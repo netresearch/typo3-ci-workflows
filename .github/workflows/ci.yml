@@ -33,7 +33,7 @@ on:
       run-rector:
         description: Run Rector dry-run
         type: boolean
-        default: false
+        default: true
       run-unit-tests:
         description: Run PHPUnit unit tests
         type: boolean
@@ -144,7 +144,7 @@ jobs:
           if [[ "$FILE_COUNT" -eq 0 ]]; then
             echo "::warning::No PHP files found to lint"
           else
-            find . -name '*.php' -not -path './.Build/*' -not -path './vendor/*' -print0 | xargs -0 -P4 -n1 php -l > /dev/null
+            find . -name '*.php' -not -path './.Build/*' -not -path './vendor/*' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
           fi
 
   # CGL runs on first PHP version only - code style results are PHP-version-independent
@@ -191,17 +191,18 @@ jobs:
         env:
           CGL_COMMAND: ${{ inputs.cgl-command }}
         run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$CGL_COMMAND" ]]; then
             bash -euo pipefail -c "$CGL_COMMAND"
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:cgl'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:cgl'; then
             composer ci:test:php:cgl
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:cgl'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:cgl'; then
             composer ci:cgl -- --dry-run
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:lint:php'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:lint:php'; then
             composer ci:lint:php
-          elif composer run-script --list 2>/dev/null | grep -q 'check:php:cs-fixer'; then
+          elif echo "$SCRIPTS" | grep -q 'check:php:cs-fixer'; then
             composer check:php:cs-fixer
-          elif composer run-script --list 2>/dev/null | grep -q 'code:style:check'; then
+          elif echo "$SCRIPTS" | grep -q 'code:style:check'; then
             composer code:style:check
           else
             echo "::error::No CGL script found. Provide cgl-command or add ci:test:php:cgl to composer scripts."
@@ -260,16 +261,25 @@ jobs:
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
           import json, os, sys, subprocess
-          entries = json.load(sys.stdin)
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
               only_for = entry.get('only-for', '')
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
-                      dep = entry['dep']
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
           "
 
       - name: Install TYPO3
@@ -277,7 +287,11 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            exit 1
+          }
+          for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -286,15 +300,16 @@ jobs:
         env:
           PHPSTAN_COMMAND: ${{ inputs.phpstan-command }}
         run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$PHPSTAN_COMMAND" ]]; then
             bash -euo pipefail -c "$PHPSTAN_COMMAND"
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:phpstan'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:phpstan'; then
             composer ci:test:php:phpstan -- --error-format=github
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:stan'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:stan'; then
             composer ci:stan
-          elif composer run-script --list 2>/dev/null | grep -q 'check:php:stan'; then
+          elif echo "$SCRIPTS" | grep -q 'check:php:stan'; then
             composer check:php:stan
-          elif composer run-script --list 2>/dev/null | grep -q 'code:phpstan'; then
+          elif echo "$SCRIPTS" | grep -q 'code:phpstan'; then
             composer code:phpstan
           else
             echo "::error::No PHPStan script found. Provide phpstan-command or add ci:test:php:phpstan to composer scripts."
@@ -345,11 +360,12 @@ jobs:
         env:
           RECTOR_COMMAND: ${{ inputs.rector-command }}
         run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$RECTOR_COMMAND" ]]; then
             bash -euo pipefail -c "$RECTOR_COMMAND"
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:rector'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:rector'; then
             composer ci:test:php:rector
-          elif composer run-script --list 2>/dev/null | grep -q 'check:php:rector'; then
+          elif echo "$SCRIPTS" | grep -q 'check:php:rector'; then
             composer check:php:rector
           else
             echo "::error::No Rector script found. Provide rector-command or add ci:test:php:rector to composer scripts."
@@ -408,16 +424,25 @@ jobs:
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
           import json, os, sys, subprocess
-          entries = json.load(sys.stdin)
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
               only_for = entry.get('only-for', '')
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
-                      dep = entry['dep']
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
           "
 
       - name: Install TYPO3
@@ -425,7 +450,11 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            exit 1
+          }
+          for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -435,15 +464,16 @@ jobs:
           UNIT_TEST_COMMAND: ${{ inputs.unit-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
         run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$UNIT_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$UNIT_TEST_COMMAND"
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:unit'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:unit'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
               composer ci:test:php:unit -- --coverage-clover=coverage-unit.xml
             else
               composer ci:test:php:unit -- --no-coverage
             fi
-          elif composer run-script --list 2>/dev/null | grep -q 'check:tests:unit'; then
+          elif echo "$SCRIPTS" | grep -q 'check:tests:unit'; then
             composer check:tests:unit
           else
             echo "::error::No unit test script found. Provide unit-test-command or add ci:test:php:unit to composer scripts."
@@ -525,16 +555,25 @@ jobs:
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
           import json, os, sys, subprocess
-          entries = json.load(sys.stdin)
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
               only_for = entry.get('only-for', '')
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
-                      dep = entry['dep']
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
           "
 
       - name: Install TYPO3
@@ -542,7 +581,11 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            exit 1
+          }
+          for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -558,15 +601,16 @@ jobs:
           typo3DatabaseUsername: ${{ inputs.functional-test-db == 'postgres' && 'postgres' || 'root' }}
           typo3DatabasePassword: root
         run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:functional'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
               composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml
             else
               composer ci:test:php:functional -- --no-coverage
             fi
-          elif composer run-script --list 2>/dev/null | grep -q 'check:tests:functional'; then
+          elif echo "$SCRIPTS" | grep -q 'check:tests:functional'; then
             composer check:tests:functional
           else
             echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
@@ -632,16 +676,25 @@ jobs:
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
           import json, os, sys, subprocess
-          entries = json.load(sys.stdin)
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
               only_for = entry.get('only-for', '')
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
-                      dep = entry['dep']
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
           "
 
       - name: Install TYPO3
@@ -649,7 +702,11 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            exit 1
+          }
+          for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -660,15 +717,16 @@ jobs:
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           typo3DatabaseDriver: pdo_sqlite
         run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
-          elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:functional'; then
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
               composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml
             else
               composer ci:test:php:functional -- --no-coverage
             fi
-          elif composer run-script --list 2>/dev/null | grep -q 'check:tests:functional'; then
+          elif echo "$SCRIPTS" | grep -q 'check:tests:functional'; then
             composer check:tests:functional
           else
             echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."

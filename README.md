@@ -51,7 +51,7 @@ jobs:
 | `run-lint` | boolean | `true` | Run PHP syntax lint |
 | `run-cgl` | boolean | `true` | Run code style check (PHP-CS-Fixer) |
 | `run-phpstan` | boolean | `true` | Run PHPStan static analysis |
-| `run-rector` | boolean | `false` | Run Rector dry-run |
+| `run-rector` | boolean | `true` | Run Rector dry-run |
 | `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
 | `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
 
@@ -68,11 +68,21 @@ Override auto-detection with custom commands:
 | `functional-test-command` | string | auto-detect |
 
 Auto-detection looks for these composer scripts (in order):
-- CGL: `ci:test:php:cgl`, `ci:cgl`, `ci:lint:php`, `code:style:check`
-- PHPStan: `ci:test:php:phpstan`, `ci:stan`, `code:phpstan`
-- Rector: `ci:test:php:rector`
-- Unit tests: `ci:test:php:unit`
-- Functional tests: `ci:test:php:functional`
+- CGL: `ci:test:php:cgl`, `ci:cgl` (+ `--dry-run`), `ci:lint:php`, `check:php:cs-fixer`, `code:style:check`
+- PHPStan: `ci:test:php:phpstan` (+ `--error-format=github`), `ci:stan`, `check:php:stan`, `code:phpstan`
+- Rector: `ci:test:php:rector`, `check:php:rector`
+- Unit tests: `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `check:tests:unit`
+- Functional tests: `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `check:tests:functional`
+
+**Note:** Some scripts get additional arguments appended automatically (shown in parentheses). Ensure your composer scripts accept `--` pass-through arguments.
+
+### PHP Extensions
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
+
+CGL and Rector run on the first PHP version only (code style is PHP-version-independent). PHPStan and tests run on the full matrix.
 
 ### Functional Tests
 
