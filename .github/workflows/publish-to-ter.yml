@@ -1,0 +1,102 @@
+name: Publish to TER
+
+on:
+  workflow_call:
+    inputs:
+      php-version:
+        description: PHP version for tailor
+        type: string
+        default: '8.4'
+    secrets:
+      TYPO3_EXTENSION_KEY:
+        required: true
+      TYPO3_TER_ACCESS_TOKEN:
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish to TER
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TYPO3_EXTENSION_KEY: ${{ secrets.TYPO3_EXTENSION_KEY }}
+      TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Determine version from tag
+        id: version
+        env:
+          TAG_REF: ${{ github.ref }}
+        run: |
+          TAG="${TAG_REF#refs/tags/}"
+          # Strip optional v prefix
+          VERSION="${TAG#v}"
+          # Validate semver format
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version format: $VERSION (from tag $TAG)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION (tag: $TAG)"
+
+      - name: Validate ext_emconf.php version
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ ! -f ext_emconf.php ]]; then
+            echo "::error::ext_emconf.php not found"
+            exit 1
+          fi
+          EMCONF_VERSION=$(sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" ext_emconf.php)
+          if [[ -z "$EMCONF_VERSION" ]]; then
+            echo "::error file=ext_emconf.php::Could not extract version"
+            exit 1
+          fi
+          if [[ "$EXPECTED_VERSION" != "$EMCONF_VERSION" ]]; then
+            echo "::error file=ext_emconf.php::Tag version ($EXPECTED_VERSION) does not match ext_emconf.php version ($EMCONF_VERSION)"
+            exit 1
+          fi
+          echo "Version validated: $EXPECTED_VERSION"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: intl, mbstring, json, zip, curl
+          tools: composer:v2
+
+      - name: Install tailor
+        run: composer global require typo3/tailor --prefer-dist --no-progress
+
+      - name: Get release comment
+        id: comment
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          COMMENT=$(git tag -n10 -l "$TAG" | sed "s/^[0-9v.]*[ ]*//" || true)
+          if [[ -z "${COMMENT// }" ]]; then
+            COMMENT="Released version $TAG -- for details see $SERVER_URL/$REPO/releases"
+          else
+            COMMENT="$COMMENT -- for details see $SERVER_URL/$REPO/releases"
+          fi
+          echo "comment=$COMMENT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to TER
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMENT: ${{ steps.comment.outputs.comment }}
+        run: php ~/.composer/vendor/bin/tailor ter:publish --comment "$COMMENT" "$VERSION"
