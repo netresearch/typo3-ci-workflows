@@ -20,6 +20,7 @@ jobs:
     name: Publish to TER
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     env:
@@ -93,10 +94,11 @@ jobs:
           else
             COMMENT="$COMMENT -- for details see $SERVER_URL/$REPO/releases"
           fi
+          DELIMITER="ghadelim_$(openssl rand -hex 8)"
           {
-            echo "comment<<EOF"
+            echo "comment<<$DELIMITER"
             echo "$COMMENT"
-            echo "EOF"
+            echo "$DELIMITER"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish to TER
