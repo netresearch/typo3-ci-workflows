@@ -23,9 +23,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    env:
-      TYPO3_EXTENSION_KEY: ${{ secrets.TYPO3_EXTENSION_KEY }}
-      TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
@@ -34,6 +31,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Determine version from tag
         id: version
@@ -79,7 +78,7 @@ jobs:
           tools: composer:v2
 
       - name: Install tailor
-        run: composer global require typo3/tailor --prefer-dist --no-progress
+        run: composer global require typo3/tailor:^1 --prefer-dist --no-progress
 
       - name: Get release comment
         id: comment
@@ -103,6 +102,8 @@ jobs:
 
       - name: Publish to TER
         env:
+          TYPO3_EXTENSION_KEY: ${{ secrets.TYPO3_EXTENSION_KEY }}
+          TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           COMMENT: ${{ steps.comment.outputs.comment }}
         run: php ~/.composer/vendor/bin/tailor ter:publish --comment "$COMMENT" "$VERSION"

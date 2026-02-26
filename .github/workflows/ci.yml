@@ -75,7 +75,7 @@ on:
       php-extensions:
         description: PHP extensions to install
         type: string
-        default: intl, mbstring, json
+        default: intl, mbstring, xml
 
       # Functional test database
       functional-test-db:
@@ -128,6 +128,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -160,6 +162,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -195,6 +199,8 @@ jobs:
             composer ci:cgl -- --dry-run
           elif composer run-script --list 2>/dev/null | grep -q 'ci:lint:php'; then
             composer ci:lint:php
+          elif composer run-script --list 2>/dev/null | grep -q 'check:php:cs-fixer'; then
+            composer check:php:cs-fixer
           elif composer run-script --list 2>/dev/null | grep -q 'code:style:check'; then
             composer code:style:check
           else
@@ -222,6 +228,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -284,6 +292,8 @@ jobs:
             composer ci:test:php:phpstan -- --error-format=github
           elif composer run-script --list 2>/dev/null | grep -q 'ci:stan'; then
             composer ci:stan
+          elif composer run-script --list 2>/dev/null | grep -q 'check:php:stan'; then
+            composer check:php:stan
           elif composer run-script --list 2>/dev/null | grep -q 'code:phpstan'; then
             composer code:phpstan
           else
@@ -306,6 +316,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -337,6 +349,8 @@ jobs:
             bash -euo pipefail -c "$RECTOR_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:rector'; then
             composer ci:test:php:rector
+          elif composer run-script --list 2>/dev/null | grep -q 'check:php:rector'; then
+            composer check:php:rector
           else
             echo "::error::No Rector script found. Provide rector-command or add ci:test:php:rector to composer scripts."
             exit 1
@@ -362,6 +376,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -427,6 +443,8 @@ jobs:
             else
               composer ci:test:php:unit -- --no-coverage
             fi
+          elif composer run-script --list 2>/dev/null | grep -q 'check:tests:unit'; then
+            composer check:tests:unit
           else
             echo "::error::No unit test script found. Provide unit-test-command or add ci:test:php:unit to composer scripts."
             exit 1
@@ -477,6 +495,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -546,6 +566,8 @@ jobs:
             else
               composer ci:test:php:functional -- --no-coverage
             fi
+          elif composer run-script --list 2>/dev/null | grep -q 'check:tests:functional'; then
+            composer check:tests:functional
           else
             echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
             exit 1
@@ -580,6 +602,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
@@ -644,6 +668,8 @@ jobs:
             else
               composer ci:test:php:functional -- --no-coverage
             fi
+          elif composer run-script --list 2>/dev/null | grep -q 'check:tests:functional'; then
+            composer check:tests:functional
           else
             echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
             exit 1
