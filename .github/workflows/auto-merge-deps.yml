@@ -29,8 +29,9 @@ jobs:
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          STRATEGY=$(gh api "repos/${{ github.repository }}" --jq '
+          STRATEGY=$(gh api "repos/$REPO" --jq '
             if .allow_squash_merge then "--squash"
             elif .allow_merge_commit then "--merge"
             elif .allow_rebase_merge then "--rebase"

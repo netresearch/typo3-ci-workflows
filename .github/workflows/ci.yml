@@ -114,6 +114,7 @@ jobs:
     name: Lint (PHP ${{ matrix.php }})
     if: ${{ inputs.run-lint }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     strategy:
@@ -141,6 +142,7 @@ jobs:
     name: Code Style
     if: ${{ inputs.run-cgl }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -178,7 +180,7 @@ jobs:
           CGL_COMMAND: ${{ inputs.cgl-command }}
         run: |
           if [[ -n "$CGL_COMMAND" ]]; then
-            eval "$CGL_COMMAND"
+            bash -c "$CGL_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:cgl'; then
             composer ci:test:php:cgl
           elif composer run-script --list 2>/dev/null | grep -q 'ci:cgl'; then
@@ -195,6 +197,7 @@ jobs:
     name: PHPStan (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
     if: ${{ inputs.run-phpstan }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     strategy:
@@ -239,9 +242,9 @@ jobs:
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
-          import json, sys, subprocess
+          import json, os, sys, subprocess
           entries = json.load(sys.stdin)
-          typo3 = '${{ matrix.typo3 }}'
+          typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
               if only_for and not typo3.startswith(only_for):
@@ -255,7 +258,7 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin)]"); do
+          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -265,7 +268,7 @@ jobs:
           PHPSTAN_COMMAND: ${{ inputs.phpstan-command }}
         run: |
           if [[ -n "$PHPSTAN_COMMAND" ]]; then
-            eval "$PHPSTAN_COMMAND"
+            bash -c "$PHPSTAN_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:phpstan'; then
             composer ci:test:php:phpstan -- --error-format=github
           elif composer run-script --list 2>/dev/null | grep -q 'ci:stan'; then
@@ -280,6 +283,7 @@ jobs:
     name: Rector
     if: ${{ inputs.run-rector }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -317,7 +321,7 @@ jobs:
           RECTOR_COMMAND: ${{ inputs.rector-command }}
         run: |
           if [[ -n "$RECTOR_COMMAND" ]]; then
-            eval "$RECTOR_COMMAND"
+            bash -c "$RECTOR_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:rector'; then
             composer ci:test:php:rector
           else
@@ -328,6 +332,7 @@ jobs:
     name: Unit Tests (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
     if: ${{ inputs.run-unit-tests }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     strategy:
@@ -372,9 +377,9 @@ jobs:
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
-          import json, sys, subprocess
+          import json, os, sys, subprocess
           entries = json.load(sys.stdin)
-          typo3 = '${{ matrix.typo3 }}'
+          typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
               if only_for and not typo3.startswith(only_for):
@@ -388,7 +393,7 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin)]"); do
+          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -399,7 +404,7 @@ jobs:
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
         run: |
           if [[ -n "$UNIT_TEST_COMMAND" ]]; then
-            eval "$UNIT_TEST_COMMAND"
+            bash -c "$UNIT_TEST_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:unit'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
               composer ci:test:php:unit -- --coverage-clover=coverage-unit.xml
@@ -411,7 +416,7 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        if: inputs.upload-coverage
+        if: ${{ inputs.upload-coverage }}
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -423,6 +428,7 @@ jobs:
     name: Functional Tests (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
     if: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -443,7 +449,7 @@ jobs:
           - 3306:3306
           - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping --silent || pg_isready || true"
+          --health-cmd="${{ inputs.functional-test-db == 'postgres' && 'pg_isready -U postgres' || 'mysqladmin ping --silent' }}"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -481,9 +487,9 @@ jobs:
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
-          import json, sys, subprocess
+          import json, os, sys, subprocess
           entries = json.load(sys.stdin)
-          typo3 = '${{ matrix.typo3 }}'
+          typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
               if only_for and not typo3.startswith(only_for):
@@ -497,7 +503,7 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin)]"); do
+          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -514,7 +520,7 @@ jobs:
           typo3DatabasePassword: root
         run: |
           if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
-            eval "$FUNCTIONAL_TEST_COMMAND"
+            bash -c "$FUNCTIONAL_TEST_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
               composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml
@@ -526,7 +532,7 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        if: inputs.upload-coverage
+        if: ${{ inputs.upload-coverage }}
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -538,6 +544,7 @@ jobs:
     name: Functional Tests SQLite (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
     if: ${{ inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -580,9 +587,9 @@ jobs:
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
-          import json, sys, subprocess
+          import json, os, sys, subprocess
           entries = json.load(sys.stdin)
-          typo3 = '${{ matrix.typo3 }}'
+          typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
               if only_for and not typo3.startswith(only_for):
@@ -596,7 +603,7 @@ jobs:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
         run: |
-          for pkg in $(echo "$TYPO3_PACKAGES" | python3 -c "import json,sys; [print(p) for p in json.load(sys.stdin)]"); do
+          for pkg in $(echo "$TYPO3_PACKAGES" | jq -r '.[]'); do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
           composer install --prefer-dist --no-progress
@@ -608,7 +615,7 @@ jobs:
           typo3DatabaseDriver: pdo_sqlite
         run: |
           if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
-            eval "$FUNCTIONAL_TEST_COMMAND"
+            bash -c "$FUNCTIONAL_TEST_COMMAND"
           elif composer run-script --list 2>/dev/null | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
               composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml
@@ -620,7 +627,7 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        if: inputs.upload-coverage
+        if: ${{ inputs.upload-coverage }}
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

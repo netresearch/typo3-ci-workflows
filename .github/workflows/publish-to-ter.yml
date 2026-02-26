@@ -93,7 +93,11 @@ jobs:
           else
             COMMENT="$COMMENT -- for details see $SERVER_URL/$REPO/releases"
           fi
-          echo "comment=$COMMENT" >> "$GITHUB_OUTPUT"
+          {
+            echo "comment<<EOF"
+            echo "$COMMENT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish to TER
         env:
