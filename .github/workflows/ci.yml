@@ -136,7 +136,7 @@ jobs:
           coverage: none
 
       - name: PHP syntax check
-        run: find . -name '*.php' -not -path './.Build/*' -not -path './vendor/*' | xargs -P4 -n1 php -l > /dev/null
+        run: find . -name '*.php' -not -path './.Build/*' -not -path './vendor/*' -print0 | xargs -0 -P4 -n1 php -l > /dev/null
 
   cgl:
     name: Code Style

@@ -37,4 +37,4 @@ jobs:
             elif .allow_rebase_merge then "--rebase"
             else "--squash" end')
           echo "Using merge strategy: $STRATEGY"
-          gh pr merge --auto $STRATEGY "$PR_URL"
+          gh pr merge --auto "$STRATEGY" "$PR_URL"
