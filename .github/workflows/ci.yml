@@ -247,10 +247,12 @@ jobs:
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
-              if only_for and not typo3.startswith(only_for):
-                  dep = entry['dep']
-                  print(f'Removing {dep} (only compatible with {only_for})')
-                  subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      dep = entry['dep']
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -382,10 +384,12 @@ jobs:
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
-              if only_for and not typo3.startswith(only_for):
-                  dep = entry['dep']
-                  print(f'Removing {dep} (only compatible with {only_for})')
-                  subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      dep = entry['dep']
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -492,10 +496,12 @@ jobs:
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
-              if only_for and not typo3.startswith(only_for):
-                  dep = entry['dep']
-                  print(f'Removing {dep} (only compatible with {only_for})')
-                  subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      dep = entry['dep']
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -592,10 +598,12 @@ jobs:
           typo3 = os.environ['TYPO3_VERSION']
           for entry in entries:
               only_for = entry.get('only-for', '')
-              if only_for and not typo3.startswith(only_for):
-                  dep = entry['dep']
-                  print(f'Removing {dep} (only compatible with {only_for})')
-                  subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      dep = entry['dep']
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
