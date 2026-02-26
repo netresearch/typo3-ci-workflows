@@ -305,6 +305,8 @@ jobs:
             bash -euo pipefail -c "$PHPSTAN_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:phpstan'; then
             composer ci:test:php:phpstan -- --error-format=github
+          elif echo "$SCRIPTS" | grep -q 'ci:phpstan'; then
+            composer ci:phpstan -- --error-format=github
           elif echo "$SCRIPTS" | grep -q 'ci:stan'; then
             composer ci:stan
           elif echo "$SCRIPTS" | grep -q 'check:php:stan'; then
@@ -473,8 +475,12 @@ jobs:
             else
               composer ci:test:php:unit -- --no-coverage
             fi
+          elif echo "$SCRIPTS" | grep -q 'ci:tests:unit'; then
+            composer ci:tests:unit
           elif echo "$SCRIPTS" | grep -q 'check:tests:unit'; then
             composer check:tests:unit
+          elif echo "$SCRIPTS" | grep -q 'test:unit'; then
+            composer test:unit
           else
             echo "::error::No unit test script found. Provide unit-test-command or add ci:test:php:unit to composer scripts."
             exit 1
@@ -610,8 +616,12 @@ jobs:
             else
               composer ci:test:php:functional -- --no-coverage
             fi
+          elif echo "$SCRIPTS" | grep -q 'ci:tests:functional'; then
+            composer ci:tests:functional
           elif echo "$SCRIPTS" | grep -q 'check:tests:functional'; then
             composer check:tests:functional
+          elif echo "$SCRIPTS" | grep -q 'test:functional'; then
+            composer test:functional
           else
             echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
             exit 1
@@ -726,8 +736,12 @@ jobs:
             else
               composer ci:test:php:functional -- --no-coverage
             fi
+          elif echo "$SCRIPTS" | grep -q 'ci:tests:functional'; then
+            composer ci:tests:functional
           elif echo "$SCRIPTS" | grep -q 'check:tests:functional'; then
             composer check:tests:functional
+          elif echo "$SCRIPTS" | grep -q 'test:functional'; then
+            composer test:functional
           else
             echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
             exit 1

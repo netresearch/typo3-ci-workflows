@@ -69,10 +69,10 @@ Override auto-detection with custom commands:
 
 Auto-detection looks for these composer scripts (in order):
 - CGL: `ci:test:php:cgl`, `ci:cgl` (+ `--dry-run`), `ci:lint:php`, `check:php:cs-fixer`, `code:style:check`
-- PHPStan: `ci:test:php:phpstan` (+ `--error-format=github`), `ci:stan`, `check:php:stan`, `code:phpstan`
+- PHPStan: `ci:test:php:phpstan` (+ `--error-format=github`), `ci:phpstan` (+ `--error-format=github`), `ci:stan`, `check:php:stan`, `code:phpstan`
 - Rector: `ci:test:php:rector`, `check:php:rector`
-- Unit tests: `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `check:tests:unit`
-- Functional tests: `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `check:tests:functional`
+- Unit tests: `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:unit`, `check:tests:unit`, `test:unit`
+- Functional tests: `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
 
 **Note:** Some scripts get additional arguments appended automatically (shown in parentheses). Ensure your composer scripts accept `--` pass-through arguments.
 
