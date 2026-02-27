@@ -54,6 +54,8 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
           if grep -E "$FORBIDDEN_PATTERN" licenses.json; then
-            echo "::error::Found forbidden licenses matching pattern: $FORBIDDEN_PATTERN"
+            SAFE_PATTERN="${FORBIDDEN_PATTERN//$'\n'/}"
+            SAFE_PATTERN="${SAFE_PATTERN//$'\r'/}"
+            echo "::error::Found forbidden licenses matching pattern: $SAFE_PATTERN"
             exit 1
           fi
