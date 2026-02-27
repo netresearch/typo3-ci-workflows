@@ -120,7 +120,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
-          generate_release_notes: true
           files: |
             dist/*
           body: |
@@ -142,7 +141,7 @@ jobs:
             ```bash
             cosign verify-blob \
               --bundle ${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip.bundle \
-              --certificate-identity-regexp "https://github.com/netresearch/.*" \
+              --certificate-identity-regexp "https://github.com/${{ github.repository_owner }}/.*" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
               ${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip
             ```
@@ -156,5 +155,3 @@ jobs:
             ## Software Bill of Materials (SBOM)
 
             SBOMs are provided in both SPDX and CycloneDX formats for supply chain transparency.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
