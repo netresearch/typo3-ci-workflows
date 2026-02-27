@@ -49,6 +49,20 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Validate inputs
+        env:
+          ARCHIVE_PREFIX: ${{ inputs.archive-prefix }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ "$ARCHIVE_PREFIX" == *..* ]] || [[ "$ARCHIVE_PREFIX" == /* ]]; then
+            echo "::error::Invalid archive-prefix: must not contain '..' or start with '/'"
+            exit 1
+          fi
+          if [[ "$VERSION" == *..* ]] || [[ "$VERSION" == */* ]]; then
+            echo "::error::Invalid version string derived from tag"
+            exit 1
+          fi
+
       - name: Generate Release Notes
         id: notes
         run: |
@@ -113,7 +127,7 @@ jobs:
           done
 
       - name: Generate attestation
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecc0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |
             dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip
