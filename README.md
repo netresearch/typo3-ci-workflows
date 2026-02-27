@@ -5,13 +5,22 @@ Reusable GitHub Actions workflows for Netresearch TYPO3 extension repositories.
 ## Workflows
 
 | Workflow | Purpose |
-|----------|---------|
+|----------|--------|
 | `ci.yml` | PHP lint, CGL, PHPStan, Rector, unit tests, functional tests |
 | `scorecard.yml` | OpenSSF Scorecard analysis |
 | `codeql.yml` | GitHub CodeQL security scanning |
 | `dependency-review.yml` | Dependency vulnerability review on PRs |
 | `auto-merge-deps.yml` | Auto-merge Dependabot/Renovate PRs |
 | `publish-to-ter.yml` | Publish extension to TYPO3 TER on tag |
+| `labeler.yml` | Automatic PR labeling based on file paths |
+| `lock.yml` | Lock old inactive issues and PRs |
+| `greetings.yml` | Greet first-time contributors |
+| `docs.yml` | Render and verify TYPO3 documentation |
+| `stale.yml` | Mark and close stale issues and PRs |
+| `license-check.yml` | PHP dependency license audit |
+| `security.yml` | Gitleaks secret scanning + Composer audit |
+| `pr-quality.yml` | PR size check + auto-approve for solo maintainers |
+| `release.yml` | Enterprise release pipeline (archive, SBOM, cosign, attestation) |
 
 ## Quick Start
 
@@ -171,6 +180,186 @@ jobs:
       TYPO3_EXTENSION_KEY: ${{ secrets.TYPO3_EXTENSION_KEY }}
       TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
 ```
+
+### Labeler
+
+```yaml
+jobs:
+  labeler:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/labeler.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `configuration-path` | string | `.github/labeler.yml` | Path to the labeler configuration file |
+
+### Lock Threads
+
+```yaml
+jobs:
+  lock:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/lock.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `issue-inactive-days` | number | `365` | Days before locking inactive issues |
+| `pr-inactive-days` | number | `365` | Days before locking inactive PRs |
+| `issue-lock-reason` | string | `resolved` | Reason for locking issues |
+| `pr-lock-reason` | string | `resolved` | Reason for locking PRs |
+| `log-output` | boolean | `true` | Log processed threads |
+
+### Greetings
+
+```yaml
+jobs:
+  greetings:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/greetings.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+    with:
+      issue-message: 'Custom welcome message for issues'
+      pr-message: 'Custom welcome message for PRs'
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `issue-message` | string | Generic welcome | Message for first-time issue authors |
+| `pr-message` | string | Generic welcome | Message for first-time PR authors |
+
+### Documentation
+
+```yaml
+jobs:
+  docs:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/docs.yml@main
+    permissions:
+      contents: read
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `source-path` | string | `Documentation` | Path to documentation source |
+| `output-path` | string | `Documentation-GENERATED-temp` | Path for rendered output |
+| `upload-artifact` | boolean | `true` | Upload rendered docs as artifact on PRs |
+| `artifact-retention-days` | number | `7` | Days to retain uploaded artifact |
+
+### Stale Issues
+
+```yaml
+jobs:
+  stale:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/stale.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `days-before-stale` | number | `60` | Days before marking as stale |
+| `days-before-close` | number | `7` | Days before closing stale issues |
+| `exempt-issue-labels` | string | `pinned,security,bug` | Comma-separated labels to exempt |
+| `exempt-pr-labels` | string | `pinned,security` | Comma-separated PR labels to exempt |
+| `operations-per-run` | number | `30` | Max operations per run |
+| `stale-issue-message` | string | Generic message | Message when marking issue as stale |
+| `stale-pr-message` | string | Generic message | Message when marking PR as stale |
+| `close-issue-message` | string | Generic message | Message when closing stale issue |
+| `close-pr-message` | string | Generic message | Message when closing stale PR |
+
+Stale labels (`stale`) are hardcoded to stay within the 10-input workflow_call limit.
+
+### License Check
+
+```yaml
+jobs:
+  license-check:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/license-check.yml@main
+    permissions:
+      contents: read
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-version` | string | `8.4` | PHP version for license checking |
+| `forbidden-licenses` | string | `"(SSPL\|BSL)"` | Regex pattern for forbidden licenses |
+
+Fails the job (exit 1) when forbidden licenses are found, not just a warning.
+
+### Security
+
+```yaml
+jobs:
+  security:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/security.yml@main
+    permissions:
+      contents: read
+      security-events: write
+    secrets:
+      GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-version` | string | `8.4` | PHP version for Composer audit |
+| `skip-gitleaks` | boolean | `false` | Skip Gitleaks secret scanning |
+| `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `GITLEAKS_LICENSE` | No | License key for Gitleaks |
+
+Gitleaks automatically skips dependabot PRs and merge_group events.
+
+### PR Quality Gates
+
+```yaml
+jobs:
+  pr-quality:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/pr-quality.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `size-warning-threshold` | number | `500` | Lines changed for medium size |
+| `size-alert-threshold` | number | `1000` | Lines changed for large size warning |
+| `security-controls-path` | string | `.github/SECURITY_CONTROLS.md` | Path to security controls docs |
+
+Includes two jobs: PR size check and auto-approve for solo maintainer projects. Skips draft PRs.
+
+### Release
+
+```yaml
+jobs:
+  release:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/release.yml@main
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      archive-prefix: my-extension
+      package-name: vendor/my-extension
+```
+
+| Input | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `archive-prefix` | string | **yes** | — | Prefix for archive files (e.g., `contexts`) |
+| `package-name` | string | **yes** | — | Composer package name (e.g., `netresearch/contexts`) |
+| `include-sbom` | boolean | no | `true` | Include SPDX and CycloneDX SBOMs |
+| `sign-artifacts` | boolean | no | `true` | Sign artifacts with Cosign keyless signing |
+
+Full enterprise release pipeline: git archive, SBOM generation (SPDX + CycloneDX), SHA256 checksums, Cosign keyless signing, build provenance attestation, and GitHub Release with verification instructions.
 
 ## Security
 

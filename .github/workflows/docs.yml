@@ -1,0 +1,65 @@
+name: Documentation
+
+on:
+  workflow_call:
+    inputs:
+      source-path:
+        description: 'Path to documentation source'
+        required: false
+        type: string
+        default: 'Documentation'
+      output-path:
+        description: 'Path for rendered output'
+        required: false
+        type: string
+        default: 'Documentation-GENERATED-temp'
+      upload-artifact:
+        description: 'Upload rendered docs as artifact on PRs'
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: 'Days to retain uploaded artifact'
+        required: false
+        type: number
+        default: 7
+
+permissions: {}
+
+jobs:
+  render:
+    name: Render Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Render Documentation
+        uses: typo3-documentation/render-guides@c4a29ab3c1e900192b9c5f76f0071afa0a8dbcb4 # 0.36.0
+        with:
+          source-path: ${{ inputs.source-path }}
+          output-path: ${{ inputs.output-path }}
+
+      - name: Check for Warnings
+        env:
+          OUTPUT_PATH: ${{ inputs.output-path }}
+        run: |
+          if [ -f "${OUTPUT_PATH}/warnings.txt" ]; then
+            echo "Documentation warnings found:"
+            cat "${OUTPUT_PATH}/warnings.txt"
+          fi
+
+      - name: Upload Documentation Artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: inputs.upload-artifact && github.event_name == 'pull_request'
+        with:
+          name: documentation
+          path: ${{ inputs.output-path }}
+          retention-days: ${{ inputs.artifact-retention-days }}

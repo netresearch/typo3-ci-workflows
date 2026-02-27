@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      archive-prefix:
+        description: 'Prefix for release archive files (e.g., contexts)'
+        required: true
+        type: string
+      package-name:
+        description: 'Composer package name (e.g., netresearch/contexts)'
+        required: true
+        type: string
+      include-sbom:
+        description: 'Include SPDX and CycloneDX SBOMs'
+        required: false
+        type: boolean
+        default: true
+      sign-artifacts:
+        description: 'Sign artifacts with Cosign keyless signing'
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREVIOUS_TAG" ]; then
+            {
+              echo "notes<<EOF"
+              echo "Initial release"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "notes<<EOF"
+              git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD"
+              echo ""
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release archive
+        env:
+          ARCHIVE_PREFIX: ${{ inputs.archive-prefix }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix="${ARCHIVE_PREFIX}/" HEAD -o "dist/${ARCHIVE_PREFIX}-${VERSION}.zip"
+          git archive --format=tar.gz --prefix="${ARCHIVE_PREFIX}/" HEAD -o "dist/${ARCHIVE_PREFIX}-${VERSION}.tar.gz"
+
+      - name: Generate SBOM (SPDX)
+        if: inputs.include-sbom
+        uses: anchore/sbom-action@17ae1740179002c89186b61233e0f892c3118b11 # v0.23.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.sbom.spdx.json
+
+      - name: Generate SBOM (CycloneDX)
+        if: inputs.include-sbom
+        uses: anchore/sbom-action@17ae1740179002c89186b61233e0f892c3118b11 # v0.23.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.sbom.cdx.json
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum ./* > checksums.txt
+          cat checksums.txt
+
+      - name: Install Cosign
+        if: inputs.sign-artifacts
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Sign artifacts with Cosign (keyless)
+        if: inputs.sign-artifacts
+        run: |
+          cd dist
+          for file in *.zip *.tar.gz *.json checksums.txt; do
+            cosign sign-blob --yes "$file" --bundle "${file}.bundle"
+          done
+
+      - name: Generate attestation
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip
+            dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.tar.gz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*
+          body: |
+            ## Changes
+            ${{ steps.notes.outputs.notes }}
+
+            ## Installation
+
+            ```bash
+            composer require ${{ inputs.package-name }}
+            ```
+
+            ## Security
+
+            All release artifacts are signed with [Sigstore](https://www.sigstore.dev/) keyless signing.
+
+            ### Verify signatures
+
+            ```bash
+            cosign verify-blob \
+              --bundle ${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip.bundle \
+              --certificate-identity-regexp "https://github.com/netresearch/.*" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              ${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip
+            ```
+
+            ### Verify checksums
+
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+
+            ## Software Bill of Materials (SBOM)
+
+            SBOMs are provided in both SPDX and CycloneDX formats for supply chain transparency.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

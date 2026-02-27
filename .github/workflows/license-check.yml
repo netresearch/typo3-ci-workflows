@@ -1,0 +1,57 @@
+name: License Check
+
+on:
+  workflow_call:
+    inputs:
+      php-version:
+        description: 'PHP version for license checking'
+        required: false
+        type: string
+        default: '8.4'
+      forbidden-licenses:
+        description: 'Regex pattern for forbidden license identifiers'
+        required: false
+        type: string
+        default: '"(SSPL|BSL)"'
+
+permissions: {}
+
+jobs:
+  php-licenses:
+    name: PHP License Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Check licenses
+        env:
+          FORBIDDEN_PATTERN: ${{ inputs.forbidden-licenses }}
+        run: |
+          composer licenses --format=json > licenses.json
+          echo "## PHP Dependency Licenses" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          head -100 licenses.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          if grep -E "$FORBIDDEN_PATTERN" licenses.json; then
+            echo "::error::Found forbidden licenses matching pattern: $FORBIDDEN_PATTERN"
+            exit 1
+          fi
