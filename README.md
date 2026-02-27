@@ -146,6 +146,10 @@ jobs:
       actions: read
 ```
 
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `languages` | string | `actions` | CodeQL languages to analyze (comma-separated) |
+
 ### Dependency Review
 
 ```yaml
@@ -156,6 +160,10 @@ jobs:
       contents: read
       pull-requests: write
 ```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fail-on-severity` | string | `high` | Minimum severity to fail on (`low`, `moderate`, `high`, `critical`) |
 
 ### Auto-merge Dependency PRs
 
@@ -180,6 +188,17 @@ jobs:
       TYPO3_EXTENSION_KEY: ${{ secrets.TYPO3_EXTENSION_KEY }}
       TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
 ```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-version` | string | `8.4` | PHP version for tailor CLI |
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `TYPO3_EXTENSION_KEY` | Yes | Extension key registered in TER |
+| `TYPO3_TER_ACCESS_TOKEN` | Yes | TER API access token |
+
+Automatically validates that the tag version matches `ext_emconf.php` before publishing.
 
 ### Labeler
 
@@ -366,5 +385,7 @@ Full enterprise release pipeline: git archive, SBOM generation (SPDX + CycloneDX
 - All third-party actions are SHA-pinned
 - `step-security/harden-runner` on every job
 - Top-level `permissions: {}` with job-level least-privilege
+- `persist-credentials: false` on all checkout steps
 - No `${{ }}` expression interpolation in `run:` blocks
+- Randomized heredoc delimiters to prevent output injection
 - Timeout-minutes on every job

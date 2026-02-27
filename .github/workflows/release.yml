@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Get version
         id: version
@@ -51,19 +52,20 @@ jobs:
       - name: Generate Release Notes
         id: notes
         run: |
+          DELIMITER="ghadelim_$(openssl rand -hex 8)"
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -z "$PREVIOUS_TAG" ]; then
             {
-              echo "notes<<EOF"
+              echo "notes<<$DELIMITER"
               echo "Initial release"
-              echo "EOF"
+              echo "$DELIMITER"
             } >> "$GITHUB_OUTPUT"
           else
             {
-              echo "notes<<EOF"
+              echo "notes<<$DELIMITER"
               git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD"
               echo ""
-              echo "EOF"
+              echo "$DELIMITER"
             } >> "$GITHUB_OUTPUT"
           fi
 
@@ -111,7 +113,7 @@ jobs:
           done
 
       - name: Generate attestation
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecc0c4c32 # v4.1.0
         with:
           subject-path: |
             dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip

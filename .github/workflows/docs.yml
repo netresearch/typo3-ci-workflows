@@ -40,6 +40,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Render Documentation
         uses: typo3-documentation/render-guides@c4a29ab3c1e900192b9c5f76f0071afa0a8dbcb4 # 0.36.0
