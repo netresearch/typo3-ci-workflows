@@ -1,0 +1,140 @@
+name: Fuzzing
+
+on:
+  workflow_call:
+    inputs:
+      php-version:
+        description: 'PHP version for fuzz and mutation tests'
+        required: false
+        type: string
+        default: '8.4'
+      php-extensions:
+        description: 'PHP extensions to install (comma-separated)'
+        required: false
+        type: string
+        default: 'intl, mbstring, xml'
+      fuzz-testsuite:
+        description: 'PHPUnit testsuite name for fuzz tests'
+        required: false
+        type: string
+        default: 'Fuzz'
+      phpunit-config:
+        description: 'Path to PHPUnit config file'
+        required: false
+        type: string
+        default: 'Build/phpunit.xml'
+      run-fuzz-tests:
+        description: 'Run fuzz tests'
+        required: false
+        type: boolean
+        default: true
+      run-mutation-tests:
+        description: 'Run mutation tests with Infection'
+        required: false
+        type: boolean
+        default: true
+      mutation-min-msi:
+        description: 'Minimum Mutation Score Indicator'
+        required: false
+        type: number
+        default: 50
+      mutation-min-covered-msi:
+        description: 'Minimum Covered Mutation Score Indicator'
+        required: false
+        type: number
+        default: 60
+
+permissions: {}
+
+jobs:
+  fuzz-tests:
+    name: Fuzz Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: inputs.run-fuzz-tests
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: ${{ inputs.php-extensions }}
+          tools: composer:v2
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-fuzz-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-composer-fuzz-
+
+      - name: Install dependencies
+        run: composer install --no-progress --prefer-dist
+
+      - name: Run Fuzz Tests
+        env:
+          PHPUNIT_CONFIG: ${{ inputs.phpunit-config }}
+          FUZZ_SUITE: ${{ inputs.fuzz-testsuite }}
+        run: .Build/bin/phpunit -c "$PHPUNIT_CONFIG" --testsuite "$FUZZ_SUITE" --no-coverage --colors=never
+
+  mutation-testing:
+    name: Mutation Testing (Infection)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: inputs.run-mutation-tests
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: ${{ inputs.php-extensions }}
+          tools: composer:v2
+          coverage: xdebug
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-mutation-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-composer-mutation-
+
+      - name: Install dependencies
+        run: composer install --no-progress --prefer-dist
+
+      - name: Run Mutation Tests
+        env:
+          MIN_MSI: ${{ inputs.mutation-min-msi }}
+          MIN_COVERED_MSI: ${{ inputs.mutation-min-covered-msi }}
+        run: composer ci:test:php:mutation -- --min-msi="$MIN_MSI" --min-covered-msi="$MIN_COVERED_MSI"
+        continue-on-error: true

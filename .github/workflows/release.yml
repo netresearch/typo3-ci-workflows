@@ -122,7 +122,8 @@ jobs:
         if: inputs.sign-artifacts
         run: |
           cd dist
-          for file in *.zip *.tar.gz *.json checksums.txt; do
+          for file in *; do
+            [ -f "$file" ] || continue
             cosign sign-blob --yes "$file" --bundle "${file}.bundle"
           done
 

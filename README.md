@@ -21,6 +21,8 @@ Reusable GitHub Actions workflows for Netresearch TYPO3 extension repositories.
 | `security.yml` | Gitleaks secret scanning + Composer audit |
 | `pr-quality.yml` | PR size check + auto-approve for solo maintainers |
 | `release.yml` | Enterprise release pipeline (archive, SBOM, cosign, attestation) |
+| `fuzz.yml` | Fuzz tests and mutation testing with Infection |
+| `slsa-provenance.yml` | SLSA Level 3 provenance generation |
 
 ## Quick Start
 
@@ -379,6 +381,62 @@ jobs:
 | `sign-artifacts` | boolean | no | `true` | Sign artifacts with Cosign keyless signing |
 
 Full enterprise release pipeline: git archive, SBOM generation (SPDX + CycloneDX), SHA256 checksums, Cosign keyless signing, build provenance attestation, and GitHub Release with verification instructions.
+
+### Fuzzing
+
+```yaml
+jobs:
+  fuzz:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/fuzz.yml@main
+    permissions:
+      contents: read
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-version` | string | `8.4` | PHP version for tests |
+| `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
+| `fuzz-testsuite` | string | `Fuzz` | PHPUnit testsuite name for fuzz tests |
+| `phpunit-config` | string | `Build/phpunit.xml` | Path to PHPUnit config |
+| `run-fuzz-tests` | boolean | `true` | Run fuzz tests |
+| `run-mutation-tests` | boolean | `true` | Run mutation tests with Infection |
+| `mutation-min-msi` | number | `50` | Minimum Mutation Score Indicator |
+| `mutation-min-covered-msi` | number | `60` | Minimum Covered MSI |
+
+Mutation testing runs with `continue-on-error: true` to allow incremental threshold improvement.
+
+### SLSA Provenance
+
+```yaml
+name: SLSA Provenance
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v4.0.0)'
+        required: true
+        type: string
+permissions: {}
+jobs:
+  provenance:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/slsa-provenance.yml@main
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    with:
+      version: ${{ inputs.version }}
+```
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | string | auto-detect | Release version tag (auto-detected from workflow_run) |
+| `artifact-patterns` | string | `*.tar.gz *.zip *.spdx.json *.cdx.json SHA256SUMS.txt checksums.txt` | Glob patterns for release assets |
+
+Generates SLSA Level 3 provenance using `slsa-framework/slsa-github-generator`. Triggered after the Release workflow completes. Uses `compile-generator: true` and `private-repository: true` workarounds for reliability.
 
 ## Security
 
