@@ -527,7 +527,9 @@ echo "--- Committing ---"
 git commit -S --signoff -m "chore: consolidate caller workflows into 4 grouped files"
 
 echo "--- Pushing to origin/${BRANCH} ---"
-git push --force-with-lease origin "$BRANCH"
+# Use --force because shallow clone + existing remote branch causes
+# --force-with-lease to fail with "stale info" (no local tracking ref)
+git push --force origin "$BRANCH"
 
 echo ""
 echo "=== Migration complete for ${REPO} ==="
