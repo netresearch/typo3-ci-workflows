@@ -41,7 +41,10 @@ jobs:
           coverage: none
 
       - name: Install dependencies
+        env:
+          COMPOSER_ALLOW_SUPERUSER: '1'
         run: |
+          composer config --no-plugins allow-plugins true
           composer config --no-plugins audit.block-insecure false
           composer install --prefer-dist --no-progress
 
