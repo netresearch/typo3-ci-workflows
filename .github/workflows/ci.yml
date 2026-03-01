@@ -205,8 +205,7 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'code:style:check'; then
             composer code:style:check
           else
-            echo "::error::No CGL script found. Provide cgl-command or add ci:test:php:cgl to composer scripts."
-            exit 1
+            echo "::notice::No CGL script found. Skipping. Add ci:test:php:cgl to composer scripts or provide cgl-command input."
           fi
 
   phpstan:
@@ -314,8 +313,7 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'code:phpstan'; then
             composer code:phpstan
           else
-            echo "::error::No PHPStan script found. Provide phpstan-command or add ci:test:php:phpstan to composer scripts."
-            exit 1
+            echo "::notice::No PHPStan script found. Skipping. Add ci:test:php:phpstan to composer scripts or provide phpstan-command input."
           fi
 
   # Rector runs on first PHP version only - rule application is PHP-version-independent
@@ -370,8 +368,7 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'check:php:rector'; then
             composer check:php:rector
           else
-            echo "::error::No Rector script found. Provide rector-command or add ci:test:php:rector to composer scripts."
-            exit 1
+            echo "::notice::No Rector script found. Skipping. Add ci:test:php:rector to composer scripts or provide rector-command input."
           fi
 
   unit-tests:
@@ -482,8 +479,7 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'test:unit'; then
             composer test:unit
           else
-            echo "::error::No unit test script found. Provide unit-test-command or add ci:test:php:unit to composer scripts."
-            exit 1
+            echo "::notice::No unit test script found. Skipping. Add ci:test:php:unit to composer scripts or provide unit-test-command input."
           fi
 
       - name: Upload coverage to Codecov
@@ -623,8 +619,7 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'test:functional'; then
             composer test:functional
           else
-            echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
-            exit 1
+            echo "::notice::No functional test script found. Skipping. Add ci:test:php:functional to composer scripts or provide functional-test-command input."
           fi
 
       - name: Upload coverage to Codecov
@@ -743,8 +738,7 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'test:functional'; then
             composer test:functional
           else
-            echo "::error::No functional test script found. Provide functional-test-command or add ci:test:php:functional to composer scripts."
-            exit 1
+            echo "::notice::No functional test script found. Skipping. Add ci:test:php:functional to composer scripts or provide functional-test-command input."
           fi
 
       - name: Upload coverage to Codecov

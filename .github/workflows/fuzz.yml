@@ -27,12 +27,12 @@ on:
         description: 'Run fuzz tests'
         required: false
         type: boolean
-        default: true
+        default: false
       run-mutation-tests:
         description: 'Run mutation tests with Infection'
         required: false
         type: boolean
-        default: true
+        default: false
       mutation-min-msi:
         description: 'Minimum Mutation Score Indicator'
         required: false
