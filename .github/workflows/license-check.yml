@@ -41,7 +41,9 @@ jobs:
           coverage: none
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-progress
+        run: |
+          composer config --no-plugins audit.block-insecure false
+          composer install --prefer-dist --no-progress
 
       - name: Check licenses
         env:
