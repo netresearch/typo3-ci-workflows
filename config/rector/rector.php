@@ -5,8 +5,11 @@
  *
  * This config provides common code-quality sets, rule skips, and optional
  * standard TYPO3 extension paths/skips via the $projectRoot parameter.
- * Rector's sets() and skip() are additive — extensions can safely call them
- * again to add TYPO3-level and extension-specific entries.
+ *
+ * Merge behavior:
+ *   - sets() and skip() are ADDITIVE — extensions can safely call them again
+ *   - paths() REPLACES — the last call wins (extension overrides shared paths)
+ *   - phpVersion() REPLACES — extension can override if needed
  *
  * Usage in your extension's Build/rector.php:
  *
@@ -34,7 +37,8 @@
  *   - phpVersion: 80200
  *
  * Pass '' or omit $projectRoot for v1.0 backward-compatible behavior
- * (extension must set paths/skip/phpVersion manually).
+ * (extension must set paths/skip/phpstanConfig/phpVersion manually).
+ * Note: sets and skips (code-quality rules) always apply regardless of $projectRoot.
  */
 
 declare(strict_types=1);
@@ -64,9 +68,8 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
 
         $rectorConfig->skip([$projectRoot . '/ext_emconf.php']);
         $rectorConfig->phpstanConfig($projectRoot . '/Build/phpstan.neon');
+        $rectorConfig->phpVersion(80200);
     }
-
-    $rectorConfig->phpVersion(80200);
 
     // Common code-quality rule sets
     $rectorConfig->sets([

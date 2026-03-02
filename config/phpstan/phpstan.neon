@@ -15,13 +15,19 @@
 #       - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/phpstan.neon
 #       - phpstan-baseline.neon
 #   parameters:
-#       paths:  # Override if extension has additional paths (Resources/, ext_localconf.php)
+#       paths:  # Each extension MUST define its own paths (not provided here)
 #           - %currentWorkingDirectory%/Classes/
-#           - ...
+#           - %currentWorkingDirectory%/Configuration/
+#           - %currentWorkingDirectory%/Tests/
 #
 # MIGRATION v1.1: Remove bootstrapFiles, excludePaths, and test-infrastructure /
 # upgrade-wizard ignoreErrors from your extension's phpstan.neon — they are now
-# provided by this shared config. Keep only extension-specific ignoreErrors.
+# provided by this shared config. Keep paths and extension-specific ignoreErrors.
+#
+# NOTE: PHPStan's NEON includes MERGE indexed arrays (paths, ignoreErrors,
+# excludePaths, stubFiles). This config intentionally does NOT define `paths`
+# because each extension needs different analysis scope. The shared excludePaths,
+# stubFiles, and ignoreErrors merge safely with extension-specific entries.
 #
 # Override `level` in your extension's phpstan.neon if level 10 is too strict.
 
@@ -34,18 +40,11 @@ parameters:
     checkUninitializedProperties: true
     reportUnmatchedIgnoredErrors: true
 
-    # Standard TYPO3 extension paths — override in your extension's phpstan.neon
-    # if you have additional paths (e.g. Resources/, ext_localconf.php)
-    paths:
-        - %currentWorkingDirectory%/Classes/
-        - %currentWorkingDirectory%/Configuration/
-        - %currentWorkingDirectory%/Tests/
-
     excludePaths:
         - %currentWorkingDirectory%/.Build/*
         - %currentWorkingDirectory%/ext_emconf.php
 
-    bootstrapFiles:
+    stubFiles:
         - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/stubs/phpunit-attributes.php
 
     ignoreErrors:
