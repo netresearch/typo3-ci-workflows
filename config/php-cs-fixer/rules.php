@@ -44,7 +44,7 @@ return [
     // Base rulesets — PER-CS 2.0 + Symfony as foundation
     '@Symfony'         => true,
     '@PER-CS2x0'       => true,
-    '@PHP82Migration'  => true,
+    '@PHP8x2Migration' => true,
 
     // Strict typing
     'declare_strict_types' => true,
