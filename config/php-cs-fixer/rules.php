@@ -3,7 +3,12 @@
 /*
  * Shared PHP-CS-Fixer rules for Netresearch TYPO3 extensions.
  *
- * Usage in your extension's Build/.php-cs-fixer.dist.php:
+ * Recommended: Use the config.php factory instead of importing rules directly:
+ *
+ *   $createConfig = require __DIR__ . '/../.Build/vendor/netresearch/typo3-ci-workflows/config/php-cs-fixer/config.php';
+ *   return $createConfig('Copyright ...', __DIR__ . '/..');
+ *
+ * Manual usage (for custom Finder or rule overrides):
  *
  *   $sharedRules = require __DIR__ . '/../.Build/vendor/netresearch/typo3-ci-workflows/config/php-cs-fixer/rules.php';
  *
