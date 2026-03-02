@@ -1,0 +1,37 @@
+{
+    "name": "netresearch/typo3-ci-workflows",
+    "description": "Centralized dev-dependencies, configs, and CI tooling for Netresearch TYPO3 extensions",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "a9f/typo3-fractor": "^0.5",
+        "captainhook/captainhook": "^5.28",
+        "captainhook/hook-installer": "^1.0",
+        "friendsofphp/php-cs-fixer": "^3.65",
+        "infection/infection": "^0.29 || ^0.30 || ^0.31 || ^0.32",
+        "nikic/php-fuzzer": "^0.0.11",
+        "overtrue/phplint": "^9.5",
+        "php": "^8.2",
+        "phpat/phpat": "^0.12",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan": "^2.0",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "rector/rector": "^2.0",
+        "saschaegerer/phpstan-typo3": "^2.0 || ^3.0",
+        "ssch/typo3-rector": "^3.0",
+        "typo3/testing-framework": "^8.0 || ^9.0"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "a9f/fractor-extension-installer": true,
+            "captainhook/hook-installer": true,
+            "infection/extension-installer": true,
+            "phpstan/extension-installer": true,
+            "typo3/class-alias-loader": true,
+            "typo3/cms-composer-installers": true
+        }
+    }
+}

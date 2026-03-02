@@ -1,0 +1,7 @@
+# Exclude CI-only files from Composer installs (export-ignore).
+# Only config/, Makefile.include, and composer.json are needed by consumers.
+/.gitattributes    export-ignore
+/.github/          export-ignore
+/docs/             export-ignore
+/scripts/          export-ignore
+/README.md         export-ignore

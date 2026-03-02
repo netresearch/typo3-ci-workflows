@@ -1,0 +1,93 @@
+# Shared Makefile targets for Netresearch TYPO3 extensions.
+#
+# Include in your extension's Makefile:
+#
+#   -include .Build/vendor/netresearch/typo3-ci-workflows/Makefile.include
+#
+#   # Add extension-specific targets below (ddev, docs, etc.)
+#
+# The `-include` prefix suppresses errors if the file doesn't exist yet
+# (e.g., before the first `composer install`).
+
+.PHONY: help
+help: ## Show available targets
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# ===================================
+# Composer
+# ===================================
+
+.PHONY: install
+install: ## Install composer dependencies
+	composer install
+
+.PHONY: update
+update: ## Update composer dependencies
+	composer update
+
+# ===================================
+# Code Quality
+# ===================================
+
+.PHONY: cgl
+cgl: ## Check code style (dry-run)
+	composer ci:test:php:cgl
+
+.PHONY: cgl-fix
+cgl-fix: ## Fix code style
+	composer ci:cgl
+
+.PHONY: phpstan
+phpstan: ## Run PHPStan static analysis
+	composer ci:test:php:phpstan
+
+.PHONY: phpstan-baseline
+phpstan-baseline: ## Regenerate PHPStan baseline
+	composer ci:test:php:phpstan:baseline
+
+.PHONY: rector
+rector: ## Run Rector dry-run
+	composer ci:test:php:rector
+
+.PHONY: rector-fix
+rector-fix: ## Apply Rector changes
+	composer ci:rector
+
+.PHONY: lint
+lint: ## Run PHP syntax check
+	composer ci:test:php:lint
+
+.PHONY: quality
+quality: lint phpstan cgl rector ## Run all quality checks
+
+# ===================================
+# Tests
+# ===================================
+
+.PHONY: test
+test: test-unit test-functional ## Run all tests (unit + functional)
+
+.PHONY: test-unit
+test-unit: ## Run unit tests
+	composer ci:test:php:unit
+
+.PHONY: test-functional
+test-functional: ## Run functional tests
+	composer ci:test:php:functional
+
+# ===================================
+# CI (quality + tests)
+# ===================================
+
+.PHONY: ci
+ci: quality test ## Run complete CI pipeline
+
+# ===================================
+# Cleanup
+# ===================================
+
+.PHONY: clean
+clean: ## Clean temporary files and caches
+	rm -rf .php-cs-fixer.cache .Build/.php-cs-fixer.cache .phplint.cache .phpunit.result.cache var/
+
+.DEFAULT_GOAL := help

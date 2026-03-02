@@ -1,0 +1,35 @@
+# Shared PHPStan parameters for Netresearch TYPO3 extensions.
+#
+# phpstan/extension-installer (included in this package) auto-registers
+# phpstan-strict-rules, phpstan-deprecation-rules, phpstan-phpunit,
+# phpstan-typo3, and phpat — no manual neon includes needed for those.
+#
+# IMPORTANT: If your extension previously did NOT use saschaegerer/phpstan-typo3,
+# adding this package will change PHPStan's type inference for TYPO3 APIs
+# (e.g. GeneralUtility::makeInstance() returns proper types instead of mixed).
+# You will need to regenerate your phpstan-baseline.neon after migration.
+#
+# Extensions include this file in their own phpstan.neon:
+#
+#   includes:
+#       - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/phpstan.neon
+#       - phpstan-baseline.neon
+#   parameters:
+#       paths:
+#           - %currentWorkingDirectory%/Classes/
+#       excludePaths:
+#           - %currentWorkingDirectory%/.Build/*
+#
+# MIGRATION: Remove any manual includes for phpstan-strict-rules, phpstan-deprecation-rules,
+# phpstan-phpunit, or phpstan-typo3 neon files — extension-installer handles these.
+#
+# Override `level` in your extension's phpstan.neon if level 10 is too strict.
+
+parameters:
+    level: 10
+
+    treatPhpDocTypesAsCertain: false
+    inferPrivatePropertyTypeFromConstructor: true
+    checkMissingCallableSignature: true
+    checkUninitializedProperties: true
+    reportUnmatchedIgnoredErrors: true
