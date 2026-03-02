@@ -25,9 +25,10 @@
 # provided by this shared config. Keep paths and extension-specific ignoreErrors.
 #
 # NOTE: PHPStan's NEON includes MERGE indexed arrays (paths, ignoreErrors,
-# excludePaths, stubFiles). This config intentionally does NOT define `paths`
-# because each extension needs different analysis scope. The shared excludePaths,
-# stubFiles, and ignoreErrors merge safely with extension-specific entries.
+# excludePaths, bootstrapFiles). This config intentionally does NOT define
+# `paths` because each extension needs different analysis scope. The shared
+# excludePaths, bootstrapFiles, and ignoreErrors merge safely with
+# extension-specific entries.
 #
 # Override `level` in your extension's phpstan.neon if level 10 is too strict.
 
@@ -44,7 +45,7 @@ parameters:
         - %currentWorkingDirectory%/.Build/*
         - %currentWorkingDirectory%/ext_emconf.php
 
-    stubFiles:
+    bootstrapFiles:
         - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/stubs/phpunit-attributes.php
 
     ignoreErrors:
