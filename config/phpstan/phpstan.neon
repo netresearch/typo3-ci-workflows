@@ -15,13 +15,13 @@
 #       - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/phpstan.neon
 #       - phpstan-baseline.neon
 #   parameters:
-#       paths:
+#       paths:  # Override if extension has additional paths (Resources/, ext_localconf.php)
 #           - %currentWorkingDirectory%/Classes/
-#       excludePaths:
-#           - %currentWorkingDirectory%/.Build/*
+#           - ...
 #
-# MIGRATION: Remove any manual includes for phpstan-strict-rules, phpstan-deprecation-rules,
-# phpstan-phpunit, or phpstan-typo3 neon files — extension-installer handles these.
+# MIGRATION v1.1: Remove bootstrapFiles, excludePaths, and test-infrastructure /
+# upgrade-wizard ignoreErrors from your extension's phpstan.neon — they are now
+# provided by this shared config. Keep only extension-specific ignoreErrors.
 #
 # Override `level` in your extension's phpstan.neon if level 10 is too strict.
 
@@ -33,3 +33,55 @@ parameters:
     checkMissingCallableSignature: true
     checkUninitializedProperties: true
     reportUnmatchedIgnoredErrors: true
+
+    # Standard TYPO3 extension paths — override in your extension's phpstan.neon
+    # if you have additional paths (e.g. Resources/, ext_localconf.php)
+    paths:
+        - %currentWorkingDirectory%/Classes/
+        - %currentWorkingDirectory%/Configuration/
+        - %currentWorkingDirectory%/Tests/
+
+    excludePaths:
+        - %currentWorkingDirectory%/.Build/*
+        - %currentWorkingDirectory%/ext_emconf.php
+
+    bootstrapFiles:
+        - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/stubs/phpunit-attributes.php
+
+    ignoreErrors:
+        # --- Test infrastructure (affects all extensions) ---
+        - identifier: offsetAccess.nonOffsetAccessible
+          path: %currentWorkingDirectory%/Tests/Unit/*
+          reportUnmatched: false
+        - identifier: argument.type
+          path: %currentWorkingDirectory%/Tests/Unit/*
+          message: '#Parameter \#2 \$array of static method PHPUnit\\Framework\\Assert::#'
+          reportUnmatched: false
+        - identifier: cast.int
+          path: %currentWorkingDirectory%/Tests/Functional/*
+          reportUnmatched: false
+        - identifier: argument.type
+          path: %currentWorkingDirectory%/Tests/Functional/*
+          message: '#mixed#'
+          reportUnmatched: false
+        - identifier: assign.propertyType
+          path: %currentWorkingDirectory%/Tests/Functional/*
+          message: '#mixed#'
+          reportUnmatched: false
+        - identifier: method.nonObject
+          path: %currentWorkingDirectory%/Tests/Functional/*
+          message: '#mixed#'
+          reportUnmatched: false
+        # --- TYPO3 upgrade wizard deprecations (v13/v14 compat) ---
+        - identifier: attribute.deprecated
+          path: %currentWorkingDirectory%/Classes/Updates/*
+          reportUnmatched: false
+        - identifier: class.implementsDeprecatedInterface
+          path: %currentWorkingDirectory%/Classes/Updates/*
+          reportUnmatched: false
+        - identifier: classConstant.deprecatedClass
+          path: %currentWorkingDirectory%/Classes/Updates/*
+          reportUnmatched: false
+        - identifier: classConstant.deprecatedClass
+          path: %currentWorkingDirectory%/Tests/Unit/Updates/*
+          reportUnmatched: false
