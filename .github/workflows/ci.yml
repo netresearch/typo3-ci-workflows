@@ -111,7 +111,7 @@ permissions: {}
 
 jobs:
   lint:
-    name: Lint (PHP ${{ matrix.php }})
+    name: Lint
     if: ${{ inputs.run-lint }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -209,7 +209,7 @@ jobs:
           fi
 
   phpstan:
-    name: PHPStan (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
+    name: PHPStan
     if: ${{ inputs.run-phpstan }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -372,7 +372,7 @@ jobs:
           fi
 
   unit-tests:
-    name: Unit Tests (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
+    name: Unit Tests
     if: ${{ inputs.run-unit-tests }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -492,7 +492,7 @@ jobs:
           fail_ci_if_error: false
 
   functional-tests:
-    name: Functional Tests (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
+    name: Functional Tests
     if: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -632,7 +632,7 @@ jobs:
           fail_ci_if_error: false
 
   functional-tests-sqlite:
-    name: Functional Tests SQLite (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
+    name: Functional Tests SQLite
     if: ${{ inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
