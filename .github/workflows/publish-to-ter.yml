@@ -33,6 +33,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Determine version from tag
         id: version
@@ -87,12 +88,25 @@ jobs:
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}
         run: |
-          COMMENT=$(git tag -n10 -l "$TAG" | sed "s/^[0-9v.]*[ ]*//" || true)
-          if [[ -z "${COMMENT// }" ]]; then
-            COMMENT="Released version $TAG -- for details see $SERVER_URL/$REPO/releases"
-          else
-            COMMENT="$COMMENT -- for details see $SERVER_URL/$REPO/releases"
+          # Try to build release notes from commit log since previous tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            LOG=$(git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" -- 2>/dev/null || true)
           fi
+
+          # Fall back to tag annotation if no commit log available
+          if [[ -z "${LOG// }" ]]; then
+            LOG=$(git tag -n10 -l "$TAG" | sed "s/^[0-9v.]*[ ]*//" || true)
+          fi
+
+          if [[ -n "${LOG// }" ]]; then
+            COMMENT="${LOG}
+
+          For details see $SERVER_URL/$REPO/releases"
+          else
+            COMMENT="Released version $TAG -- for details see $SERVER_URL/$REPO/releases"
+          fi
+
           DELIMITER="ghadelim_$(openssl rand -hex 8)"
           {
             echo "comment<<$DELIMITER"
