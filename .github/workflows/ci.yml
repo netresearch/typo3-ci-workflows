@@ -147,6 +147,29 @@ jobs:
             find . -name '*.php' -not -path './.Build/*' -not -path './vendor/*' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
           fi
 
+      - name: Check ext_emconf.php for strict_types
+        run: |
+          if [[ -f ext_emconf.php ]]; then
+            if grep -q 'declare(strict_types=1)' ext_emconf.php; then
+              echo "::error file=ext_emconf.php::ext_emconf.php must NOT contain declare(strict_types=1) — TER cannot parse it with strict_types enabled. Remove the declaration from this file."
+              exit 1
+            else
+              echo "ext_emconf.php: OK (no strict_types declaration)"
+            fi
+          else
+            echo "No ext_emconf.php found — skipping check"
+          fi
+
+      - name: Check .gitattributes for export-ignore
+        run: |
+          if [[ ! -f .gitattributes ]]; then
+            echo "::warning::.gitattributes file is missing. For TER publishing, add .gitattributes with export-ignore rules to exclude dev files (tests, CI configs) from the release archive."
+          elif ! grep -q 'export-ignore' .gitattributes; then
+            echo "::warning::.gitattributes exists but contains no export-ignore rules. Add export-ignore entries for dev files (tests, CI configs) to keep TER release archives clean."
+          else
+            echo ".gitattributes: OK (has export-ignore rules)"
+          fi
+
   # CGL runs on first PHP version only - code style results are PHP-version-independent
   cgl:
     name: Code Style
