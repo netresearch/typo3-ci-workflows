@@ -53,10 +53,12 @@ jobs:
           FORBIDDEN_PATTERN: ${{ inputs.forbidden-licenses }}
         run: |
           composer licenses --format=json > licenses.json
-          echo "## PHP Dependency Licenses" >> "$GITHUB_STEP_SUMMARY"
-          echo '```json' >> "$GITHUB_STEP_SUMMARY"
-          head -100 licenses.json >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## PHP Dependency Licenses"
+            echo '```json'
+            head -100 licenses.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if grep -E "$FORBIDDEN_PATTERN" licenses.json; then
             SAFE_PATTERN="${FORBIDDEN_PATTERN//$'\n'/}"

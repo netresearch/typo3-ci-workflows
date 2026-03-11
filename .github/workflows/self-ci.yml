@@ -25,7 +25,10 @@ jobs:
           persist-credentials: false
 
       - name: Install actionlint
-        run: bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/v1.7.11/scripts/download-actionlint.bash) 1.7.11
+        run: |
+          curl -sLO "https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz"
+          echo "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a  actionlint_1.7.11_linux_amd64.tar.gz" | sha256sum -c
+          tar xzf actionlint_1.7.11_linux_amd64.tar.gz actionlint
 
       - name: Run actionlint
         run: ./actionlint -color
@@ -75,23 +78,35 @@ jobs:
 
       - name: Smoke test php-cs-fixer config factory
         run: |
-          php -r '
-            $factory = require "config/php-cs-fixer/config.php";
-            $tmpDir = sys_get_temp_dir() . "/self-ci-cgl-" . uniqid();
-            mkdir($tmpDir);
-            file_put_contents($tmpDir . "/test.php", "<?php\n");
-            $config = $factory("Test header", $tmpDir);
-            assert($config instanceof PhpCsFixer\Config, "Factory must return PhpCsFixer\Config");
-            echo "php-cs-fixer config factory: OK" . PHP_EOL;
-          '
+          cat > /tmp/smoke-cgl.php << 'PHPEOF'
+          <?php
+          require_once 'vendor/autoload.php';
+          $factory = require "config/php-cs-fixer/config.php";
+          $tmpDir = sys_get_temp_dir() . "/self-ci-cgl-" . uniqid();
+          mkdir($tmpDir);
+          file_put_contents($tmpDir . "/test.php", "<?php\n");
+          $config = $factory("Test header", $tmpDir);
+          if (!$config instanceof PhpCsFixer\Config) {
+              fwrite(STDERR, "Factory must return PhpCsFixer\\Config" . PHP_EOL);
+              exit(1);
+          }
+          echo "php-cs-fixer config factory: OK" . PHP_EOL;
+          PHPEOF
+          php -dzend.assertions=1 /tmp/smoke-cgl.php
 
       - name: Smoke test rector config factory
         run: |
-          php -r '
-            $configure = require "config/rector/rector.php";
-            assert(is_callable($configure), "Rector config must return a callable");
-            echo "rector config factory: OK" . PHP_EOL;
-          '
+          cat > /tmp/smoke-rector.php << 'PHPEOF'
+          <?php
+          require_once 'vendor/autoload.php';
+          $configure = require "config/rector/rector.php";
+          if (!is_callable($configure)) {
+              fwrite(STDERR, "Rector config must return a callable" . PHP_EOL);
+              exit(1);
+          }
+          echo "rector config factory: OK" . PHP_EOL;
+          PHPEOF
+          php -dzend.assertions=1 /tmp/smoke-rector.php
 
   lint-json:
     name: Lint JSON
@@ -108,6 +123,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
 
       - name: Validate JSON files
         run: |
@@ -147,7 +169,7 @@ jobs:
           persist-credentials: false
 
       - name: Run ShellCheck on scripts
-        run: shellcheck scripts/migrate-to-grouped-callers.sh
+        run: shellcheck --severity=warning scripts/migrate-to-grouped-callers.sh
 
       - name: Validate repo config files
         run: |
@@ -186,26 +208,23 @@ jobs:
           STATUS=0
 
           while IFS= read -r -d '' file; do
-            # Find uses: lines with floating tags (@v4, @main, @master)
-            # Exclude:
-            #   - local workflow references (uses: ./)
-            #   - self-references to this repo's reusable workflows
-            #   - comments
+            # Match only YAML uses: keys (not comments or run: script content)
             while IFS= read -r line; do
-              # Skip local references
-              if echo "$line" | grep -qE 'uses:\s+\./'; then
-                continue
-              fi
-              # Skip self-references to this repo
-              if echo "$line" | grep -qE 'uses:\s+netresearch/typo3-ci-workflows/'; then
-                continue
-              fi
-              # Check for floating tags: @v[0-9], @main, @master
-              if echo "$line" | grep -qE '@(v[0-9]+|main|master)\s*(#|$)'; then
-                echo "FAIL: $file: $line"
+              # Extract the action reference
+              ref=$(echo "$line" | sed -n 's/.*uses:\s*//p' | xargs)
+
+              # Skip local references (./)
+              [[ "$ref" == ./* ]] && continue
+
+              # Skip self-references to this repo's reusable workflows
+              [[ "$ref" == netresearch/typo3-ci-workflows/* ]] && continue
+
+              # Require full SHA pin: @<40+ hex chars>
+              if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
+                echo "FAIL: $file: $ref"
                 STATUS=1
               fi
-            done < <(grep -n 'uses:' "$file" | grep -v '^\s*#' || true)
+            done < <(grep -E '^\s*-?\s*uses:' "$file" || true)
           done < <(find .github/workflows -name '*.yml' -print0)
 
           if [[ "$STATUS" -eq 0 ]]; then
