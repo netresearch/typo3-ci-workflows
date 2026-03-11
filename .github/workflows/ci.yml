@@ -151,7 +151,7 @@ jobs:
         if: ${{ matrix.php == fromJSON(inputs.php-versions)[0] }}
         run: |
           if [[ -f ext_emconf.php ]]; then
-            if grep -Eq '^\s*declare\s*\(\s*strict_types\s*=\s*1\s*\)\s*;?' ext_emconf.php; then
+            if grep -Eq '^[[:space:]]*declare[[:space:]]*\([[:space:]]*strict_types[[:space:]]*=[[:space:]]*1[[:space:]]*\)[[:space:]]*;?' ext_emconf.php; then
               echo "::error file=ext_emconf.php::ext_emconf.php must NOT contain declare(strict_types=1) — TER cannot parse it with strict_types enabled. Remove the declaration from this file."
               exit 1
             else
@@ -166,7 +166,7 @@ jobs:
         run: |
           if [[ ! -f .gitattributes ]]; then
             echo "::warning::.gitattributes file is missing. For TER publishing, add .gitattributes with export-ignore rules to exclude dev files (tests, CI configs) from the release archive."
-          elif ! grep -vE '^\s*#' .gitattributes | grep -q 'export-ignore'; then
+          elif ! grep -Ev '^[[:space:]]*#|^[[:space:]]*$' .gitattributes | grep -q 'export-ignore'; then
             echo "::warning::.gitattributes exists but contains no export-ignore rules. Add export-ignore entries for dev files (tests, CI configs) to keep TER release archives clean."
           else
             echo ".gitattributes: OK (has export-ignore rules)"
