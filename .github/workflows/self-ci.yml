@@ -1,0 +1,237 @@
+name: Self-CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          curl -sLO "https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz"
+          echo "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a  actionlint_1.7.11_linux_amd64.tar.gz" | sha256sum -c
+          tar xzf actionlint_1.7.11_linux_amd64.tar.gz actionlint
+
+      - name: Run actionlint
+        run: ./actionlint -color
+
+  lint-php:
+    name: Lint PHP
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-self-ci-${{ hashFiles('composer.json') }}
+          restore-keys: ${{ runner.os }}-composer-self-ci-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: PHP syntax check
+        run: |
+          FILE_COUNT=$(find config/ -name '*.php' | wc -l)
+          echo "Linting $FILE_COUNT PHP files..."
+          find config/ -name '*.php' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
+
+      - name: Smoke test php-cs-fixer config factory
+        run: |
+          cat > /tmp/smoke-cgl.php << 'PHPEOF'
+          <?php
+          require_once 'vendor/autoload.php';
+          $factory = require "config/php-cs-fixer/config.php";
+          $tmpDir = sys_get_temp_dir() . "/self-ci-cgl-" . uniqid();
+          mkdir($tmpDir);
+          file_put_contents($tmpDir . "/test.php", "<?php\n");
+          $config = $factory("Test header", $tmpDir);
+          if (!$config instanceof PhpCsFixer\Config) {
+              fwrite(STDERR, "Factory must return PhpCsFixer\\Config" . PHP_EOL);
+              exit(1);
+          }
+          echo "php-cs-fixer config factory: OK" . PHP_EOL;
+          PHPEOF
+          php -dzend.assertions=1 /tmp/smoke-cgl.php
+
+      - name: Smoke test rector config factory
+        run: |
+          cat > /tmp/smoke-rector.php << 'PHPEOF'
+          <?php
+          require_once 'vendor/autoload.php';
+          $configure = require "config/rector/rector.php";
+          if (!is_callable($configure)) {
+              fwrite(STDERR, "Rector config must return a callable" . PHP_EOL);
+              exit(1);
+          }
+          echo "rector config factory: OK" . PHP_EOL;
+          PHPEOF
+          php -dzend.assertions=1 /tmp/smoke-rector.php
+
+  lint-json:
+    name: Lint JSON
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@44454db4f0199b8b9685a5d763dc37cbf79108e1 # v2.36.0
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Validate JSON files
+        run: |
+          set -euo pipefail
+          STATUS=0
+          for f in composer.json config/captainhook/captainhook.json renovate.json; do
+            if [[ -f "$f" ]]; then
+              if jq empty "$f" 2>/dev/null; then
+                echo "OK: $f"
+              else
+                echo "FAIL: $f is not valid JSON"
+                STATUS=1
+              fi
+            else
+              echo "SKIP: $f not found"
+            fi
+          done
+          exit "$STATUS"
+
+      - name: Composer validate
+        run: composer validate --strict
+
+  lint-shell:
+    name: Lint Shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run ShellCheck on scripts
+        run: shellcheck --severity=warning scripts/migrate-to-grouped-callers.sh
+
+      - name: Validate repo config files
+        run: |
+          set -euo pipefail
+          STATUS=0
+          for conf in scripts/repo-configs/*.conf; do
+            echo "Checking $conf..."
+            if bash -n "$conf" 2>&1; then
+              echo "  OK"
+            else
+              echo "  FAIL: syntax error"
+              STATUS=1
+            fi
+          done
+          exit "$STATUS"
+
+  check-action-pins:
+    name: Check Action Pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2.15.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Verify all actions use SHA pins
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          while IFS= read -r -d '' file; do
+            # Match only YAML uses: keys (not comments or run: script content)
+            while IFS= read -r line; do
+              # Extract the action reference
+              ref=$(echo "$line" | sed -n 's/.*uses:\s*//p' | xargs)
+
+              # Skip local references (./)
+              [[ "$ref" == ./* ]] && continue
+
+              # Skip self-references to this repo's reusable workflows
+              [[ "$ref" == netresearch/typo3-ci-workflows/* ]] && continue
+
+              # Require full SHA pin: @<40+ hex chars>
+              if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
+                echo "FAIL: $file: $ref"
+                STATUS=1
+              fi
+            done < <(grep -E '^\s*-?\s*uses:' "$file" || true)
+          done < <(find .github/workflows -name '*.yml' -print0)
+
+          if [[ "$STATUS" -eq 0 ]]; then
+            echo "All actions are SHA-pinned."
+          else
+            echo ""
+            echo "ERROR: Found actions using floating tags instead of SHA pins."
+            echo "Pin actions to full commit SHAs (e.g., uses: actions/checkout@<sha> # v6.0.2)"
+            exit 1
+          fi
