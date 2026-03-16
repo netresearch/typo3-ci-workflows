@@ -77,6 +77,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
@@ -100,18 +102,22 @@ jobs:
         run: composer install --prefer-dist --no-progress
 
       - name: Setup TYPO3
-        env:
-          WEB_DIR: ${{ inputs.web-dir }}
         run: |
           # Wait for database
+          DB_READY=false
           for i in {1..30}; do
             if mysqladmin ping -h127.0.0.1 -uroot -proot --silent 2>/dev/null; then
               echo "Database is ready."
+              DB_READY=true
               break
             fi
             echo "Waiting for database... (attempt $i/30)"
             sleep 2
           done
+          if [[ "$DB_READY" != "true" ]]; then
+            echo "::error::Database failed to become ready within 60 seconds"
+            exit 1
+          fi
 
           # Setup TYPO3
           .Build/bin/typo3 setup \
