@@ -1,0 +1,16 @@
+# Explicit includes for all PHPStan plugins provided by typo3-ci-workflows.
+# Use this file when phpstan/extension-installer cannot run (e.g., --no-plugins).
+#
+# Usage in your Build/phpstan.neon:
+#   includes:
+#       - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/includes-no-extension-installer.neon
+#       - phpstan-baseline.neon
+
+includes:
+    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-strict-rules/rules.neon
+    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-deprecation-rules/rules.neon
+    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-phpunit/extension.neon
+    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-phpunit/rules.neon
+    - %currentWorkingDirectory%/.Build/vendor/saschaegerer/phpstan-typo3/extension.neon
+    - %currentWorkingDirectory%/.Build/vendor/phpat/phpat/extension.neon
+    - %currentWorkingDirectory%/.Build/vendor/ergebnis/phpstan-rules/rules.neon

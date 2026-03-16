@@ -438,6 +438,83 @@ jobs:
 
 Generates SLSA Level 3 provenance using `slsa-framework/slsa-github-generator`. Triggered after the Release workflow completes. Uses `compile-generator: true` and `private-repository: true` workarounds for reliability.
 
+## Two-Entrypoint Architecture
+
+This repository provides **two complementary ways** to run CI tooling:
+
+| Entrypoint | Environment | Use case |
+|------------|-------------|----------|
+| `Build/Scripts/runTests.sh` | Local development | Interactive use, quick feedback loop. Uses `.Build/bin/` tools directly (no Docker). |
+| `composer ci:test:php:*` | GitHub Actions CI | Automated CI on native runners. One PHP/DB version per matrix cell. |
+
+Both entrypoints share the **same tool configurations** (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, `Build/rector.php`, `Build/phpunit.xml`), ensuring local results match CI.
+
+### runTests.sh Template
+
+A generic `runTests.sh` template is provided at `assets/Build/Scripts/runTests.sh.dist`. To use it:
+
+1. Copy to your extension: `cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.sh.dist Build/Scripts/runTests.sh`
+2. Make executable: `chmod +x Build/Scripts/runTests.sh`
+3. Customize the extension-point variables at the top of the script (config paths, etc.)
+
+Supported commands: `unit`, `functional`, `fuzz`, `mutation`, `phpstan`, `cgl`, `cgl:fix`, `rector`, `rector:fix`, `ci`, `all`.
+
+## Git Worktree + captainhook Workaround
+
+When using [git worktrees](https://git-scm.com/docs/git-worktree), `.git` is a file (not a directory), which causes `captainhook/hook-installer` to fail during `composer install`.
+
+### Problem
+
+```
+captainhook/hook-installer fails: .git/hooks is not a directory
+```
+
+### Solutions
+
+**Solution 1: `--no-plugins`** (simplest)
+
+```bash
+composer install --no-plugins
+```
+
+This skips all Composer plugins including captainhook *and* `phpstan/extension-installer`. PHPStan plugins will not auto-register.
+
+**Solution 2: Explicit PHPStan includes** (recommended with Solution 1)
+
+After `--no-plugins`, include the explicit plugin file in your `Build/phpstan.neon`:
+
+```neon
+includes:
+    - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/includes-no-extension-installer.neon
+    - phpstan-baseline.neon
+```
+
+This file lists all PHPStan plugin neon files that `extension-installer` would normally auto-load.
+
+**Solution 3: Create hooks directory first**
+
+```bash
+# For git worktrees, .git is a file pointing to the real git dir.
+# Create a hooks dir where captainhook expects it:
+GITDIR=$(git rev-parse --git-dir)
+mkdir -p "${GITDIR}/hooks"
+composer install
+```
+
+## Extension Setup
+
+Add this package to your extension's `require-dev`:
+
+```json
+{
+    "require-dev": {
+        "netresearch/typo3-ci-workflows": "^1.1"
+    }
+}
+```
+
+This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows.
+
 ## Security
 
 - All third-party actions are SHA-pinned
