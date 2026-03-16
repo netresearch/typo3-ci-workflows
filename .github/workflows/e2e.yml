@@ -1,0 +1,219 @@
+name: E2E Tests
+
+on:
+  workflow_call:
+    inputs:
+      php-version:
+        description: PHP version
+        type: string
+        default: '8.4'
+      node-version:
+        description: Node.js version
+        type: string
+        default: '24'
+      typo3-setup-extensions:
+        description: Run extension:setup after TYPO3 setup
+        type: boolean
+        default: true
+      playwright-browser:
+        description: Playwright browser to install
+        type: string
+        default: 'chromium'
+      test-command:
+        description: E2E test command
+        type: string
+        default: 'npm run test:e2e'
+      db-image:
+        description: Database Docker image
+        type: string
+        default: 'mariadb:11.4'
+      php-extensions:
+        description: PHP extensions to install
+        type: string
+        default: 'mysqli, pdo_mysql, gd, intl, curl, zip'
+      timeout-minutes:
+        description: Job timeout in minutes
+        type: number
+        default: 30
+      artifact-path:
+        description: Path to Playwright reports/results for artifact upload
+        type: string
+        default: 'Tests/E2E/Playwright/reports/'
+      web-dir:
+        description: TYPO3 web directory (document root for PHP server)
+        type: string
+        default: '.Build/Web'
+
+permissions: {}
+
+jobs:
+  e2e:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+
+    services:
+      db:
+        image: ${{ inputs.db-image }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: typo3
+          MYSQL_CHARSET: utf8mb4
+          MYSQL_COLLATION: utf8mb4_unicode_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: ${{ inputs.php-extensions }}
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Setup TYPO3
+        env:
+          WEB_DIR: ${{ inputs.web-dir }}
+        run: |
+          # Wait for database
+          for i in {1..30}; do
+            if mysqladmin ping -h127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+              echo "Database is ready."
+              break
+            fi
+            echo "Waiting for database... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Setup TYPO3
+          .Build/bin/typo3 setup \
+            --driver=mysqli \
+            --host=127.0.0.1 \
+            --port=3306 \
+            --dbname=typo3 \
+            --username=root \
+            --password=root \
+            --admin-username=admin \
+            --admin-user-password='Joh316!!' \
+            --admin-email=admin@example.com \
+            --project-name='E2E Tests' \
+            --server-type=other \
+            --no-interaction \
+            --force
+
+          if [[ "${{ inputs.typo3-setup-extensions }}" == "true" ]]; then
+            .Build/bin/typo3 extension:setup --no-interaction
+          fi
+
+          # Configure for local testing
+          mkdir -p config/system
+          cat > config/system/additional.php << 'PHPEOF'
+          <?php
+          $GLOBALS['TYPO3_CONF_VARS']['SYS']['trustedHostsPattern'] = '.*';
+          $GLOBALS['TYPO3_CONF_VARS']['SYS']['displayErrors'] = 1;
+          $GLOBALS['TYPO3_CONF_VARS']['SYS']['devIPmask'] = '*';
+          $GLOBALS['TYPO3_CONF_VARS']['BE']['debug'] = true;
+          PHPEOF
+
+          .Build/bin/typo3 cache:flush
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps ${{ inputs.playwright-browser }}
+
+      - name: Start PHP server
+        env:
+          WEB_DIR: ${{ inputs.web-dir }}
+        run: |
+          cat > /tmp/typo3-router.php << 'ROUTER'
+          <?php
+          $uri = urldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
+          $docRoot = $_SERVER['DOCUMENT_ROOT'];
+          $path = $docRoot . $uri;
+          if ($uri !== '/' && file_exists($path) && is_file($path)) {
+              return false;
+          }
+          $_SERVER['SCRIPT_NAME'] = '/index.php';
+          require $docRoot . '/index.php';
+          ROUTER
+
+          php -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php > /tmp/php-server.log 2>&1 &
+          echo $! > /tmp/php-server.pid
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/typo3/login > /dev/null 2>&1; then
+              echo "PHP server is up (checked after ${i}s)."
+              break
+            fi
+            sleep 1
+          done
+
+          if ! curl -sf http://localhost:8080/typo3/login > /dev/null 2>&1; then
+            echo "PHP server failed to start. Server log:"
+            cat /tmp/php-server.log
+            exit 1
+          fi
+
+      - name: Run E2E tests
+        env:
+          TYPO3_BASE_URL: http://localhost:8080
+        run: ${{ inputs.test-command }}
+
+      - name: Upload test results
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always()
+        with:
+          name: playwright-report
+          path: ${{ inputs.artifact-path }}
+          retention-days: 7
+
+      - name: Upload PHP server logs
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: failure()
+        with:
+          name: php-server-logs
+          path: /tmp/php-server.log
+          retention-days: 3
+
+      - name: Stop PHP server
+        if: always()
+        run: |
+          if [ -f /tmp/php-server.pid ]; then
+            kill $(cat /tmp/php-server.pid) 2>/dev/null || true
+          fi
