@@ -32,7 +32,7 @@ on:
         description: 'JSON array of test suites: [{"suite":"unit","config":"Build/phpunit/UnitTests.xml","testsuite":"Unit Tests","flag":"php-unit"}]'
         required: false
         type: string
-        default: '[{"suite":"unit","config":"Build/phpunit/UnitTests.xml","testsuite":"Unit Tests","flag":"php-unit"}]'
+        default: '[{"suite":"unit","config":"Build/phpunit/UnitTests.xml","testsuite":"Unit Tests","flag":"php-unit"},{"suite":"functional","config":"Build/phpunit/FunctionalTests.xml","testsuite":"Functional Tests","flag":"php-functional"}]'
       unit-test-config:
         description: PHPUnit config for unit tests (used by mutation/fuzz)
         required: false
