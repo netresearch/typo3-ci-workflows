@@ -2,36 +2,18 @@
 
 Reusable GitHub Actions workflows for Netresearch TYPO3 extension repositories.
 
-## Workflows
-
-| Workflow | Purpose |
-|----------|--------|
-| `ci.yml` | PHP lint, CGL, PHPStan, Rector, unit tests, functional tests |
-| `scorecard.yml` | OpenSSF Scorecard analysis |
-| `codeql.yml` | GitHub CodeQL security scanning |
-| `dependency-review.yml` | Dependency vulnerability review on PRs |
-| `auto-merge-deps.yml` | Auto-merge Dependabot/Renovate PRs |
-| `publish-to-ter.yml` | Publish extension to TYPO3 TER on tag |
-| `labeler.yml` | Automatic PR labeling based on file paths |
-| `lock.yml` | Lock old inactive issues and PRs |
-| `greetings.yml` | Greet first-time contributors |
-| `docs.yml` | Render and verify TYPO3 documentation |
-| `stale.yml` | Mark and close stale issues and PRs |
-| `license-check.yml` | PHP dependency license audit |
-| `security.yml` | Gitleaks secret scanning + Composer audit |
-| `pr-quality.yml` | PR size check + auto-approve for solo maintainers |
-| `release.yml` | Enterprise release pipeline (archive, SBOM, cosign, attestation) |
-| `fuzz.yml` | Fuzz tests and mutation testing with Infection |
-| `slsa-provenance.yml` | SLSA Level 3 provenance generation |
-
 ## Quick Start
 
-Create `.github/workflows/ci.yml` in your extension repository:
+Copy these caller workflows into your extension's `.github/workflows/` directory. Most workflows work with zero configuration.
+
+### Minimal CI (required)
 
 ```yaml
+# .github/workflows/ci.yml
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
 permissions: {}
 jobs:
@@ -39,106 +21,37 @@ jobs:
     uses: netresearch/typo3-ci-workflows/.github/workflows/ci.yml@main
     permissions:
       contents: read
-    with:
-      php-versions: '["8.2", "8.3", "8.4"]'
-      typo3-versions: '["^13.4", "^14.0"]'
 ```
 
-## CI Workflow Inputs
-
-### Matrix Configuration
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `php-versions` | string | `'["8.4"]'` | JSON array of PHP versions |
-| `typo3-versions` | string | `'["^13.4"]'` | JSON array of TYPO3 versions |
-| `matrix-exclude` | string | `'[]'` | JSON array of `{php, typo3}` combinations to exclude |
-| `typo3-packages` | string | `'["typo3/cms-core"]'` | JSON array of TYPO3 packages to require |
-
-### Feature Flags
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `run-lint` | boolean | `true` | Run PHP syntax lint |
-| `run-cgl` | boolean | `true` | Run code style check (PHP-CS-Fixer) |
-| `run-phpstan` | boolean | `true` | Run PHPStan static analysis |
-| `run-rector` | boolean | `true` | Run Rector dry-run |
-| `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
-| `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
-
-### Custom Commands
-
-Override auto-detection with custom commands:
-
-| Input | Type | Default |
-|-------|------|---------|
-| `cgl-command` | string | auto-detect |
-| `phpstan-command` | string | auto-detect |
-| `rector-command` | string | auto-detect |
-| `unit-test-command` | string | auto-detect |
-| `functional-test-command` | string | auto-detect |
-
-Auto-detection looks for these composer scripts (in order):
-- CGL: `ci:test:php:cgl`, `ci:cgl` (+ `--dry-run`), `ci:lint:php`, `check:php:cs-fixer`, `code:style:check`
-- PHPStan: `ci:test:php:phpstan` (+ `--error-format=github`), `ci:phpstan` (+ `--error-format=github`), `ci:stan`, `check:php:stan`, `code:phpstan`
-- Rector: `ci:test:php:rector`, `check:php:rector`
-- Unit tests: `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:unit`, `check:tests:unit`, `test:unit`
-- Functional tests: `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
-
-**Note:** Some scripts get additional arguments appended automatically (shown in parentheses). Ensure your composer scripts accept `--` pass-through arguments.
-
-### PHP Extensions
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
-
-CGL and Rector run on the first PHP version only (code style is PHP-version-independent). PHPStan and tests run on the full matrix.
-
-### Functional Tests
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
-| `db-image` | string | `mysql:9.6` | Docker image for database service |
-
-### Coverage
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `upload-coverage` | boolean | `false` | Upload coverage to Codecov |
-| `coverage-tool` | string | `pcov` | Coverage driver: `pcov` or `xdebug` |
-
-Requires `CODECOV_TOKEN` secret when enabled.
-
-### Incompatible Dev Dependencies
-
-Remove dev dependencies that are incompatible with certain TYPO3 versions:
+### Recommended additions
 
 ```yaml
-remove-dev-deps: '[{"dep":"saschaegerer/phpstan-typo3","only-for":"^12|^13"}]'
-```
-
-The `only-for` field supports pipe-separated version prefixes. Dependencies are removed when the TYPO3 version doesn't match any pattern.
-
-## Other Workflows
-
-### Scorecard
-
-```yaml
+# .github/workflows/security.yml
+name: Security
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions: {}
 jobs:
-  scorecard:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/scorecard.yml@main
+  security:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/security.yml@main
     permissions:
       contents: read
       security-events: write
-      id-token: write
-      actions: read
+    secrets:
+      GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 ```
 
-### CodeQL
-
 ```yaml
+# .github/workflows/codeql.yml
+name: CodeQL
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+permissions: {}
 jobs:
   codeql:
     uses: netresearch/typo3-ci-workflows/.github/workflows/codeql.yml@main
@@ -148,28 +61,12 @@ jobs:
       actions: read
 ```
 
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `languages` | string | `actions` | CodeQL languages to analyze (comma-separated) |
-
-### Dependency Review
-
 ```yaml
-jobs:
-  dependency-review:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/dependency-review.yml@main
-    permissions:
-      contents: read
-      pull-requests: write
-```
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `fail-on-severity` | string | `high` | Minimum severity to fail on (`low`, `moderate`, `high`, `critical`) |
-
-### Auto-merge Dependency PRs
-
-```yaml
+# .github/workflows/auto-merge-deps.yml
+name: Auto-merge dependency PRs
+on:
+  pull_request:
+permissions: {}
 jobs:
   auto-merge:
     uses: netresearch/typo3-ci-workflows/.github/workflows/auto-merge-deps.yml@main
@@ -178,143 +75,250 @@ jobs:
       pull-requests: write
 ```
 
-### Publish to TER
+## Workflows
+
+### Core CI
+
+| Workflow | Purpose | Trigger |
+|----------|---------|---------|
+| [`ci.yml`](#ci) | PHP lint, CGL, PHPStan, Rector, unit/functional tests | push, PR |
+| [`extended-testing.yml`](#extended-testing) | Coverage, mutation testing, fuzz testing, JS tests | push, PR |
+| [`e2e.yml`](#e2e-tests) | Playwright browser tests with TYPO3 backend | push, PR |
+
+### Security & Compliance
+
+| Workflow | Purpose | Trigger |
+|----------|---------|---------|
+| [`security.yml`](#security) | Gitleaks secret scanning + Composer audit | push, PR |
+| [`codeql.yml`](#codeql) | GitHub CodeQL security scanning | push, schedule |
+| [`dependency-review.yml`](#dependency-review) | Dependency vulnerability review | PR only |
+| [`license-check.yml`](#license-check) | PHP dependency license audit | push, PR |
+| [`scorecard.yml`](#scorecard) | OpenSSF Scorecard analysis | push, schedule |
+
+### Release & Publish
+
+| Workflow | Purpose | Trigger |
+|----------|---------|---------|
+| [`release.yml`](#release) | Enterprise release pipeline (archive, SBOM, cosign, attestation) | tag push |
+| [`publish-to-ter.yml`](#publish-to-ter) | Publish extension to TYPO3 TER | tag push |
+
+### Repository Hygiene
+
+| Workflow | Purpose | Trigger |
+|----------|---------|---------|
+| [`auto-merge-deps.yml`](#auto-merge-dependency-prs) | Auto-merge Dependabot/Renovate PRs | PR |
+| [`pr-quality.yml`](#pr-quality-gates) | PR size check + auto-approve for solo maintainers | PR |
+| [`labeler.yml`](#labeler) | Automatic PR labeling based on file paths | PR |
+| [`stale.yml`](#stale-issues) | Mark and close stale issues and PRs | schedule |
+| [`lock.yml`](#lock-threads) | Lock old inactive issues and PRs | schedule |
+| [`greetings.yml`](#greetings) | Greet first-time contributors | issue, PR |
+| [`docs.yml`](#documentation) | Render and verify TYPO3 documentation | push, PR |
+
+---
+
+## CI
+
+The main CI workflow. Runs PHP lint, code style, PHPStan, Rector, and unit/functional tests across a PHP/TYPO3 version matrix.
+
+### Minimal caller
 
 ```yaml
 jobs:
-  publish:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
+  ci:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/ci.yml@main
     permissions:
       contents: read
-    secrets:
-      TYPO3_EXTENSION_KEY: ${{ secrets.TYPO3_EXTENSION_KEY }}
-      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
 ```
+
+### Customized caller
+
+```yaml
+jobs:
+  ci:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/ci.yml@main
+    permissions:
+      contents: read
+    with:
+      php-versions: '["8.2", "8.3", "8.4"]'
+      typo3-versions: '["^13.4", "^14.0"]'
+      matrix-exclude: '[{"php":"8.2","typo3":"^14.0"}]'
+      run-functional-tests: true
+      functional-test-db: mariadb
+      db-image: 'mariadb:11.4'
+      upload-coverage: true
+      remove-dev-deps: '[{"dep":"saschaegerer/phpstan-typo3","only-for":"^12|^13"}]'
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+```
+
+### Inputs
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version for tailor CLI |
+| `php-versions` | string | `'["8.4"]'` | JSON array of PHP versions |
+| `typo3-versions` | string | `'["^13.4"]'` | JSON array of TYPO3 versions |
+| `matrix-exclude` | string | `'[]'` | JSON array of `{php, typo3}` combinations to exclude |
+| `typo3-packages` | string | `'["typo3/cms-core"]'` | JSON array of TYPO3 packages to require |
+| `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
+| `run-lint` | boolean | `true` | Run PHP syntax lint |
+| `run-cgl` | boolean | `true` | Run code style check (PHP-CS-Fixer) |
+| `run-phpstan` | boolean | `true` | Run PHPStan static analysis |
+| `run-rector` | boolean | `true` | Run Rector dry-run |
+| `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
+| `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
+| `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
+| `db-image` | string | `mysql:9.6` | Docker image for database service |
+| `upload-coverage` | boolean | `false` | Upload coverage to Codecov |
+| `coverage-tool` | string | `pcov` | Coverage driver: `pcov` or `xdebug` |
+| `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |
+| `cgl-command` | string | auto-detect | Override CGL command |
+| `phpstan-command` | string | auto-detect | Override PHPStan command |
+| `rector-command` | string | auto-detect | Override Rector command |
+| `unit-test-command` | string | auto-detect | Override unit test command |
+| `functional-test-command` | string | auto-detect | Override functional test command |
+
+### Secrets
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `TYPO3_EXTENSION_KEY` | Yes | Extension key registered in TER |
-| `TYPO3_TER_ACCESS_TOKEN` | Yes | TER API access token |
+| `CODECOV_TOKEN` | No | Required when `upload-coverage: true` |
 
-Automatically validates that the tag version matches `ext_emconf.php` before publishing.
+### Auto-detection
 
-### Labeler
+Commands are auto-detected from composer scripts (in order):
+- **CGL:** `ci:test:php:cgl`, `ci:cgl` (+ `--dry-run`), `ci:lint:php`, `check:php:cs-fixer`, `code:style:check`
+- **PHPStan:** `ci:test:php:phpstan` (+ `--error-format=github`), `ci:phpstan` (+ `--error-format=github`), `ci:stan`, `check:php:stan`, `code:phpstan`
+- **Rector:** `ci:test:php:rector`, `check:php:rector`
+- **Unit tests:** `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:unit`, `check:tests:unit`, `test:unit`
+- **Functional tests:** `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
+
+CGL and Rector run on the first PHP version only (code style is PHP-version-independent). PHPStan and tests run on the full matrix.
+
+---
+
+## Extended Testing
+
+Coverage, mutation testing, fuzz testing, and JavaScript testing. Each suite is a simple boolean toggle.
+
+### Minimal caller (defaults: unit + functional coverage, mutation, fuzz, JS)
 
 ```yaml
 jobs:
-  labeler:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/labeler.yml@main
+  extended:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/extended-testing.yml@main
     permissions:
       contents: read
-      pull-requests: write
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      INFECTION_DASHBOARD_API_KEY: ${{ secrets.INFECTION_DASHBOARD_API_KEY }}
 ```
 
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `configuration-path` | string | `.github/labeler.yml` | Path to the labeler configuration file |
-
-### Lock Threads
+### Customized caller (enable integration + E2E, disable JS)
 
 ```yaml
 jobs:
-  lock:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/lock.yml@main
+  extended:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/extended-testing.yml@main
     permissions:
-      issues: write
-      pull-requests: write
-```
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `issue-inactive-days` | number | `365` | Days before locking inactive issues |
-| `pr-inactive-days` | number | `365` | Days before locking inactive PRs |
-| `issue-lock-reason` | string | `resolved` | Reason for locking issues |
-| `pr-lock-reason` | string | `resolved` | Reason for locking PRs |
-| `log-output` | boolean | `true` | Log processed threads |
-
-### Greetings
-
-```yaml
-jobs:
-  greetings:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/greetings.yml@main
-    permissions:
-      issues: write
-      pull-requests: write
+      contents: read
     with:
-      issue-message: 'Custom welcome message for issues'
-      pr-message: 'Custom welcome message for PRs'
+      run-integration-tests: true
+      run-e2e-tests: true
+      run-js-tests: false
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      INFECTION_DASHBOARD_API_KEY: ${{ secrets.INFECTION_DASHBOARD_API_KEY }}
 ```
+
+### Inputs
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `issue-message` | string | Generic welcome | Message for first-time issue authors |
-| `pr-message` | string | Generic welcome | Message for first-time PR authors |
+| `php-version` | string | `8.5` | PHP version for coverage runs |
+| `node-version` | string | `24` | Node.js version for JS testing |
+| `run-unit-tests` | boolean | `true` | Run PHP unit tests with coverage |
+| `run-functional-tests` | boolean | `true` | Run PHP functional tests with coverage |
+| `run-integration-tests` | boolean | `false` | Run PHP integration tests with coverage |
+| `run-e2e-tests` | boolean | `false` | Run PHP E2E tests with coverage |
+| `run-js-tests` | boolean | `true` | Run JavaScript tests (Vitest) |
+| `run-mutation-tests` | boolean | `true` | Run PHP mutation testing (Infection) |
+| `run-fuzz-tests` | boolean | `true` | Run PHP fuzz tests |
+| `unit-test-config` | string | `Build/phpunit/UnitTests.xml` | PHPUnit config for unit tests |
+| `functional-test-config` | string | `Build/phpunit/FunctionalTests.xml` | PHPUnit config for functional tests |
+| `integration-test-config` | string | `Build/phpunit/IntegrationTests.xml` | PHPUnit config for integration tests |
+| `e2e-test-config` | string | `Build/phpunit/E2ETests.xml` | PHPUnit config for E2E tests |
 
-### Documentation
+### Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `CODECOV_TOKEN` | No | Codecov upload token |
+| `INFECTION_DASHBOARD_API_KEY` | No | Infection dashboard API key |
+
+### Jobs
+
+| Job | Default | Depends on | Description |
+|-----|---------|------------|-------------|
+| `unit-coverage` | on | - | Unit tests with coverage upload |
+| `functional-coverage` | on | - | Functional tests with coverage upload |
+| `integration-coverage` | off | - | Integration tests with coverage upload |
+| `e2e-coverage` | off | - | E2E tests with coverage upload |
+| `mutation-testing` | on | unit-coverage | Infection mutation testing |
+| `js-coverage` | on | - | Vitest with coverage upload |
+| `fuzz-testing` | on | - | PHPUnit fuzz test group |
+
+---
+
+## E2E Tests
+
+Playwright browser tests against a running TYPO3 instance with database.
+
+### Minimal caller
 
 ```yaml
 jobs:
-  docs:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/docs.yml@main
+  e2e:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/e2e.yml@main
     permissions:
       contents: read
 ```
 
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `source-path` | string | `Documentation` | Path to documentation source |
-| `output-path` | string | `Documentation-GENERATED-temp` | Path for rendered output |
-| `upload-artifact` | boolean | `true` | Upload rendered docs as artifact on PRs |
-| `artifact-retention-days` | number | `7` | Days to retain uploaded artifact |
-
-### Stale Issues
+### Customized caller
 
 ```yaml
 jobs:
-  stale:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/stale.yml@main
-    permissions:
-      issues: write
-      pull-requests: write
-```
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `days-before-stale` | number | `60` | Days before marking as stale |
-| `days-before-close` | number | `7` | Days before closing stale issues |
-| `exempt-issue-labels` | string | `pinned,security,bug` | Comma-separated labels to exempt |
-| `exempt-pr-labels` | string | `pinned,security` | Comma-separated PR labels to exempt |
-| `operations-per-run` | number | `30` | Max operations per run |
-| `stale-issue-message` | string | Generic message | Message when marking issue as stale |
-| `stale-pr-message` | string | Generic message | Message when marking PR as stale |
-| `close-issue-message` | string | Generic message | Message when closing stale issue |
-| `close-pr-message` | string | Generic message | Message when closing stale PR |
-
-Stale labels (`stale`) are hardcoded to stay within the 10-input workflow_call limit.
-
-### License Check
-
-```yaml
-jobs:
-  license-check:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/license-check.yml@main
+  e2e:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/e2e.yml@main
     permissions:
       contents: read
+    with:
+      php-version: '8.4'
+      db-image: 'mariadb:11.4'
+      test-command: 'npm run test:e2e -- --project=chromium'
 ```
+
+### Inputs
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version for license checking |
-| `forbidden-licenses` | string | `"(SSPL\|BSL)"` | Regex pattern for forbidden licenses |
+| `php-version` | string | `8.4` | PHP version |
+| `node-version` | string | `24` | Node.js version |
+| `typo3-setup-extensions` | boolean | `true` | Run extension:setup after TYPO3 setup |
+| `playwright-browser` | string | `chromium` | Playwright browser to install |
+| `test-command` | string | `npm run test:e2e` | E2E test command |
+| `db-image` | string | `mariadb:11.4` | Database Docker image |
+| `php-extensions` | string | `mysqli, pdo_mysql, gd, intl, curl, zip` | PHP extensions to install |
+| `timeout-minutes` | number | `30` | Job timeout in minutes |
+| `artifact-path` | string | `Tests/E2E/Playwright/reports/` | Path to Playwright reports |
+| `web-dir` | string | `.Build/Web` | TYPO3 web directory (document root) |
 
-Fails the job (exit 1) when forbidden licenses are found, not just a warning.
+---
 
-### Security
+## Security
+
+Gitleaks secret scanning and Composer dependency audit.
+
+### Minimal caller
 
 ```yaml
 jobs:
@@ -327,38 +331,116 @@ jobs:
       GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 ```
 
+### Inputs
+
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `php-version` | string | `8.4` | PHP version for Composer audit |
 | `skip-gitleaks` | boolean | `false` | Skip Gitleaks secret scanning |
 | `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
 
+### Secrets
+
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `GITLEAKS_LICENSE` | No | License key for Gitleaks |
 
-Gitleaks automatically skips dependabot PRs and merge_group events.
+---
 
-### PR Quality Gates
+## CodeQL
+
+GitHub CodeQL security scanning.
+
+### Minimal caller
 
 ```yaml
 jobs:
-  pr-quality:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/pr-quality.yml@main
+  codeql:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/codeql.yml@main
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `languages` | string | `actions` | CodeQL languages to analyze (comma-separated) |
+
+---
+
+## Dependency Review
+
+Dependency vulnerability review on pull requests.
+
+### Minimal caller
+
+```yaml
+jobs:
+  dependency-review:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/dependency-review.yml@main
     permissions:
       contents: read
       pull-requests: write
 ```
 
+### Inputs
+
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `size-warning-threshold` | number | `500` | Lines changed for medium size |
-| `size-alert-threshold` | number | `1000` | Lines changed for large size warning |
-| `security-controls-path` | string | `.github/SECURITY_CONTROLS.md` | Path to security controls docs |
+| `fail-on-severity` | string | `high` | Minimum severity to fail on (`low`, `moderate`, `high`, `critical`) |
 
-Includes two jobs: PR size check and auto-approve for solo maintainer projects. Skips draft PRs.
+---
 
-### Release
+## License Check
+
+PHP dependency license audit. Fails when forbidden licenses are found.
+
+### Minimal caller
+
+```yaml
+jobs:
+  license-check:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/license-check.yml@main
+    permissions:
+      contents: read
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-version` | string | `8.4` | PHP version for license checking |
+| `forbidden-licenses` | string | `"(SSPL\|BSL)"` | Regex pattern for forbidden licenses |
+
+---
+
+## Scorecard
+
+OpenSSF Scorecard analysis. No inputs.
+
+### Minimal caller
+
+```yaml
+jobs:
+  scorecard:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/scorecard.yml@main
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      actions: read
+```
+
+---
+
+## Release
+
+Enterprise release pipeline: git archive, SBOM generation (SPDX + CycloneDX), SHA256 checksums, Cosign keyless signing, build provenance attestation, and GitHub Release.
+
+### Minimal caller
 
 ```yaml
 jobs:
@@ -373,16 +455,227 @@ jobs:
       package-name: vendor/my-extension
 ```
 
+### Inputs
+
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `archive-prefix` | string | **yes** | — | Prefix for archive files (e.g., `contexts`) |
-| `package-name` | string | **yes** | — | Composer package name (e.g., `netresearch/contexts`) |
+| `archive-prefix` | string | **yes** | - | Prefix for archive files (e.g., `contexts`) |
+| `package-name` | string | **yes** | - | Composer package name (e.g., `netresearch/contexts`) |
 | `include-sbom` | boolean | no | `true` | Include SPDX and CycloneDX SBOMs |
 | `sign-artifacts` | boolean | no | `true` | Sign artifacts with Cosign keyless signing |
 
-Full enterprise release pipeline: git archive, SBOM generation (SPDX + CycloneDX), SHA256 checksums, Cosign keyless signing, build provenance attestation, and GitHub Release with verification instructions.
+---
 
-### Fuzzing
+## Publish to TER
+
+Publish extension to TYPO3 TER on tag push. Auto-resolves extension key from `composer.json` and validates the tag version against `ext_emconf.php`.
+
+### Minimal caller
+
+```yaml
+jobs:
+  publish:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
+    permissions:
+      contents: read
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `php-version` | string | `8.4` | PHP version for tailor CLI |
+
+### Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `TYPO3_TER_ACCESS_TOKEN` | Yes | TER API access token |
+| `TYPO3_EXTENSION_KEY` | No | Deprecated: auto-resolved from composer.json |
+
+---
+
+## Auto-merge Dependency PRs
+
+Automatically approves and merges Dependabot/Renovate PRs. Auto-detects the repo's allowed merge strategy.
+
+### Minimal caller
+
+```yaml
+jobs:
+  auto-merge:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/auto-merge-deps.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+```
+
+No inputs.
+
+---
+
+## PR Quality Gates
+
+PR size check and auto-approve for solo maintainer projects. Skips draft PRs.
+
+### Minimal caller
+
+```yaml
+jobs:
+  pr-quality:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/pr-quality.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `size-warning-threshold` | number | `500` | Lines changed for medium size |
+| `size-alert-threshold` | number | `1000` | Lines changed for large size warning |
+| `security-controls-path` | string | `.github/SECURITY_CONTROLS.md` | Path to security controls docs |
+
+---
+
+## Labeler
+
+Automatic PR labeling based on file paths.
+
+### Minimal caller
+
+```yaml
+jobs:
+  labeler:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/labeler.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `configuration-path` | string | `.github/labeler.yml` | Path to the labeler configuration file |
+
+---
+
+## Stale Issues
+
+Mark and close stale issues and PRs.
+
+### Minimal caller
+
+```yaml
+jobs:
+  stale:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/stale.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `days-before-stale` | number | `60` | Days before marking as stale |
+| `days-before-close` | number | `7` | Days before closing stale issues |
+| `exempt-issue-labels` | string | `pinned,security,bug` | Comma-separated labels to exempt |
+| `exempt-pr-labels` | string | `pinned,security` | Comma-separated PR labels to exempt |
+| `operations-per-run` | number | `30` | Max operations per run |
+| `stale-issue-message` | string | Generic message | Message when marking issue as stale |
+| `stale-pr-message` | string | Generic message | Message when marking PR as stale |
+| `close-issue-message` | string | Generic message | Message when closing stale issue |
+| `close-pr-message` | string | Generic message | Message when closing stale PR |
+
+---
+
+## Lock Threads
+
+Lock old inactive issues and PRs.
+
+### Minimal caller
+
+```yaml
+jobs:
+  lock:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/lock.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `issue-inactive-days` | number | `365` | Days before locking inactive issues |
+| `pr-inactive-days` | number | `365` | Days before locking inactive PRs |
+| `issue-lock-reason` | string | `resolved` | Reason for locking issues |
+| `pr-lock-reason` | string | `resolved` | Reason for locking PRs |
+| `log-output` | boolean | `true` | Log processed threads |
+
+---
+
+## Greetings
+
+Greet first-time contributors on issues and PRs.
+
+### Minimal caller
+
+```yaml
+jobs:
+  greetings:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/greetings.yml@main
+    permissions:
+      issues: write
+      pull-requests: write
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `issue-message` | string | Generic welcome | Message for first-time issue authors |
+| `pr-message` | string | Generic welcome | Message for first-time PR authors |
+
+---
+
+## Documentation
+
+Render and verify TYPO3 documentation.
+
+### Minimal caller
+
+```yaml
+jobs:
+  docs:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/docs.yml@main
+    permissions:
+      contents: read
+```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `input` | string | `Documentation` | Path to documentation source |
+| `output` | string | `Documentation-GENERATED-temp` | Path for rendered output |
+| `upload-artifact` | boolean | `true` | Upload rendered docs as artifact on PRs |
+| `artifact-retention-days` | number | `7` | Days to retain uploaded artifact |
+
+---
+
+## Fuzzing
+
+Standalone fuzz tests and mutation testing with Infection (for repos not using `extended-testing.yml`).
+
+### Minimal caller
 
 ```yaml
 jobs:
@@ -390,7 +683,12 @@ jobs:
     uses: netresearch/typo3-ci-workflows/.github/workflows/fuzz.yml@main
     permissions:
       contents: read
+    with:
+      run-fuzz-tests: true
+      run-mutation-tests: true
 ```
+
+### Inputs
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -398,45 +696,12 @@ jobs:
 | `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
 | `fuzz-testsuite` | string | `Fuzz` | PHPUnit testsuite name for fuzz tests |
 | `phpunit-config` | string | `Build/phpunit.xml` | Path to PHPUnit config |
-| `run-fuzz-tests` | boolean | `true` | Run fuzz tests |
-| `run-mutation-tests` | boolean | `true` | Run mutation tests with Infection |
+| `run-fuzz-tests` | boolean | `false` | Run fuzz tests |
+| `run-mutation-tests` | boolean | `false` | Run mutation tests with Infection |
 | `mutation-min-msi` | number | `50` | Minimum Mutation Score Indicator |
 | `mutation-min-covered-msi` | number | `60` | Minimum Covered MSI |
 
-Mutation testing runs with `continue-on-error: true` to allow incremental threshold improvement.
-
-### SLSA Provenance
-
-```yaml
-name: SLSA Provenance
-on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version tag (e.g. v4.0.0)'
-        required: true
-        type: string
-permissions: {}
-jobs:
-  provenance:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/slsa-provenance.yml@main
-    permissions:
-      actions: read
-      contents: write
-      id-token: write
-    with:
-      version: ${{ inputs.version }}
-```
-
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `version` | string | auto-detect | Release version tag (auto-detected from workflow_run) |
-| `artifact-patterns` | string | `*.tar.gz *.zip *.spdx.json *.cdx.json SHA256SUMS.txt checksums.txt` | Glob patterns for release assets |
-
-Generates SLSA Level 3 provenance using `slsa-framework/slsa-github-generator`. Triggered after the Release workflow completes. Uses `compile-generator: true` and `private-repository: true` workarounds for reliability.
+---
 
 ## Two-Entrypoint Architecture
 
@@ -458,6 +723,20 @@ A generic `runTests.sh` template is provided at `assets/Build/Scripts/runTests.s
 3. Customize the extension-point variables at the top of the script (config paths, etc.)
 
 Supported commands: `unit`, `functional`, `fuzz`, `mutation`, `phpstan`, `cgl`, `cgl:fix`, `rector`, `rector:fix`, `ci`, `all`.
+
+## Extension Setup
+
+Add this package to your extension's `require-dev`:
+
+```json
+{
+    "require-dev": {
+        "netresearch/typo3-ci-workflows": "^1.1"
+    }
+}
+```
+
+This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows.
 
 ## Git Worktree + captainhook Workaround
 
@@ -500,20 +779,6 @@ GITDIR=$(git rev-parse --git-dir)
 mkdir -p "${GITDIR}/hooks"
 composer install
 ```
-
-## Extension Setup
-
-Add this package to your extension's `require-dev`:
-
-```json
-{
-    "require-dev": {
-        "netresearch/typo3-ci-workflows": "^1.1"
-    }
-}
-```
-
-This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows.
 
 ## Security
 
