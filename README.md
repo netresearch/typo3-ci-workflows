@@ -75,6 +75,45 @@ jobs:
       pull-requests: write
 ```
 
+## Required Webhooks
+
+In addition to workflow callers, each extension repo needs these GitHub webhooks configured. Go to **Settings → Webhooks → Add webhook** in each repo.
+
+### Packagist (required for all public extensions)
+
+| Setting | Value |
+|---------|-------|
+| Payload URL | `https://packagist.org/api/github` |
+| Content type | `application/json` |
+| SSL verification | Enabled |
+| Events | Just the push event |
+
+Auto-updates the Composer package on Packagist whenever you push.
+
+### TYPO3 Documentation (required for all extensions with `Documentation/`)
+
+| Setting | Value |
+|---------|-------|
+| Payload URL | `https://docs-hook.typo3.org` |
+| Content type | `application/json` |
+| SSL verification | Enabled |
+| Events | Just the push event |
+
+Triggers automatic documentation rendering and publishing on [docs.typo3.org](https://docs.typo3.org). First-time builds require manual approval by the TYPO3 Documentation Team (1-3 business days). See the [typo3-docs skill](https://github.com/netresearch/typo3-docs-skill) for the full deployment guide.
+
+### CLI setup
+
+```bash
+# Add both webhooks to a repo
+gh api repos/netresearch/REPO/hooks --method POST \
+  -f name=web -f "config[url]=https://packagist.org/api/github" \
+  -f "config[content_type]=json" --raw-field "events[]=push" -f active=true
+
+gh api repos/netresearch/REPO/hooks --method POST \
+  -f name=web -f "config[url]=https://docs-hook.typo3.org" \
+  -f "config[content_type]=json" --raw-field "events[]=push" -f active=true
+```
+
 ## Workflows
 
 ### Core CI
