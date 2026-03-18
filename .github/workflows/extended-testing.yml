@@ -13,6 +13,26 @@ on:
         required: false
         type: string
         default: '24'
+      run-unit-tests:
+        description: Run PHP unit tests with coverage
+        required: false
+        type: boolean
+        default: true
+      run-functional-tests:
+        description: Run PHP functional tests with coverage
+        required: false
+        type: boolean
+        default: true
+      run-integration-tests:
+        description: Run PHP integration tests with coverage
+        required: false
+        type: boolean
+        default: false
+      run-e2e-tests:
+        description: Run PHP E2E tests with coverage
+        required: false
+        type: boolean
+        default: false
       run-js-tests:
         description: Run JavaScript tests (Vitest)
         required: false
@@ -28,21 +48,26 @@ on:
         required: false
         type: boolean
         default: true
-      php-test-suites:
-        description: 'JSON array of test suites: [{"suite":"unit","config":"Build/phpunit/UnitTests.xml","testsuite":"Unit Tests","flag":"php-unit"}]'
-        required: false
-        type: string
-        default: '[{"suite":"unit","config":"Build/phpunit/UnitTests.xml","testsuite":"Unit Tests","flag":"php-unit"},{"suite":"functional","config":"Build/phpunit/FunctionalTests.xml","testsuite":"Functional Tests","flag":"php-functional"}]'
       unit-test-config:
-        description: PHPUnit config for unit tests (used by mutation/fuzz)
+        description: PHPUnit config for unit tests
         required: false
         type: string
         default: 'Build/phpunit/UnitTests.xml'
-      unit-test-suite-name:
-        description: PHPUnit testsuite name for unit tests
+      functional-test-config:
+        description: PHPUnit config for functional tests
         required: false
         type: string
-        default: 'Unit Tests'
+        default: 'Build/phpunit/FunctionalTests.xml'
+      integration-test-config:
+        description: PHPUnit config for integration tests
+        required: false
+        type: string
+        default: 'Build/phpunit/IntegrationTests.xml'
+      e2e-test-config:
+        description: PHPUnit config for E2E tests
+        required: false
+        type: string
+        default: 'Build/phpunit/E2ETests.xml'
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -52,15 +77,13 @@ on:
 permissions: {}
 
 jobs:
-  php-coverage:
-    name: PHP Coverage (${{ matrix.suite.suite }})
+  unit-coverage:
+    name: Unit Coverage
+    if: inputs.run-unit-tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: ${{ fromJson(inputs.php-test-suites) }}
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -69,6 +92,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
@@ -83,31 +108,28 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          PHPUNIT_CONFIG: ${{ matrix.suite.config }}
-          PHPUNIT_SUITE: ${{ matrix.suite.testsuite }}
-          COVERAGE_DIR: .Build/coverage
-          SUITE_NAME: ${{ matrix.suite.suite }}
+          PHPUNIT_CONFIG: ${{ inputs.unit-test-config }}
         run: |
-          mkdir -p "$COVERAGE_DIR"
+          mkdir -p .Build/coverage
           .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
-            --testsuite="$PHPUNIT_SUITE" \
-            --coverage-clover="$COVERAGE_DIR/$SUITE_NAME-clover.xml"
+            --testsuite="Unit Tests" \
+            --coverage-clover=.Build/coverage/unit-clover.xml
 
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
-          files: .Build/coverage/${{ matrix.suite.suite }}-clover.xml
-          flags: ${{ matrix.suite.flag }}
-          name: php-${{ matrix.suite.suite }}
+          files: .Build/coverage/unit-clover.xml
+          flags: php-unit
+          name: php-unit
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  mutation-testing:
-    name: Mutation Testing (PHP)
-    if: inputs.run-mutation-tests
+  functional-coverage:
+    name: Functional Coverage
+    if: inputs.run-functional-tests
     runs-on: ubuntu-latest
-    needs: php-coverage
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -118,6 +140,153 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: pcov
+          coverage: pcov
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-progress
+
+      - name: Run tests with coverage
+        env:
+          PHPUNIT_CONFIG: ${{ inputs.functional-test-config }}
+        run: |
+          mkdir -p .Build/coverage
+          .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
+            --testsuite="Functional Tests" \
+            --coverage-clover=.Build/coverage/functional-clover.xml
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        with:
+          files: .Build/coverage/functional-clover.xml
+          flags: php-functional
+          name: php-functional
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  integration-coverage:
+    name: Integration Coverage
+    if: inputs.run-integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: pcov
+          coverage: pcov
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-progress
+
+      - name: Run tests with coverage
+        env:
+          PHPUNIT_CONFIG: ${{ inputs.integration-test-config }}
+        run: |
+          mkdir -p .Build/coverage
+          .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
+            --testsuite="Integration Tests" \
+            --coverage-clover=.Build/coverage/integration-clover.xml
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        with:
+          files: .Build/coverage/integration-clover.xml
+          flags: php-integration
+          name: php-integration
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  e2e-coverage:
+    name: E2E Coverage
+    if: inputs.run-e2e-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
+        with:
+          php-version: ${{ inputs.php-version }}
+          extensions: pcov
+          coverage: pcov
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-progress
+
+      - name: Run tests with coverage
+        env:
+          PHPUNIT_CONFIG: ${{ inputs.e2e-test-config }}
+        run: |
+          mkdir -p .Build/coverage
+          .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
+            --testsuite="E2E Tests" \
+            --coverage-clover=.Build/coverage/e2e-clover.xml
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        with:
+          files: .Build/coverage/e2e-clover.xml
+          flags: php-e2e
+          name: php-e2e
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  mutation-testing:
+    name: Mutation Testing (PHP)
+    if: inputs.run-mutation-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: unit-coverage
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
@@ -133,27 +302,26 @@ jobs:
       - name: Generate coverage for Infection
         env:
           UNIT_CONFIG: ${{ inputs.unit-test-config }}
-          UNIT_SUITE: ${{ inputs.unit-test-suite-name }}
         run: |
           mkdir -p .Build/logs
           .Build/bin/phpunit -c "$UNIT_CONFIG" \
-            --testsuite="$UNIT_SUITE" \
+            --testsuite="Unit Tests" \
             --coverage-xml=.Build/logs/coverage-xml \
             --log-junit=.Build/logs/junit.xml
 
       - name: Run mutation testing
         env:
-          UNIT_SUITE: ${{ inputs.unit-test-suite-name }}
           INFECTION_DASHBOARD_API_KEY: ${{ secrets.INFECTION_DASHBOARD_API_KEY }}
         run: |
           .Build/bin/infection --threads=4 --no-progress --logger-github \
             --skip-initial-tests --coverage=.Build/logs \
-            --test-framework-options="--testsuite='$UNIT_SUITE'"
+            --test-framework-options="--testsuite='Unit Tests'"
 
   js-coverage:
     name: JavaScript Coverage
     if: inputs.run-js-tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -164,6 +332,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
@@ -190,6 +360,7 @@ jobs:
     name: Fuzz Testing (PHP)
     if: inputs.run-fuzz-tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -200,6 +371,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # 2.37.0
@@ -213,8 +386,7 @@ jobs:
       - name: Run fuzz tests
         env:
           UNIT_CONFIG: ${{ inputs.unit-test-config }}
-          UNIT_SUITE: ${{ inputs.unit-test-suite-name }}
         run: |
           .Build/bin/phpunit -c "$UNIT_CONFIG" \
-            --testsuite="$UNIT_SUITE" \
+            --testsuite="Unit Tests" \
             --group=fuzz
