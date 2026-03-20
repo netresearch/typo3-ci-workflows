@@ -44,7 +44,7 @@ jobs:
           persist-credentials: false
 
       - name: Render Documentation
-        uses: typo3-documentation/render-guides@c4a29ab3c1e900192b9c5f76f0071afa0a8dbcb4 # 0.36.0
+        uses: typo3-documentation/render-guides@7b3323156fccf762a2689cd38dfa6910015a7033 # 0.37.0
         with:
           input: ${{ inputs.input }}
           output: ${{ inputs.output }}
