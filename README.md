@@ -828,3 +828,21 @@ composer install
 - No `${{ }}` expression interpolation in `run:` blocks
 - Randomized heredoc delimiters to prevent output injection
 - Timeout-minutes on every job
+
+### Secret Propagation
+
+**Never use `secrets: inherit`** when calling these workflows. Always pass only the specific secrets each workflow needs:
+
+```yaml
+# Good - explicit secrets
+secrets:
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+# Bad - exposes ALL org secrets to every action in the workflow chain
+secrets: inherit
+```
+
+Using `secrets: inherit` is a supply chain risk. If any third-party action in the
+workflow chain is compromised (cf. [netresearch/ofelia#535](https://github.com/netresearch/ofelia/issues/535)),
+the attacker gains access to **all** organization secrets. Passing secrets explicitly
+limits the blast radius to only the secrets that workflow actually needs.
