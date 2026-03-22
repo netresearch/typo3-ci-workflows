@@ -838,11 +838,12 @@ composer install
 secrets:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-# Bad - exposes ALL org secrets to every action in the workflow chain
+# Bad - exposes all secrets accessible to the caller to every action in the chain
 secrets: inherit
 ```
 
 Using `secrets: inherit` is a supply chain risk. If any third-party action in the
 workflow chain is compromised (cf. [netresearch/ofelia#535](https://github.com/netresearch/ofelia/issues/535)),
-the attacker gains access to **all** organization secrets. Passing secrets explicitly
-limits the blast radius to only the secrets that workflow actually needs.
+the attacker gains access to every secret the calling workflow can access. Passing
+secrets explicitly limits the blast radius to only what the workflow actually needs.
+See the [GitHub documentation on passing secrets](https://docs.github.com/en/actions/using-workflows/reusing-workflows#passing-secrets-to-a-reusable-workflow).
