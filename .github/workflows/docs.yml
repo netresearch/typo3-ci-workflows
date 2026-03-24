@@ -26,6 +26,10 @@ on:
 
 permissions: {}
 
+env:
+  # typo3-documentation/render-guides 0.37.0
+  RENDER_GUIDES_IMAGE: ghcr.io/typo3-documentation/render-guides@sha256:431ac2644f0230c5e22174ec9d5f95c2271b038193765c3851bfdc2ad9e8cde5
+
 jobs:
   render:
     name: Render Documentation
@@ -45,24 +49,22 @@ jobs:
 
       - name: Configure Documentation
         env:
-          DOCS_IMAGE: ghcr.io/typo3-documentation/render-guides@sha256:431ac2644f0230c5e22174ec9d5f95c2271b038193765c3851bfdc2ad9e8cde5
           SHELL_VERBOSITY: '3'
           INPUT_PATH: ${{ inputs.input }}
         run: |
           docker run --rm -v "${GITHUB_WORKSPACE}:/project" -w /project \
             -e SHELL_VERBOSITY="${SHELL_VERBOSITY}" \
-            "${DOCS_IMAGE}" configure "${INPUT_PATH}"
+            "${RENDER_GUIDES_IMAGE}" configure "${INPUT_PATH}"
 
       - name: Render Documentation
         env:
-          DOCS_IMAGE: ghcr.io/typo3-documentation/render-guides@sha256:431ac2644f0230c5e22174ec9d5f95c2271b038193765c3851bfdc2ad9e8cde5
           SHELL_VERBOSITY: '3'
           INPUT_PATH: ${{ inputs.input }}
           OUTPUT_PATH: ${{ inputs.output }}
         run: |
           docker run --rm -v "${GITHUB_WORKSPACE}:/project" -w /project \
             -e SHELL_VERBOSITY="${SHELL_VERBOSITY}" \
-            "${DOCS_IMAGE}" render --config="${INPUT_PATH}" --output="${OUTPUT_PATH}" "${INPUT_PATH}"
+            "${RENDER_GUIDES_IMAGE}" render --config="${INPUT_PATH}" --output="${OUTPUT_PATH}" "${INPUT_PATH}"
 
       - name: Check for Warnings
         env:
