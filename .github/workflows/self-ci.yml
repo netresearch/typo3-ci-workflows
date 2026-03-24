@@ -219,6 +219,9 @@ jobs:
               # Skip self-references to this repo's reusable workflows
               [[ "$ref" == netresearch/typo3-ci-workflows/* ]] && continue
 
+              # Skip docker:// references pinned by digest (@sha256:...)
+              [[ "$ref" == docker://*@sha256:* ]] && continue
+
               # Require full SHA pin: @<40+ hex chars>
               if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
                 echo "FAIL: $file: $ref"
