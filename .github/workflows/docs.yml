@@ -43,11 +43,25 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Render Documentation
-        uses: typo3-documentation/render-guides@7b3323156fccf762a2689cd38dfa6910015a7033 # 0.37.0
+      - name: Configure Documentation
+        uses: docker://ghcr.io/typo3-documentation/render-guides@sha256:431ac2644f0230c5e22174ec9d5f95c2271b038193765c3851bfdc2ad9e8cde5 # latest
+        env:
+          SHELL_VERBOSITY: '3'
         with:
-          input: ${{ inputs.input }}
-          output: ${{ inputs.output }}
+          args: >-
+            configure
+            ${{ inputs.input }}
+
+      - name: Render Documentation
+        uses: docker://ghcr.io/typo3-documentation/render-guides@sha256:431ac2644f0230c5e22174ec9d5f95c2271b038193765c3851bfdc2ad9e8cde5 # latest
+        env:
+          SHELL_VERBOSITY: '3'
+        with:
+          args: >-
+            render
+            --config=${{ inputs.input }}
+            --output=${{ inputs.output }}
+            ${{ inputs.input }}
 
       - name: Check for Warnings
         env:
