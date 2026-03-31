@@ -24,7 +24,7 @@ permissions: {}
 
 jobs:
   greeting:
-    uses: netresearch/.github/.github/workflows/greetings.yml@d88eed9ac412c7e6f05bbdb93824a5175a054a65 # main
+    uses: netresearch/.github/.github/workflows/greetings.yml@719efa1363a09402610a5e515f668eff54ec4e23 # main
     with:
       issue-message: ${{ inputs.issue-message }}
       pr-message: ${{ inputs.pr-message }}
