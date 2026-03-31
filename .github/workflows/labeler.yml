@@ -15,7 +15,7 @@ permissions: {}
 
 jobs:
   label:
-    uses: netresearch/.github/.github/workflows/labeler.yml@main
+    uses: netresearch/.github/.github/workflows/labeler.yml@ac02398d6b2413d9677ec97763b4c8173b605695 # main
     with:
       configuration-path: ${{ inputs.configuration-path }}
     permissions:
