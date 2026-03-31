@@ -35,7 +35,7 @@ permissions: {}
 
 jobs:
   lock:
-    uses: netresearch/.github/.github/workflows/lock.yml@719efa1363a09402610a5e515f668eff54ec4e23 # main
+    uses: netresearch/.github/.github/workflows/lock.yml@f87ee244a6e0d78c24e0bd58794563ab8d916943 # main
     with:
       issue-inactive-days: ${{ inputs.issue-inactive-days }}
       pr-inactive-days: ${{ inputs.pr-inactive-days }}
