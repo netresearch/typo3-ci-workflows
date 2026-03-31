@@ -14,7 +14,7 @@ permissions: {}
 
 jobs:
   analyze:
-    uses: netresearch/.github/.github/workflows/codeql.yml@ac02398d6b2413d9677ec97763b4c8173b605695 # main
+    uses: netresearch/.github/.github/workflows/codeql.yml@d88eed9ac412c7e6f05bbdb93824a5175a054a65 # main
     with:
       languages: ${{ inputs.languages }}
     permissions:
