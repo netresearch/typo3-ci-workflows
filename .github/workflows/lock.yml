@@ -1,3 +1,5 @@
+# Moved to netresearch/.github — this wrapper provides backward compatibility.
+# New repos should use: netresearch/.github/.github/workflows/lock.yml@main
 name: Lock Threads
 
 on:
@@ -33,23 +35,14 @@ permissions: {}
 
 jobs:
   lock:
-    name: Lock Old Threads
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    uses: netresearch/.github/.github/workflows/lock.yml@main
+    with:
+      issue-inactive-days: ${{ inputs.issue-inactive-days }}
+      pr-inactive-days: ${{ inputs.pr-inactive-days }}
+      issue-lock-reason: ${{ inputs.issue-lock-reason }}
+      pr-lock-reason: ${{ inputs.pr-lock-reason }}
+      log-output: ${{ inputs.log-output }}
     permissions:
       issues: write
       pull-requests: write
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - uses: dessant/lock-threads@7266a7ce5c1df01b1c6db85bf8cd86c737dadbe7 # v6.0.0
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-inactive-days: ${{ inputs.issue-inactive-days }}
-          issue-lock-reason: ${{ inputs.issue-lock-reason }}
-          pr-inactive-days: ${{ inputs.pr-inactive-days }}
-          pr-lock-reason: ${{ inputs.pr-lock-reason }}
-          log-output: ${{ inputs.log-output }}
+    secrets: inherit
