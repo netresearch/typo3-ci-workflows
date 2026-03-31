@@ -25,7 +25,7 @@ permissions: {}
 
 jobs:
   quality-gate:
-    uses: netresearch/.github/.github/workflows/pr-quality.yml@ac02398d6b2413d9677ec97763b4c8173b605695 # main
+    uses: netresearch/.github/.github/workflows/pr-quality.yml@d88eed9ac412c7e6f05bbdb93824a5175a054a65 # main
     with:
       size-warning-threshold: ${{ inputs.size-warning-threshold }}
       size-alert-threshold: ${{ inputs.size-alert-threshold }}
