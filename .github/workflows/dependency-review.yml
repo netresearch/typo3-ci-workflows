@@ -14,7 +14,7 @@ permissions: {}
 
 jobs:
   dependency-review:
-    uses: netresearch/.github/.github/workflows/dependency-review.yml@main
+    uses: netresearch/.github/.github/workflows/dependency-review.yml@ac02398d6b2413d9677ec97763b4c8173b605695 # main
     with:
       fail-on-severity: ${{ inputs.fail-on-severity }}
     permissions:
