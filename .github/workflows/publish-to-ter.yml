@@ -101,9 +101,21 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Try to build release notes from commit log since previous tag
+          COMMENT=""
+
+          # 1. Prefer GitHub release notes (curated, may cover multiple versions)
           if [[ -n "$TAG" ]]; then
+            RELEASE_BODY=$(gh release view "$TAG" --json body --jq '.body' 2>/dev/null || true)
+            if [[ -n "${RELEASE_BODY// }" ]]; then
+              # Strip HTML tags and limit length for TER (max ~2000 chars)
+              COMMENT=$(echo "$RELEASE_BODY" | sed 's/<[^>]*>//g' | head -c 1900)
+            fi
+          fi
+
+          # 2. Fall back to commit log since previous tag
+          if [[ -z "${COMMENT// }" ]] && [[ -n "$TAG" ]]; then
             PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
             if [[ -n "$PREVIOUS_TAG" ]]; then
               LOG=$(git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" -- 2>/dev/null || true)
@@ -112,10 +124,14 @@ jobs:
             if [[ -z "${LOG// }" ]]; then
               LOG=$(git tag -n10 -l "$TAG" | sed "s/^[0-9v.]*[ ]*//" || true)
             fi
+            if [[ -n "${LOG// }" ]]; then
+              COMMENT="${LOG}"
+            fi
           fi
 
-          if [[ -n "${LOG// }" ]]; then
-            COMMENT="${LOG}
+          # 3. Append link to GitHub releases
+          if [[ -n "${COMMENT// }" ]]; then
+            COMMENT="${COMMENT}
 
           For details see $SERVER_URL/$REPO/releases"
           else
