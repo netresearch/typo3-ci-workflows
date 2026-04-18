@@ -112,9 +112,14 @@ jobs:
         # WARNING+ findings. The SARIF file is still written on failure,
         # and the upload step below runs with if: always() so findings
         # land in the Security tab even when CI is blocked.
+        #
+        # `read -ra` tokenises OPENGREP_CONFIG on whitespace into an array
+        # WITHOUT glob expansion or word-splitting surprises. Passing
+        # "${ARGS[@]}" preserves each arg as a single argv entry, so
+        # callers cannot inject shell syntax via this input.
         run: |
-          # shellcheck disable=SC2086  # $OPENGREP_CONFIG contains multiple flags
-          opengrep scan $OPENGREP_CONFIG --sarif --output opengrep.sarif .
+          read -ra ARGS <<< "$OPENGREP_CONFIG"
+          opengrep scan "${ARGS[@]}" --sarif --output opengrep.sarif .
 
       - name: Upload SARIF to code scanning
         if: always()

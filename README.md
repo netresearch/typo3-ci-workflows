@@ -39,8 +39,6 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    secrets:
-      GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 ```
 
 ```yaml
@@ -357,7 +355,11 @@ jobs:
 
 Composer dependency audit and [Opengrep](https://github.com/opengrep/opengrep) SAST (the fully-OSS LGPL-2.1 fork of Semgrep). Both jobs run by default.
 
-Opengrep **blocks CI on findings at severity WARNING or higher** and also uploads SARIF to the repo's **Security** tab. Override `opengrep-config` to tune the threshold — e.g. drop `--error` for pure report-only, or raise `--severity ERROR` to only block on critical findings.
+Opengrep **blocks CI on findings at severity WARNING or higher** and also uploads SARIF to the repo's **Security** tab. Override `opengrep-config` to tune behavior:
+
+- **Report-only (all findings, CI never fails):** `--config auto` — drop both `--error` and `--severity` so every finding reaches the Security tab without gating merges.
+- **Block only on critical (RCE/SQLi/XXE):** `--config auto --error --severity ERROR`.
+- **Block on everything, including INFO:** `--config auto --error --severity INFO`.
 
 ### Minimal caller
 
@@ -377,7 +379,7 @@ jobs:
 | `php-version` | string | `8.4` | PHP version for Composer audit |
 | `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
 | `skip-opengrep` | boolean | `false` | Skip Opengrep SAST scanning |
-| `opengrep-config` | string | `--config auto --error --severity WARNING` | Opengrep scan arguments (rules + behavior flags). Drop `--error` for report-only, use `--severity ERROR` for looser gating, or set `--severity INFO` to also block on informational findings. |
+| `opengrep-config` | string | `--config auto --error --severity WARNING` | Opengrep scan arguments (rules + behavior flags). See the [overrides above](#security) for report-only, ERROR-only, and INFO-blocking variants. |
 
 ---
 
