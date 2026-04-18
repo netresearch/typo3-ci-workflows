@@ -128,7 +128,7 @@ gh api repos/netresearch/REPO/hooks --method POST \
 
 | Workflow | Purpose | Trigger |
 |----------|---------|---------|
-| [`security.yml`](#security) | Gitleaks secret scanning + Composer audit | push, PR |
+| [`security.yml`](#security) | Composer audit + Opengrep SAST | push, PR |
 | [`codeql.yml`](#codeql) | GitHub CodeQL security scanning | push, schedule |
 | [`dependency-review.yml`](#dependency-review) | Dependency vulnerability review | PR only |
 | [`license-check.yml`](#license-check) | PHP dependency license audit | push, PR |
@@ -355,7 +355,7 @@ jobs:
 
 ## Security
 
-Gitleaks secret scanning and Composer dependency audit.
+Composer dependency audit and [Opengrep](https://github.com/opengrep/opengrep) SAST (the fully-OSS LGPL-2.1 fork of Semgrep). Both jobs run by default; Opengrep findings surface in the repo's **Security** tab via SARIF upload and do **not** fail CI — flip `--error` in `opengrep-config` to make them blocking once baselines are triaged.
 
 ### Minimal caller
 
@@ -366,8 +366,6 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    secrets:
-      GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 ```
 
 ### Inputs
@@ -375,14 +373,9 @@ jobs:
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `php-version` | string | `8.4` | PHP version for Composer audit |
-| `skip-gitleaks` | boolean | `false` | Skip Gitleaks secret scanning |
 | `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
-
-### Secrets
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `GITLEAKS_LICENSE` | No | License key for Gitleaks |
+| `skip-opengrep` | boolean | `false` | Skip Opengrep SAST scanning |
+| `opengrep-config` | string | `--config auto` | Opengrep rules argument (one or more `--config` tokens, space-separated, e.g. `--config p/php --config p/security-audit`) |
 
 ---
 
