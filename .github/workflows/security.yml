@@ -19,10 +19,10 @@ on:
         type: boolean
         default: false
       opengrep-config:
-        description: 'Opengrep rules argument (one or more --config tokens, space-separated)'
+        description: 'Opengrep scan arguments (rules + behavior flags). Default blocks CI on WARNING+ findings; override to e.g. "--config auto" for report-only or "--config auto --error --severity ERROR" for looser gating.'
         required: false
         type: string
-        default: '--config auto'
+        default: '--config auto --error --severity WARNING'
 
 permissions: {}
 
@@ -108,12 +108,12 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run Opengrep scan
-        # Report-only: findings go to the Security tab via SARIF upload.
-        # We intentionally do not pass --error so existing repos aren't
-        # suddenly blocked — teams can triage baselines, then tighten via
-        # a follow-up PR that flips --error on.
+        # Default config (--error --severity WARNING) fails this step on
+        # WARNING+ findings. The SARIF file is still written on failure,
+        # and the upload step below runs with if: always() so findings
+        # land in the Security tab even when CI is blocked.
         run: |
-          # shellcheck disable=SC2086  # $OPENGREP_CONFIG contains multiple --config flags
+          # shellcheck disable=SC2086  # $OPENGREP_CONFIG contains multiple flags
           opengrep scan $OPENGREP_CONFIG --sarif --output opengrep.sarif .
 
       - name: Upload SARIF to code scanning
