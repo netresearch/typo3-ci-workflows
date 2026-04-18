@@ -13,6 +13,16 @@ on:
         required: false
         type: boolean
         default: false
+      skip-opengrep:
+        description: 'Skip Opengrep SAST scanning'
+        required: false
+        type: boolean
+        default: false
+      opengrep-config:
+        description: 'Opengrep rules argument (one or more --config tokens, space-separated)'
+        required: false
+        type: string
+        default: '--config auto'
 
 permissions: {}
 
@@ -62,3 +72,53 @@ jobs:
 
       - name: Run Composer Audit
         run: composer audit --format=plain --abandoned=report
+
+  opengrep:
+    name: SAST (Opengrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ !inputs.skip-opengrep }}
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      # Pinned Opengrep release — bump via renovate/manual PR. Binary is
+      # verified by SHA256 below; update both values together.
+      OPENGREP_VERSION: v1.19.0
+      OPENGREP_SHA256: 1d69a41beb88e8e7917f26cc6a16c1edf298f31402807e6d1afbb5d8684c3590
+      OPENGREP_CONFIG: ${{ inputs.opengrep-config }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@6c3c2f2c1c457b00c10c4848d6f5491db3b629df # v2.18.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Opengrep
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/opengrep" \
+            "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/opengrep_manylinux_x86"
+          echo "${OPENGREP_SHA256}  $HOME/.local/bin/opengrep" | sha256sum -c -
+          chmod +x "$HOME/.local/bin/opengrep"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run Opengrep scan
+        # Report-only: findings go to the Security tab via SARIF upload.
+        # We intentionally do not pass --error so existing repos aren't
+        # suddenly blocked — teams can triage baselines, then tighten via
+        # a follow-up PR that flips --error on.
+        run: |
+          # shellcheck disable=SC2086  # $OPENGREP_CONFIG contains multiple --config flags
+          opengrep scan $OPENGREP_CONFIG --sarif --output opengrep.sarif .
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1
+        with:
+          sarif_file: opengrep.sarif
+          category: opengrep
