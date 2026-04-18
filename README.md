@@ -355,7 +355,9 @@ jobs:
 
 ## Security
 
-Composer dependency audit and [Opengrep](https://github.com/opengrep/opengrep) SAST (the fully-OSS LGPL-2.1 fork of Semgrep). Both jobs run by default; Opengrep findings surface in the repo's **Security** tab via SARIF upload and do **not** fail CI — flip `--error` in `opengrep-config` to make them blocking once baselines are triaged.
+Composer dependency audit and [Opengrep](https://github.com/opengrep/opengrep) SAST (the fully-OSS LGPL-2.1 fork of Semgrep). Both jobs run by default.
+
+Opengrep **blocks CI on findings at severity WARNING or higher** and also uploads SARIF to the repo's **Security** tab. Override `opengrep-config` to tune the threshold — e.g. drop `--error` for pure report-only, or raise `--severity ERROR` to only block on critical findings.
 
 ### Minimal caller
 
@@ -375,7 +377,7 @@ jobs:
 | `php-version` | string | `8.4` | PHP version for Composer audit |
 | `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
 | `skip-opengrep` | boolean | `false` | Skip Opengrep SAST scanning |
-| `opengrep-config` | string | `--config auto` | Opengrep rules argument (one or more `--config` tokens, space-separated, e.g. `--config p/php --config p/security-audit`) |
+| `opengrep-config` | string | `--config auto --error --severity WARNING` | Opengrep scan arguments (rules + behavior flags). Drop `--error` for report-only, use `--severity ERROR` for looser gating, or set `--severity INFO` to also block on informational findings. |
 
 ---
 
