@@ -40,6 +40,7 @@ jobs:
         id: version
         env:
           GIT_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Extract version from ext_emconf.php (single source of truth)
           if [[ ! -f ext_emconf.php ]]; then
@@ -67,8 +68,28 @@ jobs:
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             echo "Version $VERSION (from tag $TAG)"
           else
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "Version $VERSION (manual trigger)"
+            # Manual workflow_dispatch from a branch: GitHub rejects
+            # `--ref <tag>` for workflows whose file doesn't exist at that
+            # tag (common for older tags pre-dating a workflow addition), so
+            # callers dispatch against a branch instead. Derive the matching
+            # release tag from the ext_emconf.php version so the
+            # "Get release comment" step can still fetch the GitHub release
+            # body as the TER upload comment. Try 'v${VERSION}' first
+            # (signed-tag convention), fall back to bare '${VERSION}'
+            # (historic).
+            TAG=""
+            if gh release view "v${VERSION}" --json tagName --jq .tagName >/dev/null 2>&1; then
+              TAG="v${VERSION}"
+            elif gh release view "${VERSION}" --json tagName --jq .tagName >/dev/null 2>&1; then
+              TAG="${VERSION}"
+            fi
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            if [[ -n "$TAG" ]]; then
+              echo "Version $VERSION (manual trigger, derived release tag: $TAG)"
+            else
+              echo "::warning::No GitHub release found for version $VERSION (tried 'v$VERSION' and '$VERSION') -- TER upload comment will be the default short link"
+              echo "Version $VERSION (manual trigger, no matching release tag)"
+            fi
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
