@@ -118,7 +118,17 @@ jobs:
         # "${ARGS[@]}" preserves each arg as a single argv entry, so
         # callers cannot inject shell syntax via this input.
         run: |
-          read -ra ARGS <<< "$OPENGREP_CONFIG"
+          # `read -r -a` tokenises OPENGREP_CONFIG on whitespace into an
+          # array WITHOUT backslash interpretation or glob expansion, and
+          # passing "${ARGS[@]}" preserves each arg as a single argv entry
+          # so callers cannot inject shell syntax via this input.
+          #
+          # `|| :` absorbs the non-zero exit status `read` returns when
+          # OPENGREP_CONFIG is an empty string (no delimiter consumed), so
+          # a caller passing `opengrep-config: ''` doesn't abort the step
+          # under GitHub Actions' default `bash -e` shell.
+          ARGS=()
+          read -r -a ARGS <<< "$OPENGREP_CONFIG" || :
           opengrep scan "${ARGS[@]}" --sarif --output opengrep.sarif .
 
       - name: Upload SARIF to code scanning

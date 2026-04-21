@@ -135,8 +135,25 @@ jobs:
           if [[ -n "$TAG" ]]; then
             RELEASE_BODY=$(gh release view "$TAG" --json body --jq '.body' 2>/dev/null || true)
             if [[ -n "${RELEASE_BODY// }" ]]; then
-              # Strip HTML tags and limit length for TER (max ~2000 chars)
-              COMMENT=$(echo "$RELEASE_BODY" | sed 's/<[^>]*>//g' | head -c 1900)
+              # Strip HTML tags and limit length for TER (max ~2000 chars).
+              # Truncation is CHARACTER-based, not byte-based: `head -c`
+              # splits multi-byte UTF-8 sequences (emoji, em-dashes,
+              # accented characters) mid-codepoint and TER rejects the
+              # resulting invalid UTF-8. Use python3 with explicit UTF-8
+              # decoding: guaranteed-stable slicing on codepoints,
+              # doesn't depend on whether the runner's `awk` is gawk or
+              # mawk (ubuntu-latest historically ships both), doesn't
+              # fold blank lines (no RS="" paragraph mode), and preserves
+              # leading/trailing whitespace verbatim.
+              #
+              # `printf '%s'` (not `echo`) so that release bodies starting
+              # with `-n` / `-e` / `--` are passed through literally
+              # rather than interpreted as echo's own options.
+              COMMENT=$(
+                printf '%s' "$RELEASE_BODY" \
+                  | sed 's/<[^>]*>//g' \
+                  | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
+              )
             fi
           fi
 
@@ -151,7 +168,14 @@ jobs:
               LOG=$(git tag -n10 -l "$TAG" | sed "s/^[0-9v.]*[ ]*//" || true)
             fi
             if [[ -n "${LOG// }" ]]; then
-              COMMENT="${LOG}"
+              # Same character-level truncation as the release-body branch
+              # above — git log / tag annotations can also exceed TER's
+              # ~2000 char limit and the final comment must fit regardless
+              # of source.
+              COMMENT=$(
+                printf '%s' "$LOG" \
+                  | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
+              )
             fi
           fi
 
