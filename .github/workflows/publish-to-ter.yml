@@ -68,12 +68,17 @@ jobs:
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             echo "Version $VERSION (from tag $TAG)"
           else
-            # Manual workflow_dispatch from a branch: GitHub rejects
-            # `--ref <tag>` for workflows whose file doesn't exist at that
-            # tag (common for older tags pre-dating a workflow addition), so
-            # callers dispatch against a branch instead. Derive the matching
-            # release tag from the ext_emconf.php version so the
-            # "Get release comment" step can still fetch the GitHub release
+            # Non-tag ref: runs for any caller that didn't dispatch against
+            # a git tag. The most common case is a workflow_dispatch-only
+            # caller (the t3x-nr-llm / t3x-nr-mcp-agent pattern) where
+            # GitHub rejects `--ref <tag>` when the caller file doesn't
+            # exist at that tag, forcing callers onto a branch ref instead.
+            # But this branch also runs if a caller chooses to invoke the
+            # reusable workflow on a branch push, schedule, or
+            # pull_request event. In all cases the release tag cannot be
+            # derived from $GIT_REF, so we resolve it from the
+            # ext_emconf.php version instead -- so the "Get release
+            # comment" step downstream can still fetch the GitHub release
             # body as the TER upload comment. Try 'v${VERSION}' first
             # (signed-tag convention), fall back to bare '${VERSION}'
             # (historic).
@@ -85,10 +90,10 @@ jobs:
             fi
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             if [[ -n "$TAG" ]]; then
-              echo "Version $VERSION (manual trigger, derived release tag: $TAG)"
+              echo "Version $VERSION (non-tag ref, derived release tag: $TAG)"
             else
               echo "::warning::No GitHub release found for version $VERSION (tried 'v$VERSION' and '$VERSION') -- TER upload comment will be the default short link"
-              echo "Version $VERSION (manual trigger, no matching release tag)"
+              echo "Version $VERSION (non-tag ref, no matching release tag)"
             fi
           fi
 
