@@ -119,6 +119,38 @@ jobs:
             exit 1
           fi
 
+          # Pre-seed a minimal settings.php so the DI container can resolve
+          # Messenger\DoctrineTransportFactory during CLI bootstrap. TYPO3 v14.2
+          # resolves this factory before `typo3 setup` writes the DB config,
+          # and the factory dereferences
+          # $GLOBALS['TYPO3_CONF_VARS']['DB']['Connections']['Default'] — if
+          # that array key is missing, Doctrine DBAL throws
+          # `DriverManager::getConnection(): Argument #1 must be of type array,
+          # null given`. `typo3 setup --force` then overwrites the file with
+          # the real installation config.
+          mkdir -p config/system
+          cat > config/system/settings.php << 'PHPEOF'
+          <?php
+          return [
+              'DB' => [
+                  'Connections' => [
+                      'Default' => [
+                          'driver' => 'mysqli',
+                          'host' => '127.0.0.1',
+                          'port' => 3306,
+                          'dbname' => 'typo3',
+                          'user' => 'root',
+                          'password' => 'root',
+                          'charset' => 'utf8mb4',
+                      ],
+                  ],
+              ],
+              'SYS' => [
+                  'encryptionKey' => 'ci-e2e-placeholder-overwritten-by-typo3-setup--force',
+              ],
+          ];
+          PHPEOF
+
           # Setup TYPO3
           .Build/bin/typo3 setup \
             --driver=mysqli \
