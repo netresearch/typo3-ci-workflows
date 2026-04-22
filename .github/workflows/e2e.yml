@@ -101,6 +101,26 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-progress
 
+      - name: Ensure typo3/cms-install is available
+        # `bin/typo3 setup` (used by the next step) is provided by
+        # typo3/cms-install. Many extensions don't declare it as a dev
+        # dependency, so install it on-demand if missing. Match the major
+        # version to whatever typo3/cms-core resolved to.
+        run: |
+          if [[ -d .Build/vendor/typo3/cms-install ]]; then
+            echo "typo3/cms-install already present."
+            exit 0
+          fi
+          CORE_VERSION=$(composer show typo3/cms-core 2>/dev/null | awk '/^versions/ {print $NF}')
+          if [[ -z "$CORE_VERSION" ]]; then
+            echo "::warning::Could not detect typo3/cms-core version, falling back to ^14.0"
+            CORE_VERSION='^14.0'
+          fi
+          # Extract the major.minor constraint (e.g. v14.2.0 -> ^14.0)
+          MAJOR=$(echo "$CORE_VERSION" | sed -E 's/^v?([0-9]+)\..*/\1/')
+          composer require --dev --no-progress --no-interaction \
+            "typo3/cms-install:^${MAJOR}.0"
+
       - name: Setup TYPO3
         run: |
           # Wait for database
