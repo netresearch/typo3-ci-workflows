@@ -2,5 +2,19 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track container image pins embedded in workflow env variables (e.g. RENDER_GUIDES_IMAGE). The built-in github-actions manager only parses `uses:` refs; digests inside `env:` would otherwise rot unnoticed. The regex handles optional registry ports (registry.example.com:5000/...) and optional image tags before the digest (image:tag@sha256:...).",
+      "fileMatch": [
+        "^\\.github/workflows/[^/]+\\.ya?ml$"
+      ],
+      "matchStrings": [
+        "#\\s*(?<depName>\\S+)\\s+(?<currentValue>\\S+)\\s*\\n\\s*\\S+:\\s*(?<packageName>[a-z0-9.-]+(?::\\d+)?/[^@:\\s]+)(?::[^@\\s]+)?@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
   ]
 }
