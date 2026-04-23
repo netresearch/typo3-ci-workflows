@@ -117,8 +117,10 @@ jobs:
 
       - name: Generate release notes
         id: notes
-        # Phase 1 keeps the git-log approach used by release.yml. Phase 3 swaps
-        # this for git-cliff + contributor/reporter attribution.
+        # Phase 1: one line per merge commit on main (PR title with #N). Avoids
+        # the duplicate "feature-branch commit + merge commit" noise the naive
+        # `git log` produced. Phase 3 swaps this for git-cliff + contributor
+        # and issue-reporter attribution.
         run: |
           DELIMITER="ghadelim_$(openssl rand -hex 8)"
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
@@ -127,7 +129,15 @@ jobs:
             if [[ -z "$PREVIOUS_TAG" ]]; then
               echo "Initial release"
             else
-              git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD"
+              # --first-parent --merges gives one line per merged PR (the
+              # merge commit's subject carries the PR title and "#N"
+              # reference). Falls back to --no-merges if no merge commits
+              # exist in the range (direct pushes / rebase-merge strategy).
+              LOG=$(git log --first-parent --merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
+              if [[ -z "${LOG// }" ]]; then
+                LOG=$(git log --no-merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
+              fi
+              echo "$LOG"
               echo ""
             fi
             echo "$DELIMITER"
@@ -300,7 +310,10 @@ jobs:
               echo "- Packagist: skipped"
             fi
             if [[ "$DOCS_RESULT" == "success" ]]; then
-              echo "- Documentation: [docs.typo3.org/p/${VENDOR}/${KEY}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${VENDOR}/${KEY}/${DOCS_BRANCH}/en-us/) — render verified"
+              # docs.typo3.org path uses the composer package name verbatim
+              # (`{vendor}/{repo-name}` with dashes), NOT the TYPO3 extension
+              # key (which uses underscores).
+              echo "- Documentation: [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/) — render verified"
             elif [[ "$DOCS_RESULT" == "skipped" ]]; then
               echo "- Documentation: skipped"
             fi
