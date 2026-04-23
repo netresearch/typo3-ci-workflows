@@ -1,11 +1,10 @@
-name: Publish to Packagist
+name: Verify Packagist publication
 
-# Triggers a Packagist update for the repo and polls the API until the new
-# version is visible, so the caller can wait on it in a `needs:` chain.
-#
-# Idempotent: Packagist's update endpoint tolerates repeated calls for the
-# same version. If the version is already visible when we start, we return
-# success without hitting the update endpoint.
+# Doesn't trigger the update — Packagist's GitHub integration auto-subscribes
+# to push/tag events for every Netresearch repo and rescans on its own. This
+# workflow polls the Packagist P2 API until the new version is visible, so
+# the caller can wait on it in a `needs:` chain before considering the
+# release fully published.
 
 on:
   workflow_call:
@@ -29,19 +28,12 @@ on:
         required: false
         type: number
         default: 15
-    secrets:
-      PACKAGIST_USERNAME:
-        description: Packagist username that owns the package
-        required: true
-      PACKAGIST_TOKEN:
-        description: Packagist API token for the user
-        required: true
 
 permissions: {}
 
 jobs:
-  publish:
-    name: Publish to Packagist
+  verify:
+    name: Verify Packagist
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -79,54 +71,7 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Check if version is already on Packagist
-        id: precheck
-        env:
-          PACKAGE: ${{ inputs.package-name }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          # Packagist's P2 metadata is what Composer consumes. Cache propagation
-          # can lag the webhook by a minute or two; we accept that lag and only
-          # use this precheck to short-circuit the trigger on re-runs.
-          URL="https://repo.packagist.org/p2/${PACKAGE}.json"
-          BODY=$(curl -sS --max-time 15 "$URL" || true)
-          if [[ -n "$BODY" ]] && echo "$BODY" | jq -e --arg p "$PACKAGE" --arg v "$VERSION" \
-              '.packages[$p] | map(.version == $v or .version == ("v" + $v)) | any' \
-              >/dev/null 2>&1; then
-            echo "already-published=true" >> "$GITHUB_OUTPUT"
-            echo "Version $VERSION already visible on Packagist"
-          else
-            echo "already-published=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Trigger Packagist update
-        if: steps.precheck.outputs.already-published != 'true'
-        env:
-          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
-          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
-          SERVER_URL: ${{ github.server_url }}
-          REPO: ${{ github.repository }}
-        run: |
-          # Packagist accepts the GitHub repo URL verbatim; it then re-scans
-          # its own mirror and updates the P2 metadata. Webhook delivery is
-          # best-effort, so calling the update endpoint explicitly guarantees
-          # the scan happens regardless of the GitHub → Packagist integration
-          # state.
-          RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST \
-            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}" \
-            -H 'Content-Type: application/json' \
-            -d "{\"repository\":{\"url\":\"${SERVER_URL}/${REPO}\"}}" \
-            --max-time 30)
-          BODY=$(echo "$RESPONSE" | head -n -1)
-          CODE=$(echo "$RESPONSE" | tail -n 1)
-          if [[ "$CODE" != "200" && "$CODE" != "202" ]]; then
-            echo "::error::Packagist update returned HTTP $CODE: $BODY"
-            exit 1
-          fi
-          echo "Packagist update triggered (HTTP $CODE)"
-
       - name: Poll Packagist until version visible
-        if: steps.precheck.outputs.already-published != 'true'
         env:
           PACKAGE: ${{ inputs.package-name }}
           VERSION: ${{ steps.version.outputs.version }}

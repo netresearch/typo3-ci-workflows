@@ -38,10 +38,6 @@ on:
     secrets:
       TYPO3_TER_ACCESS_TOKEN:
         required: false
-      PACKAGIST_USERNAME:
-        required: false
-      PACKAGIST_TOKEN:
-        required: false
 
 permissions: {}
 
@@ -85,20 +81,19 @@ jobs:
     name: Packagist
     if: inputs.target == 'packagist' || inputs.target == 'all'
     needs: resolve-version
+    # Verify-only: Packagist's GitHub integration auto-updates on push/tag.
+    # This job just polls until the version is visible in the P2 API.
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
     with:
       package-name: ${{ inputs.package-name }}
       version: ${{ needs.resolve-version.outputs.version }}
-    secrets: inherit
 
   republish-docs:
     name: docs.typo3.org
-    # Run after TER — docs.typo3.org only starts rendering once TER's Intercept
-    # webhook fires, so polling the docs URL before TER is live would always
-    # time out. The `always()` is needed so docs still verifies when the
-    # caller re-runs only docs or the all-target chain includes TER as well.
-    if: ${{ always() && (inputs.target == 'docs' || inputs.target == 'all') }}
-    needs: [resolve-version, republish-ter]
+    if: inputs.target == 'docs' || inputs.target == 'all'
+    needs: resolve-version
+    # Verify-only: docs.typo3.org renders via Intercept's GitHub push webhook,
+    # independent of TER. Runs in parallel with the TER and Packagist jobs.
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
     with:
       extension-key: ${{ inputs.extension-key }}

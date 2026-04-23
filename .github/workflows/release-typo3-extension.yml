@@ -72,10 +72,6 @@ on:
     secrets:
       TYPO3_TER_ACCESS_TOKEN:
         required: false
-      PACKAGIST_USERNAME:
-        required: false
-      PACKAGIST_TOKEN:
-        required: false
 
 permissions: {}
 
@@ -208,22 +204,25 @@ jobs:
       ref: ${{ github.ref }}
     secrets: inherit
 
-  publish-to-packagist:
-    name: Publish to Packagist
+  verify-packagist:
+    name: Verify Packagist
     needs: build-and-sign
     if: ${{ !inputs.skip-packagist }}
+    # Packagist's GitHub integration auto-subscribes to push/tag events and
+    # rescans without our workflow having to do anything. This job only
+    # polls the Packagist API until the new version is visible.
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
     with:
       package-name: ${{ inputs.package-name }}
       version: ${{ needs.build-and-sign.outputs.version }}
-    secrets: inherit
 
-  publish-to-docs:
+  verify-docs:
     name: Verify docs.typo3.org
-    needs: [build-and-sign, publish-to-ter]
-    # Docs render fires via TER → Intercept — poll only after TER confirmed.
-    # Skipping TER also skips docs; no independent trigger exists.
-    if: ${{ !inputs.skip-docs && !inputs.skip-ter && needs.publish-to-ter.result == 'success' }}
+    needs: build-and-sign
+    # docs.typo3.org renders via the Intercept webhook subscribed to GitHub
+    # push events — independent of TER. Runs in parallel with the TER and
+    # Packagist jobs, no `needs:` coupling.
+    if: ${{ !inputs.skip-docs }}
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
     with:
       extension-key: ${{ inputs.extension-key }}
@@ -232,7 +231,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [build-and-sign, publish-to-ter, publish-to-packagist, publish-to-docs]
+    needs: [build-and-sign, publish-to-ter, verify-packagist, verify-docs]
     # Run only if every non-skipped publish reached success. This enforces
     # "release-last": the GitHub release is a receipt of a successful run, and
     # never a canvas that gets edited afterwards. If any publish failed, no
@@ -242,8 +241,8 @@ jobs:
         always()
         && needs.build-and-sign.result == 'success'
         && (needs.publish-to-ter.result == 'success' || needs.publish-to-ter.result == 'skipped')
-        && (needs.publish-to-packagist.result == 'success' || needs.publish-to-packagist.result == 'skipped')
-        && (needs.publish-to-docs.result == 'success' || needs.publish-to-docs.result == 'skipped')
+        && (needs.verify-packagist.result == 'success' || needs.verify-packagist.result == 'skipped')
+        && (needs.verify-docs.result == 'success' || needs.verify-docs.result == 'skipped')
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -269,8 +268,8 @@ jobs:
           VENDOR: ${{ inputs.vendor }}
           VERSION: ${{ needs.build-and-sign.outputs.version }}
           TER_RESULT: ${{ needs.publish-to-ter.result }}
-          PKGST_RESULT: ${{ needs.publish-to-packagist.result }}
-          DOCS_RESULT: ${{ needs.publish-to-docs.result }}
+          PKGST_RESULT: ${{ needs.verify-packagist.result }}
+          DOCS_RESULT: ${{ needs.verify-docs.result }}
         run: |
           DELIMITER="ghadelim_$(openssl rand -hex 8)"
           {
