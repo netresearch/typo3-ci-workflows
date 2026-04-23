@@ -237,9 +237,7 @@ jobs:
       contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
     with:
-      extension-key: ${{ inputs.extension-key }}
-      vendor: ${{ inputs.vendor }}
-      version: ${{ needs.build-and-sign.outputs.version }}
+      package-name: ${{ inputs.package-name }}
 
   create-release:
     name: Create GitHub Release
@@ -284,6 +282,9 @@ jobs:
           DOCS_RESULT: ${{ needs.verify-docs.result }}
         run: |
           DELIMITER="ghadelim_$(openssl rand -hex 8)"
+          # Intercept maps the tag to a major.minor docs branch (v0.8.1 → 0.8),
+          # so the published URL uses major.minor, not the full semver.
+          DOCS_BRANCH=$(echo "$VERSION" | awk -F. '{printf "%s.%s", $1, $2}')
           {
             echo "block<<$DELIMITER"
             echo "## Publication status"
@@ -299,7 +300,7 @@ jobs:
               echo "- Packagist: skipped"
             fi
             if [[ "$DOCS_RESULT" == "success" ]]; then
-              echo "- Documentation: [docs.typo3.org/p/${VENDOR}/${KEY}/${VERSION}/en-us/](https://docs.typo3.org/p/${VENDOR}/${KEY}/${VERSION}/en-us/) — verified"
+              echo "- Documentation: [docs.typo3.org/p/${VENDOR}/${KEY}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${VENDOR}/${KEY}/${DOCS_BRANCH}/en-us/) — render verified"
             elif [[ "$DOCS_RESULT" == "skipped" ]]; then
               echo "- Documentation: skipped"
             fi

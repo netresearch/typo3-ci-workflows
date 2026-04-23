@@ -102,6 +102,4 @@ jobs:
       contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
     with:
-      extension-key: ${{ inputs.extension-key }}
-      vendor: ${{ inputs.vendor }}
-      version: ${{ needs.resolve-version.outputs.version }}
+      package-name: ${{ inputs.package-name }}
