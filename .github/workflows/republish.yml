@@ -72,6 +72,8 @@ jobs:
     name: TER
     if: inputs.target == 'ter' || inputs.target == 'all'
     needs: resolve-version
+    permissions:
+      contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
       ref: ${{ inputs.tag }}
@@ -83,6 +85,8 @@ jobs:
     needs: resolve-version
     # Verify-only: Packagist's GitHub integration auto-updates on push/tag.
     # This job just polls until the version is visible in the P2 API.
+    permissions:
+      contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
     with:
       package-name: ${{ inputs.package-name }}
@@ -94,6 +98,8 @@ jobs:
     needs: resolve-version
     # Verify-only: docs.typo3.org renders via Intercept's GitHub push webhook,
     # independent of TER. Runs in parallel with the TER and Packagist jobs.
+    permissions:
+      contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
     with:
       extension-key: ${{ inputs.extension-key }}
