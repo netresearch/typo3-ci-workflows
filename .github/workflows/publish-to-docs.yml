@@ -1,43 +1,59 @@
-name: Verify docs.typo3.org publication
+name: Verify docs.typo3.org rendering
 
 # Doesn't trigger the render — docs.typo3.org's Intercept webhook auto-triggers
-# when TER receives a new version. This workflow polls the expected rendered
-# URL until it returns 200 (or times out) so the caller can wait on it in a
-# `needs:` chain before considering the release fully published.
+# when GitHub fires a push/tag event on a repo registered in TER. This
+# workflow polls the public render workflow in `TYPO3-Documentation/t3docs-ci-deploy`
+# for the job whose name matches the caller's package, then reports its
+# success/failure.
+#
+# Polling the render workflow (not the rendered URL) is authoritative:
+# - a 200 on the rendered URL only confirms success, never distinguishes
+#   "still rendering" from "render failed and will never succeed";
+# - Intercept maps tags to major.minor docs branches (v0.8.1 → 0.8), so the
+#   rendered URL pattern depends on git-ref vs. major.minor conventions the
+#   caller shouldn't need to reconstruct;
+# - the render workflow's job conclusion is deterministic and exposes an
+#   upstream run URL the release body can cite as evidence.
 
 on:
   workflow_call:
     inputs:
-      extension-key:
-        description: Extension key as registered on docs.typo3.org
+      package-name:
+        description: |
+          Composer-style vendor/name used by t3docs-ci-deploy to name the
+          render job (e.g. "netresearch/nr-passkeys-be"). Must match the
+          job literally — the render job is named "Render {package-name}".
         required: true
         type: string
-      vendor:
-        description: Vendor segment of the docs path (e.g. "netresearch")
-        required: false
-        type: string
-        default: netresearch
-      version:
-        description: Version to verify (no v-prefix, e.g. "0.8.0"). When empty, resolved from ext_emconf.php on the caller's ref.
+      since:
+        description: |
+          ISO-8601 timestamp; only render runs created on or after this moment
+          are considered. Defaults to this workflow's own start-time, which
+          works when the orchestrator calls us right after the tag push.
         required: false
         type: string
         default: ''
       timeout-minutes:
-        description: Max minutes to wait for docs.typo3.org to serve the version
+        description: Max minutes to wait for the render run to complete
         required: false
         type: number
         default: 45
       poll-interval-seconds:
-        description: Seconds between polls
+        description: Seconds between polls of the render workflow
         required: false
         type: number
-        default: 60
+        default: 30
+      intercept-grace-seconds:
+        description: Seconds to wait for Intercept to create the render run before timing out the initial search
+        required: false
+        type: number
+        default: 180
 
 permissions: {}
 
 jobs:
   verify:
-    name: Verify docs.typo3.org
+    name: Verify docs render
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -48,63 +64,94 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout (for ext_emconf.php version fallback only)
-        if: inputs.version == ''
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Resolve version
-        id: version
+      - name: Poll t3docs-ci-deploy for the render run
         env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [[ -n "$INPUT_VERSION" ]]; then
-            VERSION="$INPUT_VERSION"
-          else
-            if [[ ! -f ext_emconf.php ]]; then
-              echo "::error::No version input provided and ext_emconf.php not found on caller's ref"
-              exit 1
-            fi
-            VERSION=$(sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" ext_emconf.php)
-            if [[ -z "$VERSION" ]]; then
-              echo "::error file=ext_emconf.php::Could not extract version"
-              exit 1
-            fi
-          fi
-          # Strip optional v-prefix for safety
-          VERSION="${VERSION#v}"
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid version format: $VERSION"
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Poll docs.typo3.org
-        env:
-          VENDOR: ${{ inputs.vendor }}
-          KEY: ${{ inputs.extension-key }}
-          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ inputs.package-name }}
+          SINCE_INPUT: ${{ inputs.since }}
           TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
           POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+          GRACE_SECONDS: ${{ inputs.intercept-grace-seconds }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          URL="https://docs.typo3.org/p/${VENDOR}/${KEY}/${VERSION}/en-us/"
-          echo "Waiting for $URL (timeout: ${TIMEOUT_MINUTES}m, poll every ${POLL_INTERVAL}s)"
+          set -euo pipefail
 
+          JOB_NAME="Render ${PACKAGE}"
+          SINCE="${SINCE_INPUT:-$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ)}"
           DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
-          ATTEMPT=0
-          while true; do
-            ATTEMPT=$((ATTEMPT + 1))
-            STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$URL" || echo "000")
-            if [[ "$STATUS" == "200" ]]; then
-              echo "docs.typo3.org serves $VERSION (attempt $ATTEMPT)"
-              echo "docs-url=$URL" >> "$GITHUB_OUTPUT"
-              exit 0
+          GRACE_DEADLINE=$(( $(date +%s) + GRACE_SECONDS ))
+          RUN_ID=""
+          echo "Looking for render job named: $JOB_NAME"
+          echo "Only considering runs created on or after: $SINCE"
+
+          # Phase 1: wait for Intercept to create a render run for our package.
+          while [[ -z "$RUN_ID" ]]; do
+            # Fetch the most recent render-workflow runs (default page is 30);
+            # that window is large enough to contain our run across all
+            # typical Intercept dispatch delays without paginating.
+            RUNS_JSON=$(gh api \
+              "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/workflows/main-rendering.yml/runs?per_page=30" \
+              --jq '.workflow_runs' 2>/dev/null || echo '[]')
+
+            # For each run, ask the jobs endpoint whether our render job is
+            # present. We cannot filter runs by inner-job-name server-side;
+            # the request volume is still small (≤30) and short-circuits the
+            # moment we find the run.
+            while read -r CANDIDATE; do
+              ID=$(echo "$CANDIDATE" | jq -r '.id')
+              CREATED=$(echo "$CANDIDATE" | jq -r '.created_at')
+              if [[ "$CREATED" < "$SINCE" ]]; then
+                continue
+              fi
+              MATCH=$(gh api \
+                "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${ID}/jobs" \
+                --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | .id" \
+                2>/dev/null | head -n 1 || true)
+              if [[ -n "$MATCH" ]]; then
+                RUN_ID="$ID"
+                JOB_ID="$MATCH"
+                echo "Matched render run: https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
+                echo "Matched job id: ${JOB_ID}"
+                break
+              fi
+            done < <(echo "$RUNS_JSON" | jq -c '.[]')
+
+            if [[ -n "$RUN_ID" ]]; then
+              break
             fi
-            if [[ $(date +%s) -ge $DEADLINE ]]; then
-              echo "::error::Timed out waiting for $URL (last status: $STATUS)"
+
+            if [[ $(date +%s) -ge $GRACE_DEADLINE ]]; then
+              echo "::error::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s — Intercept webhook may not have fired."
               exit 1
             fi
-            echo "Attempt $ATTEMPT: status $STATUS, retrying in ${POLL_INTERVAL}s"
+            echo "No matching render run yet. Retrying in ${POLL_INTERVAL}s."
             sleep "$POLL_INTERVAL"
+          done
+
+          # Phase 2: wait for the matched job to finish.
+          while true; do
+            JOB_STATE=$(gh api \
+              "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/jobs/${JOB_ID}" \
+              --jq '"\(.status):\(.conclusion // "-")"' 2>/dev/null || echo "error:-")
+            case "$JOB_STATE" in
+              completed:success)
+                echo "docs render succeeded — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
+                exit 0
+                ;;
+              completed:failure|completed:cancelled|completed:timed_out|completed:startup_failure)
+                echo "::error::docs render did not succeed ($JOB_STATE) — see https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
+                exit 1
+                ;;
+              completed:*)
+                echo "::error::unexpected terminal state: $JOB_STATE"
+                exit 1
+                ;;
+              *)
+                if [[ $(date +%s) -ge $DEADLINE ]]; then
+                  echo "::error::Timed out waiting for docs render to finish (last: $JOB_STATE) — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
+                  exit 1
+                fi
+                echo "render job ${JOB_ID}: $JOB_STATE — retrying in ${POLL_INTERVAL}s"
+                sleep "$POLL_INTERVAL"
+                ;;
+            esac
           done
