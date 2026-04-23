@@ -1,0 +1,106 @@
+name: Republish
+
+# Manually re-run publish steps against an existing tag. Meant to be wrapped
+# by a consumer `workflow_dispatch` in each extension so a maintainer can
+# recover a partially-failed release (e.g. TER accepted, Packagist didn't)
+# without cutting a new version. All sub-steps are idempotent — running
+# republish against a fully-published version is a safe no-op.
+#
+# Explicitly does NOT mutate the existing GitHub release, per our release
+# immutability policy. If the release itself is missing (first-run aborted
+# before creation), the orchestrator `release-typo3-extension.yml` must be
+# re-run instead; this workflow only retries the external publishes.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Git tag to republish (e.g. "v0.8.0")
+        required: true
+        type: string
+      target:
+        description: Which publish target(s) to re-run
+        required: true
+        type: string   # 'ter' | 'docs' | 'packagist' | 'all'
+      extension-key:
+        description: Extension key as registered on TER/docs.typo3.org
+        required: true
+        type: string
+      package-name:
+        description: Composer package name
+        required: true
+        type: string
+      vendor:
+        description: docs.typo3.org vendor segment
+        required: false
+        type: string
+        default: netresearch
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN:
+        required: false
+      PACKAGIST_USERNAME:
+        required: false
+      PACKAGIST_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  resolve-version:
+    name: Resolve version from tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Strip v-prefix
+        id: v
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          V="${TAG#v}"
+          if ! echo "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid tag format: $TAG (expected semver, optionally v-prefixed)"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+  republish-ter:
+    name: TER
+    if: inputs.target == 'ter' || inputs.target == 'all'
+    needs: resolve-version
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
+    with:
+      ref: ${{ inputs.tag }}
+    secrets: inherit
+
+  republish-packagist:
+    name: Packagist
+    if: inputs.target == 'packagist' || inputs.target == 'all'
+    needs: resolve-version
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
+    with:
+      package-name: ${{ inputs.package-name }}
+      version: ${{ needs.resolve-version.outputs.version }}
+    secrets: inherit
+
+  republish-docs:
+    name: docs.typo3.org
+    # Run after TER — docs.typo3.org only starts rendering once TER's Intercept
+    # webhook fires, so polling the docs URL before TER is live would always
+    # time out. The `always()` is needed so docs still verifies when the
+    # caller re-runs only docs or the all-target chain includes TER as well.
+    if: ${{ always() && (inputs.target == 'docs' || inputs.target == 'all') }}
+    needs: [resolve-version, republish-ter]
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
+    with:
+      extension-key: ${{ inputs.extension-key }}
+      vendor: ${{ inputs.vendor }}
+      version: ${{ needs.resolve-version.outputs.version }}

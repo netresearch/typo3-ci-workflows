@@ -1,0 +1,154 @@
+name: Publish to Packagist
+
+# Triggers a Packagist update for the repo and polls the API until the new
+# version is visible, so the caller can wait on it in a `needs:` chain.
+#
+# Idempotent: Packagist's update endpoint tolerates repeated calls for the
+# same version. If the version is already visible when we start, we return
+# success without hitting the update endpoint.
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: Composer package name (e.g. "netresearch/nr-passkeys-be")
+        required: true
+        type: string
+      version:
+        description: Version to verify (no v-prefix, e.g. "0.8.0"). When empty, resolved from ext_emconf.php on the caller's ref.
+        required: false
+        type: string
+        default: ''
+      timeout-minutes:
+        description: Max minutes to wait for Packagist to list the version
+        required: false
+        type: number
+        default: 10
+      poll-interval-seconds:
+        description: Seconds between polls
+        required: false
+        type: number
+        default: 15
+    secrets:
+      PACKAGIST_USERNAME:
+        description: Packagist username that owns the package
+        required: true
+      PACKAGIST_TOKEN:
+        description: Packagist API token for the user
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish to Packagist
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout (for ext_emconf.php version fallback only)
+        if: inputs.version == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "$INPUT_VERSION" ]]; then
+            VERSION="$INPUT_VERSION"
+          else
+            if [[ ! -f ext_emconf.php ]]; then
+              echo "::error::No version input provided and ext_emconf.php not found on caller's ref"
+              exit 1
+            fi
+            VERSION=$(sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" ext_emconf.php)
+          fi
+          VERSION="${VERSION#v}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if version is already on Packagist
+        id: precheck
+        env:
+          PACKAGE: ${{ inputs.package-name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Packagist's P2 metadata is what Composer consumes. Cache propagation
+          # can lag the webhook by a minute or two; we accept that lag and only
+          # use this precheck to short-circuit the trigger on re-runs.
+          URL="https://repo.packagist.org/p2/${PACKAGE}.json"
+          BODY=$(curl -sS --max-time 15 "$URL" || true)
+          if [[ -n "$BODY" ]] && echo "$BODY" | jq -e --arg p "$PACKAGE" --arg v "$VERSION" \
+              '.packages[$p] | map(.version == $v or .version == ("v" + $v)) | any' \
+              >/dev/null 2>&1; then
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION already visible on Packagist"
+          else
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger Packagist update
+        if: steps.precheck.outputs.already-published != 'true'
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Packagist accepts the GitHub repo URL verbatim; it then re-scans
+          # its own mirror and updates the P2 metadata. Webhook delivery is
+          # best-effort, so calling the update endpoint explicitly guarantees
+          # the scan happens regardless of the GitHub → Packagist integration
+          # state.
+          RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"repository\":{\"url\":\"${SERVER_URL}/${REPO}\"}}" \
+            --max-time 30)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          CODE=$(echo "$RESPONSE" | tail -n 1)
+          if [[ "$CODE" != "200" && "$CODE" != "202" ]]; then
+            echo "::error::Packagist update returned HTTP $CODE: $BODY"
+            exit 1
+          fi
+          echo "Packagist update triggered (HTTP $CODE)"
+
+      - name: Poll Packagist until version visible
+        if: steps.precheck.outputs.already-published != 'true'
+        env:
+          PACKAGE: ${{ inputs.package-name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+        run: |
+          URL="https://repo.packagist.org/p2/${PACKAGE}.json"
+          DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
+          ATTEMPT=0
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            BODY=$(curl -sS --max-time 15 "$URL" || true)
+            if [[ -n "$BODY" ]] && echo "$BODY" | jq -e --arg p "$PACKAGE" --arg v "$VERSION" \
+                '.packages[$p] | map(.version == $v or .version == ("v" + $v)) | any' \
+                >/dev/null 2>&1; then
+              echo "Packagist lists $VERSION (attempt $ATTEMPT)"
+              exit 0
+            fi
+            if [[ $(date +%s) -ge $DEADLINE ]]; then
+              echo "::error::Timed out waiting for Packagist to list $VERSION"
+              exit 1
+            fi
+            echo "Attempt $ATTEMPT: version not yet visible, retrying in ${POLL_INTERVAL}s"
+            sleep "$POLL_INTERVAL"
+          done
