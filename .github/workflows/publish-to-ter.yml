@@ -7,6 +7,21 @@ on:
         description: PHP version for tailor
         type: string
         default: '8.4'
+      ref:
+        description: Git ref (tag or SHA) to check out. Defaults to the event ref — set this explicitly when re-triggering from a workflow_dispatch against a branch to ensure the correct source is packaged.
+        required: false
+        type: string
+        default: ''
+      verify-timeout-minutes:
+        description: Max minutes to wait for TER to serve the published version
+        required: false
+        type: number
+        default: 10
+      verify-poll-interval-seconds:
+        description: Seconds between TER verification polls
+        required: false
+        type: number
+        default: 30
     secrets:
       TYPO3_EXTENSION_KEY:
         description: "Deprecated: extension key is auto-resolved from composer.json"
@@ -34,7 +49,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
 
       - name: Resolve version
         id: version
@@ -195,10 +210,55 @@ jobs:
             echo "$DELIMITER"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Check if version is already on TER
+        id: precheck
+        env:
+          KEY: ${{ steps.extkey.outputs.key }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # HEAD the download URL: 200 => version already published, skip.
+          # This makes the workflow idempotent so republishing a tag after a
+          # partial failure is a safe no-op on the TER side.
+          URL="https://extensions.typo3.org/extension/download/${KEY}/${VERSION}/zip"
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -I --max-time 15 "$URL" || echo "000")
+          if [[ "$STATUS" == "200" ]]; then
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION is already on TER — skipping publish"
+          else
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+            echo "TER precheck status for $VERSION: $STATUS (will publish)"
+          fi
+
       - name: Publish to TER
+        if: steps.precheck.outputs.already-published != 'true'
         env:
           TYPO3_EXTENSION_KEY: ${{ steps.extkey.outputs.key }}
           TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           COMMENT: ${{ steps.comment.outputs.comment }}
         run: php ~/.composer/vendor/bin/tailor ter:publish --comment="$COMMENT" "$VERSION"
+
+      - name: Verify TER serves the version
+        env:
+          KEY: ${{ steps.extkey.outputs.key }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TIMEOUT_MINUTES: ${{ inputs.verify-timeout-minutes }}
+          POLL_INTERVAL: ${{ inputs.verify-poll-interval-seconds }}
+        run: |
+          URL="https://extensions.typo3.org/extension/download/${KEY}/${VERSION}/zip"
+          DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
+          ATTEMPT=0
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -I --max-time 15 "$URL" || echo "000")
+            if [[ "$STATUS" == "200" ]]; then
+              echo "TER serves $VERSION (attempt $ATTEMPT)"
+              exit 0
+            fi
+            if [[ $(date +%s) -ge $DEADLINE ]]; then
+              echo "::error::Timed out waiting for TER to serve $VERSION (last status: $STATUS)"
+              exit 1
+            fi
+            echo "Attempt $ATTEMPT: status $STATUS, retrying in ${POLL_INTERVAL}s"
+            sleep "$POLL_INTERVAL"
+          done

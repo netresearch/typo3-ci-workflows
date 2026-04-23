@@ -1,0 +1,337 @@
+name: Release (TYPO3 extension)
+
+# Orchestrator for the full TYPO3-extension release pipeline.
+#
+# Order of operations (immutability-friendly):
+#
+#   1. build-and-sign — create archives, SBOMs, checksums, Cosign signatures,
+#      build-provenance attestations. Uploads everything as the `dist` run
+#      artifact. No external publishing yet.
+#   2. publish-to-ter, publish-to-packagist — run in parallel after the build
+#      succeeds. Each sub-workflow is idempotent and polls its respective
+#      service until the new version is visible.
+#   3. publish-to-docs — polls docs.typo3.org AFTER TER confirms, because the
+#      TER → Intercept webhook is what triggers the docs render.
+#   4. create-release — the GitHub release is created LAST, in a single
+#      atomic `softprops/action-gh-release` call, with every artifact and the
+#      verification-evidence block already determined. Compatible with GitHub
+#      "Immutable Releases": nothing is added, removed, or edited after
+#      publication.
+#
+# If any of steps 2–3 fail, step 4 is skipped: no release is created, the
+# tag exists without a GitHub release, and the maintainer re-runs the whole
+# orchestrator (which is idempotent on every publish step) to finish. The
+# `republish.yml` dispatcher is for recovering a completed release whose
+# publishes later regressed — not for mid-release crashes.
+
+on:
+  workflow_call:
+    inputs:
+      archive-prefix:
+        description: 'Prefix for release archive files (e.g., "nr-passkeys-be")'
+        required: true
+        type: string
+      package-name:
+        description: 'Composer package name (e.g., "netresearch/nr-passkeys-be")'
+        required: true
+        type: string
+      extension-key:
+        description: 'TYPO3 extension key (e.g., "nr_passkeys_be")'
+        required: true
+        type: string
+      vendor:
+        description: 'docs.typo3.org vendor segment (owner of the docs URL)'
+        required: false
+        type: string
+        default: netresearch
+      include-sbom:
+        description: Include SPDX and CycloneDX SBOMs as release assets
+        required: false
+        type: boolean
+        default: true
+      sign-artifacts:
+        description: Sign artifacts with Cosign keyless signing
+        required: false
+        type: boolean
+        default: true
+      skip-ter:
+        description: Skip TER publish + verification (for testing only)
+        required: false
+        type: boolean
+        default: false
+      skip-packagist:
+        description: Skip Packagist publish + verification
+        required: false
+        type: boolean
+        default: false
+      skip-docs:
+        description: Skip docs.typo3.org verification
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN:
+        required: false
+
+permissions: {}
+
+jobs:
+  build-and-sign:
+    name: Build & sign artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release-notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve version from tag
+        id: version
+        env:
+          ARCHIVE_PREFIX: ${{ inputs.archive-prefix }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version derived from tag: $GITHUB_REF_NAME"
+            exit 1
+          fi
+          if [[ "$ARCHIVE_PREFIX" == *..* ]] || [[ "$ARCHIVE_PREFIX" == /* ]]; then
+            echo "::error::Invalid archive-prefix: $ARCHIVE_PREFIX"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        # Phase 1 keeps the git-log approach used by release.yml. Phase 3 swaps
+        # this for git-cliff + contributor/reporter attribution.
+        run: |
+          DELIMITER="ghadelim_$(openssl rand -hex 8)"
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          {
+            echo "notes<<$DELIMITER"
+            if [[ -z "$PREVIOUS_TAG" ]]; then
+              echo "Initial release"
+            else
+              git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD"
+              echo ""
+            fi
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release archives
+        env:
+          ARCHIVE_PREFIX: ${{ inputs.archive-prefix }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix="${ARCHIVE_PREFIX}/" HEAD -o "dist/${ARCHIVE_PREFIX}-${VERSION}.zip"
+          git archive --format=tar.gz --prefix="${ARCHIVE_PREFIX}/" HEAD -o "dist/${ARCHIVE_PREFIX}-${VERSION}.tar.gz"
+
+      - name: Generate SBOM (SPDX)
+        if: inputs.include-sbom
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.sbom.spdx.json
+
+      - name: Generate SBOM (CycloneDX)
+        if: inputs.include-sbom
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.sbom.cdx.json
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum ./* > checksums.txt
+          cat checksums.txt
+
+      - name: Install Cosign
+        if: inputs.sign-artifacts
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign artifacts with Cosign (keyless)
+        if: inputs.sign-artifacts
+        run: |
+          cd dist
+          for file in *; do
+            [ -f "$file" ] || continue
+            case "$file" in
+              *.bundle) continue ;;  # don't sign already-generated bundles
+            esac
+            cosign sign-blob --yes "$file" --bundle "${file}.bundle"
+          done
+
+      - name: Generate build-provenance attestation
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: |
+            dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.zip
+            dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.tar.gz
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish-to-ter:
+    name: Publish to TER
+    needs: build-and-sign
+    if: ${{ !inputs.skip-ter }}
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
+    with:
+      ref: ${{ github.ref }}
+    secrets: inherit
+
+  verify-packagist:
+    name: Verify Packagist
+    needs: build-and-sign
+    if: ${{ !inputs.skip-packagist }}
+    # Packagist's GitHub integration auto-subscribes to push/tag events and
+    # rescans without our workflow having to do anything. This job only
+    # polls the Packagist API until the new version is visible.
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
+    with:
+      package-name: ${{ inputs.package-name }}
+      version: ${{ needs.build-and-sign.outputs.version }}
+
+  verify-docs:
+    name: Verify docs.typo3.org
+    needs: build-and-sign
+    # docs.typo3.org renders via the Intercept webhook subscribed to GitHub
+    # push events — independent of TER. Runs in parallel with the TER and
+    # Packagist jobs, no `needs:` coupling.
+    if: ${{ !inputs.skip-docs }}
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
+    with:
+      extension-key: ${{ inputs.extension-key }}
+      vendor: ${{ inputs.vendor }}
+      version: ${{ needs.build-and-sign.outputs.version }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-and-sign, publish-to-ter, verify-packagist, verify-docs]
+    # Run only if every non-skipped publish reached success. This enforces
+    # "release-last": the GitHub release is a receipt of a successful run, and
+    # never a canvas that gets edited afterwards. If any publish failed, no
+    # release is created and the orchestrator must be re-run to finish.
+    if: >-
+      ${{
+        always()
+        && needs.build-and-sign.result == 'success'
+        && (needs.publish-to-ter.result == 'success' || needs.publish-to-ter.result == 'skipped')
+        && (needs.verify-packagist.result == 'success' || needs.verify-packagist.result == 'skipped')
+        && (needs.verify-docs.result == 'success' || needs.verify-docs.result == 'skipped')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-dist
+          path: dist/
+
+      - name: Compose verification-evidence block
+        id: evidence
+        env:
+          PACKAGE: ${{ inputs.package-name }}
+          KEY: ${{ inputs.extension-key }}
+          VENDOR: ${{ inputs.vendor }}
+          VERSION: ${{ needs.build-and-sign.outputs.version }}
+          TER_RESULT: ${{ needs.publish-to-ter.result }}
+          PKGST_RESULT: ${{ needs.verify-packagist.result }}
+          DOCS_RESULT: ${{ needs.verify-docs.result }}
+        run: |
+          DELIMITER="ghadelim_$(openssl rand -hex 8)"
+          {
+            echo "block<<$DELIMITER"
+            echo "## Publication status"
+            echo ""
+            if [[ "$TER_RESULT" == "success" ]]; then
+              echo "- TER: [extensions.typo3.org/extension/${KEY}](https://extensions.typo3.org/extension/${KEY}) — ${VERSION} verified"
+            elif [[ "$TER_RESULT" == "skipped" ]]; then
+              echo "- TER: skipped"
+            fi
+            if [[ "$PKGST_RESULT" == "success" ]]; then
+              echo "- Packagist: [packagist.org/packages/${PACKAGE}](https://packagist.org/packages/${PACKAGE}) — ${VERSION} verified"
+            elif [[ "$PKGST_RESULT" == "skipped" ]]; then
+              echo "- Packagist: skipped"
+            fi
+            if [[ "$DOCS_RESULT" == "success" ]]; then
+              echo "- Documentation: [docs.typo3.org/p/${VENDOR}/${KEY}/${VERSION}/en-us/](https://docs.typo3.org/p/${VENDOR}/${KEY}/${VERSION}/en-us/) — verified"
+            elif [[ "$DOCS_RESULT" == "skipped" ]]; then
+              echo "- Documentation: skipped"
+            fi
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release (atomic, all assets)
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          files: |
+            dist/*
+          fail_on_unmatched_files: true
+          body: |
+            ## Changes
+            ${{ needs.build-and-sign.outputs.release-notes }}
+
+            ## Installation
+
+            ```bash
+            composer require ${{ inputs.package-name }}
+            ```
+
+            ${{ steps.evidence.outputs.block }}
+
+            ## Security
+
+            All release artifacts are signed with [Sigstore](https://www.sigstore.dev/) keyless signing.
+
+            ### Verify signatures
+
+            ```bash
+            cosign verify-blob \
+              --bundle ${{ inputs.archive-prefix }}-${{ needs.build-and-sign.outputs.version }}.zip.bundle \
+              --certificate-identity-regexp "https://github.com/${{ github.repository_owner }}/.*" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              ${{ inputs.archive-prefix }}-${{ needs.build-and-sign.outputs.version }}.zip
+            ```
+
+            ### Verify checksums
+
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+
+            ## Software Bill of Materials (SBOM)
+
+            SBOMs are provided in both SPDX and CycloneDX formats for supply chain transparency.
