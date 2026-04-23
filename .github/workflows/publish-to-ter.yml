@@ -22,6 +22,26 @@ on:
         required: false
         type: number
         default: 30
+      update-metadata:
+        description: After publishing, sync the TER listing's manual/issues/repository URLs via `tailor ter:update`. Safe to re-run; TER overwrites with the supplied values.
+        required: false
+        type: boolean
+        default: true
+      manual-url:
+        description: Override for the "manual" URL in TER metadata. Defaults to the GitHub repo URL, which is what readers expect from the TER listing's "Manual" link.
+        required: false
+        type: string
+        default: ''
+      issues-url:
+        description: Override for the "issues" URL in TER metadata. Defaults to ${repo}/issues.
+        required: false
+        type: string
+        default: ''
+      repository-url:
+        description: Override for the "repository" URL in TER metadata. Defaults to the GitHub repo URL.
+        required: false
+        type: string
+        default: ''
     secrets:
       TYPO3_EXTENSION_KEY:
         description: "Deprecated: extension key is auto-resolved from composer.json"
@@ -262,3 +282,49 @@ jobs:
             echo "Attempt $ATTEMPT: status $STATUS, retrying in ${POLL_INTERVAL}s"
             sleep "$POLL_INTERVAL"
           done
+
+      - name: Update TER metadata
+        # Keeps the TER listing's Manual / Issues / Repository links current.
+        # Idempotent — TER overwrites with the supplied values on every call.
+        # Runs regardless of the idempotency precheck: even when the version
+        # was already on TER, the metadata may have drifted (e.g. repo
+        # renamed) and this step reconciles it.
+        if: inputs.update-metadata
+        env:
+          KEY: ${{ steps.extkey.outputs.key }}
+          PACKAGE: ${{ github.repository }}
+          COMPOSER_NAME: ''
+          TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          MANUAL_INPUT: ${{ inputs.manual-url }}
+          ISSUES_INPUT: ${{ inputs.issues-url }}
+          REPOSITORY_INPUT: ${{ inputs.repository-url }}
+        run: |
+          # Composer name is kept in sync with the local composer.json rather
+          # than plumbed as a separate input — the source of truth is already
+          # on the checked-out ref and will never disagree with what we just
+          # published.
+          COMPOSER_NAME=$(php -r "echo json_decode(file_get_contents('composer.json'), true)['name'] ?? '';")
+          if [[ -z "$COMPOSER_NAME" ]]; then
+            echo "::error file=composer.json::Missing 'name' field — required for TER metadata update"
+            exit 1
+          fi
+
+          REPO_URL="${SERVER_URL}/${REPO}"
+          MANUAL_URL="${MANUAL_INPUT:-$REPO_URL}"
+          ISSUES_URL="${ISSUES_INPUT:-${REPO_URL}/issues}"
+          REPOSITORY_URL="${REPOSITORY_INPUT:-$REPO_URL}"
+
+          echo "Updating TER metadata for $KEY:"
+          echo "  composer=$COMPOSER_NAME"
+          echo "  manual=$MANUAL_URL"
+          echo "  issues=$ISSUES_URL"
+          echo "  repository=$REPOSITORY_URL"
+
+          php ~/.composer/vendor/bin/tailor ter:update \
+            --composer="$COMPOSER_NAME" \
+            --manual="$MANUAL_URL" \
+            --issues="$ISSUES_URL" \
+            --repository="$REPOSITORY_URL" \
+            "$KEY"
