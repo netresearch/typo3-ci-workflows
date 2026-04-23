@@ -199,6 +199,14 @@ jobs:
     name: Publish to TER
     needs: build-and-sign
     if: ${{ !inputs.skip-ter }}
+    # Declare permissions at the calling-job level so GitHub's startup-time
+    # validator sees that we can cover publish-to-ter.yml's inner
+    # `contents: read`. Without this the workflow fails with `startup_failure`
+    # and zero materialised jobs — the inner reusable's permissions cannot
+    # exceed what the caller job grants, and the workflow-level
+    # `permissions: {}` (no default) does not propagate to `uses:` jobs.
+    permissions:
+      contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
       ref: ${{ github.ref }}
@@ -211,6 +219,8 @@ jobs:
     # Packagist's GitHub integration auto-subscribes to push/tag events and
     # rescans without our workflow having to do anything. This job only
     # polls the Packagist API until the new version is visible.
+    permissions:
+      contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
     with:
       package-name: ${{ inputs.package-name }}
@@ -223,6 +233,8 @@ jobs:
     # push events — independent of TER. Runs in parallel with the TER and
     # Packagist jobs, no `needs:` coupling.
     if: ${{ !inputs.skip-docs }}
+    permissions:
+      contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
     with:
       extension-key: ${{ inputs.extension-key }}
