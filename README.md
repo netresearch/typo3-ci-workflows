@@ -206,7 +206,7 @@ jobs:
 | `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
 | `db-image` | string | `mysql:9.6` | Docker image for database service |
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov |
-| `coverage-tool` | string | `pcov` | Coverage driver: `pcov` or `xdebug` |
+| `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (branch + path coverage, matches local `XDEBUG_MODE=coverage`) or `pcov` (line-only, ~3-10× faster) |
 | `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |
 | `cgl-command` | string | auto-detect | Override CGL command |
 | `phpstan-command` | string | auto-detect | Override PHPStan command |
