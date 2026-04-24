@@ -28,8 +28,10 @@ on:
       since:
         description: |
           ISO-8601 timestamp; only render runs created on or after this moment
-          are considered. Defaults to this workflow's own start-time, which
-          works when the orchestrator calls us right after the tag push.
+          are considered. If omitted, the workflow falls back to a timestamp
+          approximately 5 minutes in the past to locate the matching render
+          run (covers the typical Intercept dispatch delay when the
+          orchestrator calls us right after the tag push).
         required: false
         type: string
         default: ''

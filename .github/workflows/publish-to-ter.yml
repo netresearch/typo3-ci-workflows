@@ -24,11 +24,13 @@ on:
         default: 30
       update-metadata:
         description: >-
-          After publishing, sync the TER listing's composer/issues/repository
-          URLs via `tailor ter:update`. The manual URL is only written
-          when `manual-url` is explicitly set (empty preserves TER's
-          existing value). Safe to re-run; TER overwrites each supplied
-          field.
+          Sync the TER listing's composer/issues/repository URLs via
+          `tailor ter:update`. Runs after publishing, and also on a
+          no-op republish when the version is already on TER (so a
+          repo rename or URL change reconciles without a new release).
+          The manual URL is only written when `manual-url` is
+          explicitly set (empty preserves TER's existing value).
+          Safe to re-run; TER overwrites each supplied field.
         required: false
         type: boolean
         default: true

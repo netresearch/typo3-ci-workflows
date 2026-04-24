@@ -7,21 +7,21 @@ name: Release (TYPO3 extension)
 #   1. build-and-sign — create archives, SBOMs, checksums, Cosign signatures,
 #      build-provenance attestations. Uploads everything as the `dist` run
 #      artifact. No external publishing yet.
-#   2. publish-to-ter, publish-to-packagist — run in parallel after the build
-#      succeeds. Each sub-workflow is idempotent and polls its respective
-#      service until the new version is visible.
-#   3. publish-to-docs — polls docs.typo3.org AFTER TER confirms, because the
-#      TER → Intercept webhook is what triggers the docs render.
-#   4. create-release — the GitHub release is created LAST, in a single
+#   2. publish-to-ter, verify-packagist, verify-docs — all run in parallel
+#      after the build succeeds. docs.typo3.org renders via Intercept's
+#      GitHub-push webhook (independent of TER), so the docs verifier is not
+#      coupled to the TER publish. Each sub-workflow is idempotent and polls
+#      its respective service until the new version is visible.
+#   3. create-release — the GitHub release is created LAST, in a single
 #      atomic `softprops/action-gh-release` call, with every artifact and the
 #      verification-evidence block already determined. Compatible with GitHub
 #      "Immutable Releases": nothing is added, removed, or edited after
 #      publication.
 #
-# If any of steps 2–3 fail, step 4 is skipped: no release is created, the
-# tag exists without a GitHub release, and the maintainer re-runs the whole
-# orchestrator (which is idempotent on every publish step) to finish. The
-# `republish.yml` dispatcher is for recovering a completed release whose
+# If any of step 2's sub-jobs fail, step 3 is skipped: no release is created,
+# the tag exists without a GitHub release, and the maintainer re-runs the
+# whole orchestrator (which is idempotent on every publish step) to finish.
+# The `republish.yml` dispatcher is for recovering a completed release whose
 # publishes later regressed — not for mid-release crashes.
 
 on:
@@ -211,10 +211,11 @@ jobs:
     if: ${{ !inputs.skip-ter }}
     # Declare permissions at the calling-job level so GitHub's startup-time
     # validator sees that we can cover publish-to-ter.yml's inner
-    # `contents: read`. Without this the workflow fails with `startup_failure`
-    # and zero materialised jobs — the inner reusable's permissions cannot
-    # exceed what the caller job grants, and the workflow-level
-    # `permissions: {}` (no default) does not propagate to `uses:` jobs.
+    # `contents: read`. The workflow-level `permissions: {}` is empty and
+    # is inherited by `uses:` jobs just like by regular jobs — but an
+    # inherited empty set cannot satisfy the called workflow's required
+    # `contents: read`, so without this per-job grant the workflow fails
+    # with `startup_failure` and zero materialised jobs.
     permissions:
       contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
