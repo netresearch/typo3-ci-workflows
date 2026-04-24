@@ -93,9 +93,16 @@ on:
         type: boolean
         default: false
       coverage-tool:
-        description: Coverage driver (pcov or xdebug)
+        description: >-
+          Coverage driver. "xdebug" (default) delivers branch + path
+          coverage and matches the local `composer ci:test:php:*:coverage`
+          scripts which set XDEBUG_MODE=coverage -- choosing xdebug here
+          eliminates "green locally, red in CI" drift around
+          beStrictAboutCoverageMetadata. "pcov" is line-only but ~3-10x
+          faster; set it explicitly when CI runtime matters more than
+          coverage fidelity.
         type: string
-        default: pcov
+        default: xdebug
 
       # Incompatible dev deps
       remove-dev-deps:
