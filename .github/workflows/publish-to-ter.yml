@@ -22,6 +22,16 @@ on:
         required: false
         type: number
         default: 30
+      job-timeout-minutes:
+        description: |
+          Hard upper bound on the publish job. Must cover
+          `verify-timeout-minutes` plus a buffer (~10 min) for setup,
+          install, publish, and metadata-sync. Bump this whenever you
+          raise `verify-timeout-minutes` so the verify loop isn't cut
+          short by the job budget.
+        required: false
+        type: number
+        default: 25
       update-metadata:
         description: >-
           Sync the TER listing's composer/issues/repository URLs via
@@ -70,7 +80,12 @@ jobs:
   publish:
     name: Publish to TER
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # GitHub Actions expressions don't support arithmetic, so we can't
+    # auto-derive `verify-timeout-minutes + buffer` here. Callers that
+    # raise `verify-timeout-minutes` above the default must also raise
+    # `job-timeout-minutes` to keep the verify loop from being cut
+    # short by the job budget.
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
     permissions:
       contents: read
     steps:
