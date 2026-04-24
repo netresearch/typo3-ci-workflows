@@ -31,9 +31,14 @@ on:
         type: string
         default: ''
       package-name:
-        description: Composer package name
-        required: true
+        description: |
+          Composer package name. Required when target is `packagist`,
+          `docs`, or `all`. Optional (and ignored) when target is `ter`,
+          since publish-to-ter.yml resolves the package from
+          composer.json on the checked-out ref.
+        required: false
         type: string
+        default: ''
       vendor:
         description: |
           Deprecated, no longer consumed. The docs.typo3.org URL is derived
@@ -49,7 +54,7 @@ permissions: {}
 
 jobs:
   resolve-version:
-    name: Resolve version from tag
+    name: Validate inputs and resolve version
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -61,6 +66,50 @@ jobs:
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
+
+      - name: Validate target
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          # Reject unknown target values explicitly; otherwise every
+          # republish-* job's `if:` evaluates false and the workflow
+          # silently succeeds with no work done — a typo would look
+          # indistinguishable from a real republish.
+          case "$TARGET" in
+            ter|docs|packagist|all) ;;
+            *)
+              echo "::error::Invalid target: '$TARGET' (expected one of: ter, docs, packagist, all)"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate per-target inputs
+        env:
+          TARGET: ${{ inputs.target }}
+          PACKAGE_NAME: ${{ inputs.package-name }}
+          TER_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+        run: |
+          # package-name is needed by Packagist and docs verification;
+          # TER resolves the package from composer.json instead.
+          case "$TARGET" in
+            packagist|docs|all)
+              if [[ -z "$PACKAGE_NAME" ]]; then
+                echo "::error::package-name is required when target is '$TARGET'"
+                exit 1
+              fi
+              ;;
+          esac
+
+          # Preflight the TER token so the failure surfaces here with a
+          # clear message, not deep inside publish-to-ter.yml.
+          case "$TARGET" in
+            ter|all)
+              if [[ -z "$TER_TOKEN" ]]; then
+                echo "::error::TYPO3_TER_ACCESS_TOKEN secret is required when target is '$TARGET'"
+                exit 1
+              fi
+              ;;
+          esac
 
       - name: Strip v-prefix
         id: v
@@ -83,7 +132,11 @@ jobs:
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
       ref: ${{ inputs.tag }}
-    secrets: inherit
+    # Explicit secret pass-through (NOT `secrets: inherit`) so a
+    # compromised action in the called workflow can't reach unrelated
+    # org secrets. Forwards only the TER token actually needed.
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
 
   republish-packagist:
     name: Packagist
