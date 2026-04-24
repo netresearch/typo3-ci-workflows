@@ -95,6 +95,23 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Preflight TER token
+        # When `secrets:` is mapped explicitly on a `uses:` job, GitHub
+        # Actions treats the entry as "present" regardless of whether the
+        # value resolved to a real string or an empty one — so the
+        # called workflow's `required: true` declaration is satisfied
+        # even if the consumer never set the secret. Fail here with a
+        # clear message instead of letting `tailor ter:publish` fail
+        # later with a less direct API auth error.
+        if: ${{ !inputs.skip-ter }}
+        env:
+          TER_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+        run: |
+          if [[ -z "$TER_TOKEN" ]]; then
+            echo "::error::TYPO3_TER_ACCESS_TOKEN secret is required when skip-ter=false"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

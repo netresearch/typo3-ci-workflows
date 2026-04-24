@@ -82,6 +82,11 @@ jobs:
           DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
           GRACE_DEADLINE=$(( $(date +%s) + GRACE_SECONDS ))
           RUN_ID=""
+          # Track whether any jobs query has succeeded so far. If the
+          # grace window expires with zero successful jobs queries, the
+          # problem is the API (rate limit / auth), not Intercept —
+          # report accordingly instead of misleading on the webhook.
+          JOBS_QUERY_OK=false
           echo "Looking for render job named: $JOB_NAME"
           echo "Only considering runs created on or after: $SINCE"
 
@@ -120,6 +125,7 @@ jobs:
                 echo "::warning::Failed to list jobs for run ${ID}: ${JOBS_JSON}"
                 continue
               fi
+              JOBS_QUERY_OK=true
               MATCH=$(echo "$JOBS_JSON" \
                 | jq -r --arg job_name "$JOB_NAME" '.jobs[] | select(.name == $job_name) | .id' \
                 | head -n 1 || true)
@@ -137,7 +143,11 @@ jobs:
             fi
 
             if [[ $(date +%s) -ge $GRACE_DEADLINE ]]; then
-              echo "::error::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s — Intercept webhook may not have fired."
+              if [[ "$JOBS_QUERY_OK" != "true" ]]; then
+                echo "::error::Could not inspect any candidate run's jobs within ${GRACE_SECONDS}s — every jobs API query failed (likely auth or secondary rate limiting). This is NOT an Intercept-webhook problem; check the warnings above."
+              else
+                echo "::error::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s — Intercept webhook may not have fired."
+              fi
               exit 1
             fi
             echo "No matching render run yet. Retrying in ${POLL_INTERVAL}s."
