@@ -23,12 +23,25 @@ on:
         type: number
         default: 30
       update-metadata:
-        description: After publishing, sync the TER listing's manual/issues/repository URLs via `tailor ter:update`. Safe to re-run; TER overwrites with the supplied values.
+        description: >-
+          After publishing, sync the TER listing's composer/issues/repository
+          URLs via `tailor ter:update`. The manual URL is only written
+          when `manual-url` is explicitly set (empty preserves TER's
+          existing value). Safe to re-run; TER overwrites each supplied
+          field.
         required: false
         type: boolean
         default: true
       manual-url:
-        description: Override for the "manual" URL in TER metadata. Defaults to the GitHub repo URL, which is what readers expect from the TER listing's "Manual" link.
+        description: >-
+          URL for TER's "External manual" field. If empty (default), the
+          existing value on TER is preserved -- in particular, TYPO3
+          extensions with composer-docs auto-publish should leave this
+          empty so TER auto-links the "Extension Manual" button to
+          docs.typo3.org/p/<vendor>/<package>/<major>.<minor>/en-us.
+          If set, overwrites TER's field with the supplied URL on every
+          publish (idempotent). Set to a real docs URL only if your
+          extension does NOT auto-publish to docs.typo3.org.
         required: false
         type: string
         default: ''
@@ -312,19 +325,28 @@ jobs:
           fi
 
           REPO_URL="${SERVER_URL}/${REPO}"
-          MANUAL_URL="${MANUAL_INPUT:-$REPO_URL}"
           ISSUES_URL="${ISSUES_INPUT:-${REPO_URL}/issues}"
           REPOSITORY_URL="${REPOSITORY_INPUT:-$REPO_URL}"
 
+          # Build the tailor argv in an array. --manual is appended ONLY
+          # when manual-url is explicitly set -- empty means "preserve
+          # TER's existing value" so composer-docs auto-publish consumers
+          # keep their docs.typo3.org/p/... auto-link intact.
+          TAILOR_ARGS=(
+            "--composer=$COMPOSER_NAME"
+            "--issues=$ISSUES_URL"
+            "--repository=$REPOSITORY_URL"
+          )
+
           echo "Updating TER metadata for $KEY:"
           echo "  composer=$COMPOSER_NAME"
-          echo "  manual=$MANUAL_URL"
+          if [[ -n "$MANUAL_INPUT" ]]; then
+            TAILOR_ARGS+=("--manual=$MANUAL_INPUT")
+            echo "  manual=$MANUAL_INPUT"
+          else
+            echo "  manual=(preserving TER's existing value)"
+          fi
           echo "  issues=$ISSUES_URL"
           echo "  repository=$REPOSITORY_URL"
 
-          php ~/.composer/vendor/bin/tailor ter:update \
-            --composer="$COMPOSER_NAME" \
-            --manual="$MANUAL_URL" \
-            --issues="$ISSUES_URL" \
-            --repository="$REPOSITORY_URL" \
-            "$KEY"
+          php ~/.composer/vendor/bin/tailor ter:update "${TAILOR_ARGS[@]}" "$KEY"

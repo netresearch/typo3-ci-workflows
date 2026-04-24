@@ -523,6 +523,13 @@ jobs:
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `php-version` | string | `8.4` | PHP version for tailor CLI |
+| `ref` | string | _event ref_ | Git ref (tag or SHA) to check out. Set explicitly when re-triggering from `workflow_dispatch` against a branch. |
+| `verify-timeout-minutes` | number | `10` | Max minutes to wait for TER to serve the published version |
+| `verify-poll-interval-seconds` | number | `30` | Seconds between TER verification polls |
+| `update-metadata` | boolean | `true` | After publish, sync composer/issues/repository URLs via `tailor ter:update`. The manual URL is only written when `manual-url` is non-empty. |
+| `manual-url` | string | `''` | TER's "External manual" field. **Empty preserves TER's existing value** — recommended for extensions that auto-publish to `docs.typo3.org/p/<vendor>/<package>/...` (TER then auto-links the "Extension Manual" button there). Set explicitly only when your extension does NOT auto-publish and you need a custom manual URL. |
+| `issues-url` | string | `''` | TER's "issues" URL. Empty defaults to `${repo}/issues`. |
+| `repository-url` | string | `''` | TER's "repository" URL. Empty defaults to the GitHub repo URL. |
 
 ### Secrets
 
@@ -530,6 +537,14 @@ jobs:
 |--------|----------|-------------|
 | `TYPO3_TER_ACCESS_TOKEN` | Yes | TER API access token |
 | `TYPO3_EXTENSION_KEY` | No | Deprecated: auto-resolved from composer.json |
+
+### Notes on the "External manual" field
+
+TER surfaces a prominent "Extension Manual" button on every listing. If `external_manual` is empty, TER auto-links it to `https://docs.typo3.org/p/<vendor>/<package>/<major>.<minor>/en-us` — the composer-docs auto-publish route. If `external_manual` is set, the button links there instead.
+
+Most TYPO3 extensions that ship a `Documentation/` directory and are listed on Packagist get automatic docs.typo3.org publishing, and the auto-link delivers users to nicely rendered manuals. Writing the GitHub repo URL into `external_manual` would point readers at raw PHP source instead — worse UX, and not what most consumers want.
+
+This workflow defaults to preserving whatever TER currently has for `external_manual` (typically empty for auto-publishing extensions). Only set `manual-url` explicitly if your extension does NOT use docs.typo3.org auto-publish.
 
 ---
 
