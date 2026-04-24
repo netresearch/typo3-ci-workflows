@@ -528,8 +528,8 @@ jobs:
 | `verify-poll-interval-seconds` | number | `30` | Seconds between TER verification polls |
 | `update-metadata` | boolean | `true` | After publish, sync composer/issues/repository URLs via `tailor ter:update`. The manual URL is only written when `manual-url` is non-empty. |
 | `manual-url` | string | `''` | TER's "External manual" field. **Empty preserves TER's existing value** — recommended for extensions that auto-publish to `docs.typo3.org/p/<vendor>/<package>/...` (TER then auto-links the "Extension Manual" button there). Set explicitly only when your extension does NOT auto-publish and you need a custom manual URL. |
-| `issues-url` | string | `''` | TER's "issues" URL. Empty defaults to `${repo}/issues`. |
-| `repository-url` | string | `''` | TER's "repository" URL. Empty defaults to the GitHub repo URL. |
+| `issues-url` | string | `''` | TER's "issues" URL. Empty defaults to `${{ github.server_url }}/${{ github.repository }}/issues`. |
+| `repository-url` | string | `''` | TER's "repository" URL. Empty defaults to `${{ github.server_url }}/${{ github.repository }}`. |
 
 ### Secrets
 
