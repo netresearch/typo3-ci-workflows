@@ -131,11 +131,17 @@ jobs:
             if [[ -z "$PREVIOUS_TAG" ]]; then
               echo "Initial release"
             else
-              # --first-parent --merges gives one line per merged PR (the
-              # merge commit's subject carries the PR title and "#N"
-              # reference). Falls back to --no-merges if no merge commits
-              # exist in the range (direct pushes / rebase-merge strategy).
-              LOG=$(git log --first-parent --merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
+              # --first-parent gives one line per commit on the trunk's
+              # first-parent line: merge commits (PR title with "#N")
+              # *and* any direct hotfix commits that landed straight on
+              # main without a PR. The earlier `--first-parent --merges`
+              # variant dropped direct commits whenever the range
+              # contained at least one merge — a release that mixed both
+              # would silently lose the direct ones.
+              # Falls back to --no-merges if --first-parent returns
+              # empty (rebase-merge strategy with squash + linear history
+              # rooted on a non-trunk branch — uncommon, but harmless).
+              LOG=$(git log --first-parent --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
               if [[ -z "${LOG// }" ]]; then
                 LOG=$(git log --no-merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
               fi
