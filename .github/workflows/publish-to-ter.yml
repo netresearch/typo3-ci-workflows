@@ -38,7 +38,7 @@ on:
           existing value on TER is preserved -- in particular, TYPO3
           extensions with composer-docs auto-publish should leave this
           empty so TER auto-links the "Extension Manual" button to
-          docs.typo3.org/p/<vendor>/<package>/<major>.<minor>/en-us.
+          https://docs.typo3.org/p/<vendor>/<package>/<major>.<minor>/en-us.
           If set, overwrites TER's field with the supplied URL on every
           publish (idempotent). Set to a real docs URL only if your
           extension does NOT auto-publish to docs.typo3.org.
