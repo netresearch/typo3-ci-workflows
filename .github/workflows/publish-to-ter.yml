@@ -22,13 +22,25 @@ on:
         required: false
         type: number
         default: 30
+      job-timeout-minutes:
+        description: |
+          Hard upper bound on the publish job. Must cover
+          `verify-timeout-minutes` plus a buffer (~10 min) for setup,
+          install, publish, and metadata-sync. Bump this whenever you
+          raise `verify-timeout-minutes` so the verify loop isn't cut
+          short by the job budget.
+        required: false
+        type: number
+        default: 25
       update-metadata:
         description: >-
-          After publishing, sync the TER listing's composer/issues/repository
-          URLs via `tailor ter:update`. The manual URL is only written
-          when `manual-url` is explicitly set (empty preserves TER's
-          existing value). Safe to re-run; TER overwrites each supplied
-          field.
+          Sync the TER listing's composer/issues/repository URLs via
+          `tailor ter:update`. Runs after publishing, and also on a
+          no-op republish when the version is already on TER (so a
+          repo rename or URL change reconciles without a new release).
+          The manual URL is only written when `manual-url` is
+          explicitly set (empty preserves TER's existing value).
+          Safe to re-run; TER overwrites each supplied field.
         required: false
         type: boolean
         default: true
@@ -68,7 +80,12 @@ jobs:
   publish:
     name: Publish to TER
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # GitHub Actions expressions don't support arithmetic, so we can't
+    # auto-derive `verify-timeout-minutes + buffer` here. Callers that
+    # raise `verify-timeout-minutes` above the default must also raise
+    # `job-timeout-minutes` to keep the verify loop from being cut
+    # short by the job budget.
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
     permissions:
       contents: read
     steps:
@@ -305,8 +322,6 @@ jobs:
         if: inputs.update-metadata
         env:
           KEY: ${{ steps.extkey.outputs.key }}
-          PACKAGE: ${{ github.repository }}
-          COMPOSER_NAME: ''
           TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}

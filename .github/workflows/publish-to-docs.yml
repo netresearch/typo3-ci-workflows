@@ -28,8 +28,10 @@ on:
       since:
         description: |
           ISO-8601 timestamp; only render runs created on or after this moment
-          are considered. Defaults to this workflow's own start-time, which
-          works when the orchestrator calls us right after the tag push.
+          are considered. If omitted, the workflow falls back to a timestamp
+          approximately 5 minutes in the past to locate the matching render
+          run (covers the typical Intercept dispatch delay when the
+          orchestrator calls us right after the tag push).
         required: false
         type: string
         default: ''
@@ -80,6 +82,11 @@ jobs:
           DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
           GRACE_DEADLINE=$(( $(date +%s) + GRACE_SECONDS ))
           RUN_ID=""
+          # Track whether any jobs query has succeeded so far. If the
+          # grace window expires with zero successful jobs queries, the
+          # problem is the API (rate limit / auth), not Intercept —
+          # report accordingly instead of misleading on the webhook.
+          JOBS_QUERY_OK=false
           echo "Looking for render job named: $JOB_NAME"
           echo "Only considering runs created on or after: $SINCE"
 
@@ -88,9 +95,16 @@ jobs:
             # Fetch the most recent render-workflow runs (default page is 30);
             # that window is large enough to contain our run across all
             # typical Intercept dispatch delays without paginating.
-            RUNS_JSON=$(gh api \
+            # Surface gh api errors instead of swallowing them — a transient
+            # auth/rate-limit failure shouldn't be misreported as
+            # "Intercept didn't fire". Capture stderr so the error message
+            # lands in the workflow log.
+            if ! RUNS_JSON=$(gh api \
               "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/workflows/main-rendering.yml/runs?per_page=30" \
-              --jq '.workflow_runs' 2>/dev/null || echo '[]')
+              --jq '.workflow_runs' 2>&1); then
+              echo "::error::Failed to list render workflow runs: ${RUNS_JSON}"
+              exit 1
+            fi
 
             # For each run, ask the jobs endpoint whether our render job is
             # present. We cannot filter runs by inner-job-name server-side;
@@ -102,10 +116,19 @@ jobs:
               if [[ "$CREATED" < "$SINCE" ]]; then
                 continue
               fi
-              MATCH=$(gh api \
-                "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${ID}/jobs" \
-                --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | .id" \
-                2>/dev/null | head -n 1 || true)
+              # Fetch jobs JSON, then run jq with --arg so JOB_NAME is safely
+              # quoted (a `"` or other special character in package-name
+              # would otherwise break the jq filter and silently miss the
+              # match). Surface API errors instead of swallowing them.
+              if ! JOBS_JSON=$(gh api \
+                "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${ID}/jobs" 2>&1); then
+                echo "::warning::Failed to list jobs for run ${ID}: ${JOBS_JSON}"
+                continue
+              fi
+              JOBS_QUERY_OK=true
+              MATCH=$(echo "$JOBS_JSON" \
+                | jq -r --arg job_name "$JOB_NAME" '.jobs[] | select(.name == $job_name) | .id' \
+                | head -n 1 || true)
               if [[ -n "$MATCH" ]]; then
                 RUN_ID="$ID"
                 JOB_ID="$MATCH"
@@ -120,18 +143,28 @@ jobs:
             fi
 
             if [[ $(date +%s) -ge $GRACE_DEADLINE ]]; then
-              echo "::error::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s — Intercept webhook may not have fired."
+              if [[ "$JOBS_QUERY_OK" != "true" ]]; then
+                echo "::error::Could not inspect any candidate run's jobs within ${GRACE_SECONDS}s — every jobs API query failed (likely auth or secondary rate limiting). This is NOT an Intercept-webhook problem; check the warnings above."
+              else
+                echo "::error::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s — Intercept webhook may not have fired."
+              fi
               exit 1
             fi
             echo "No matching render run yet. Retrying in ${POLL_INTERVAL}s."
             sleep "$POLL_INTERVAL"
           done
 
-          # Phase 2: wait for the matched job to finish.
+          # Phase 2: wait for the matched job to finish. Surface API errors
+          # so a transient auth/rate-limit failure isn't retried silently
+          # until the job timeout fires.
           while true; do
-            JOB_STATE=$(gh api \
+            if ! JOB_STATE=$(gh api \
               "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/jobs/${JOB_ID}" \
-              --jq '"\(.status):\(.conclusion // "-")"' 2>/dev/null || echo "error:-")
+              --jq '"\(.status):\(.conclusion // "-")"' 2>&1); then
+              echo "::error::Failed to query docs render job state: ${JOB_STATE}"
+              echo "::error::See https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
+              exit 1
+            fi
             case "$JOB_STATE" in
               completed:success)
                 echo "docs render succeeded — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"

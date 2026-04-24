@@ -7,21 +7,21 @@ name: Release (TYPO3 extension)
 #   1. build-and-sign — create archives, SBOMs, checksums, Cosign signatures,
 #      build-provenance attestations. Uploads everything as the `dist` run
 #      artifact. No external publishing yet.
-#   2. publish-to-ter, publish-to-packagist — run in parallel after the build
-#      succeeds. Each sub-workflow is idempotent and polls its respective
-#      service until the new version is visible.
-#   3. publish-to-docs — polls docs.typo3.org AFTER TER confirms, because the
-#      TER → Intercept webhook is what triggers the docs render.
-#   4. create-release — the GitHub release is created LAST, in a single
+#   2. publish-to-ter, verify-packagist, verify-docs — all run in parallel
+#      after the build succeeds. docs.typo3.org renders via Intercept's
+#      GitHub-push webhook (independent of TER), so the docs verifier is not
+#      coupled to the TER publish. Each sub-workflow is idempotent and polls
+#      its respective service until the new version is visible.
+#   3. create-release — the GitHub release is created LAST, in a single
 #      atomic `softprops/action-gh-release` call, with every artifact and the
 #      verification-evidence block already determined. Compatible with GitHub
 #      "Immutable Releases": nothing is added, removed, or edited after
 #      publication.
 #
-# If any of steps 2–3 fail, step 4 is skipped: no release is created, the
-# tag exists without a GitHub release, and the maintainer re-runs the whole
-# orchestrator (which is idempotent on every publish step) to finish. The
-# `republish.yml` dispatcher is for recovering a completed release whose
+# If any of step 2's sub-jobs fail, step 3 is skipped: no release is created,
+# the tag exists without a GitHub release, and the maintainer re-runs the
+# whole orchestrator (which is idempotent on every publish step) to finish.
+# The `republish.yml` dispatcher is for recovering a completed release whose
 # publishes later regressed — not for mid-release crashes.
 
 on:
@@ -40,10 +40,12 @@ on:
         required: true
         type: string
       vendor:
-        description: 'docs.typo3.org vendor segment (owner of the docs URL)'
+        description: |
+          Deprecated, no longer consumed. The docs.typo3.org URL is derived
+          from package-name now. Safe to omit.
         required: false
         type: string
-        default: netresearch
+        default: ''
       include-sbom:
         description: Include SPDX and CycloneDX SBOMs as release assets
         required: false
@@ -93,6 +95,23 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Preflight TER token
+        # When `secrets:` is mapped explicitly on a `uses:` job, GitHub
+        # Actions treats the entry as "present" regardless of whether the
+        # value resolved to a real string or an empty one — so the
+        # called workflow's `required: true` declaration is satisfied
+        # even if the consumer never set the secret. Fail here with a
+        # clear message instead of letting `tailor ter:publish` fail
+        # later with a less direct API auth error.
+        if: ${{ !inputs.skip-ter }}
+        env:
+          TER_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+        run: |
+          if [[ -z "$TER_TOKEN" ]]; then
+            echo "::error::TYPO3_TER_ACCESS_TOKEN secret is required when skip-ter=false"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -129,11 +148,17 @@ jobs:
             if [[ -z "$PREVIOUS_TAG" ]]; then
               echo "Initial release"
             else
-              # --first-parent --merges gives one line per merged PR (the
-              # merge commit's subject carries the PR title and "#N"
-              # reference). Falls back to --no-merges if no merge commits
-              # exist in the range (direct pushes / rebase-merge strategy).
-              LOG=$(git log --first-parent --merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
+              # --first-parent gives one line per commit on the trunk's
+              # first-parent line: merge commits (PR title with "#N")
+              # *and* any direct hotfix commits that landed straight on
+              # main without a PR. The earlier `--first-parent --merges`
+              # variant dropped direct commits whenever the range
+              # contained at least one merge — a release that mixed both
+              # would silently lose the direct ones.
+              # Falls back to --no-merges if --first-parent returns
+              # empty (rebase-merge strategy with squash + linear history
+              # rooted on a non-trunk branch — uncommon, but harmless).
+              LOG=$(git log --first-parent --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
               if [[ -z "${LOG// }" ]]; then
                 LOG=$(git log --no-merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
               fi
@@ -211,16 +236,21 @@ jobs:
     if: ${{ !inputs.skip-ter }}
     # Declare permissions at the calling-job level so GitHub's startup-time
     # validator sees that we can cover publish-to-ter.yml's inner
-    # `contents: read`. Without this the workflow fails with `startup_failure`
-    # and zero materialised jobs — the inner reusable's permissions cannot
-    # exceed what the caller job grants, and the workflow-level
-    # `permissions: {}` (no default) does not propagate to `uses:` jobs.
+    # `contents: read`. The workflow-level `permissions: {}` is empty and
+    # is inherited by `uses:` jobs just like by regular jobs — but an
+    # inherited empty set cannot satisfy the called workflow's required
+    # `contents: read`, so without this per-job grant the workflow fails
+    # with `startup_failure` and zero materialised jobs.
     permissions:
       contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
       ref: ${{ github.ref }}
-    secrets: inherit
+    # Explicit secret pass-through (NOT `secrets: inherit`) so a
+    # compromised action in the called workflow can't reach unrelated
+    # org secrets. Forwards only the TER token actually needed.
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
 
   verify-packagist:
     name: Verify Packagist
@@ -285,7 +315,6 @@ jobs:
         env:
           PACKAGE: ${{ inputs.package-name }}
           KEY: ${{ inputs.extension-key }}
-          VENDOR: ${{ inputs.vendor }}
           VERSION: ${{ needs.build-and-sign.outputs.version }}
           TER_RESULT: ${{ needs.publish-to-ter.result }}
           PKGST_RESULT: ${{ needs.verify-packagist.result }}
