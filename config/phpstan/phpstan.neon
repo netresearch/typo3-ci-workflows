@@ -2,12 +2,22 @@
 #
 # phpstan/extension-installer (included in this package) auto-registers
 # phpstan-strict-rules, phpstan-deprecation-rules, phpstan-phpunit,
-# phpstan-typo3, and phpat — no manual neon includes needed for those.
+# phpstan-typo3, phpat, and ergebnis/phpstan-rules — no manual neon
+# includes needed for those.
 #
 # IMPORTANT: If your extension previously did NOT use saschaegerer/phpstan-typo3,
 # adding this package will change PHPStan's type inference for TYPO3 APIs
 # (e.g. GeneralUtility::makeInstance() returns proper types instead of mixed).
 # You will need to regenerate your phpstan-baseline.neon after migration.
+#
+# ergebnis/phpstan-rules defaults (allRules: true) enable rules that conflict
+# with standard TYPO3 framework patterns: extending @internal base classes
+# (ActionController, AbstractEntity), named arguments on TYPO3 core APIs,
+# isset(), switch statements, nullable return types, and parameters with null
+# default values. This config disables `allRules` and opts back in to the
+# universally beneficial rules that match TYPO3 coding standards.
+# Override individual `ergebnis.*.enabled` flags in your extension's
+# phpstan.neon to tighten or loosen per-project.
 #
 # Extensions include this file in their own phpstan.neon:
 #
@@ -40,6 +50,27 @@ parameters:
     checkMissingCallableSignature: true
     checkUninitializedProperties: true
     reportUnmatchedIgnoredErrors: true
+
+    # Curated ergebnis/phpstan-rules for TYPO3 compatibility.
+    # Default (allRules: true) breaks every TYPO3 extension by forbidding
+    # extending ActionController / AbstractEntity, named args, isset(),
+    # switch, nullable params, etc. We opt-in only to rules that align
+    # with TYPO3 coding standards.
+    ergebnis:
+        allRules: false
+        # Style / safety rules that align with TYPO3 coding standards:
+        declareStrictTypes:
+            enabled: true
+        noCompact:
+            enabled: true
+        noErrorSuppression:
+            enabled: true
+        noEval:
+            enabled: true
+        noReturnByReference:
+            enabled: true
+        testCaseWithSuffix:
+            enabled: true
 
     excludePaths:
         - %currentWorkingDirectory%/.Build/*
