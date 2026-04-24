@@ -90,9 +90,16 @@ jobs:
             # Fetch the most recent render-workflow runs (default page is 30);
             # that window is large enough to contain our run across all
             # typical Intercept dispatch delays without paginating.
-            RUNS_JSON=$(gh api \
+            # Surface gh api errors instead of swallowing them — a transient
+            # auth/rate-limit failure shouldn't be misreported as
+            # "Intercept didn't fire". Capture stderr so the error message
+            # lands in the workflow log.
+            if ! RUNS_JSON=$(gh api \
               "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/workflows/main-rendering.yml/runs?per_page=30" \
-              --jq '.workflow_runs' 2>/dev/null || echo '[]')
+              --jq '.workflow_runs' 2>&1); then
+              echo "::error::Failed to list render workflow runs: ${RUNS_JSON}"
+              exit 1
+            fi
 
             # For each run, ask the jobs endpoint whether our render job is
             # present. We cannot filter runs by inner-job-name server-side;
@@ -104,10 +111,18 @@ jobs:
               if [[ "$CREATED" < "$SINCE" ]]; then
                 continue
               fi
-              MATCH=$(gh api \
-                "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${ID}/jobs" \
-                --jq ".jobs[] | select(.name == \"${JOB_NAME}\") | .id" \
-                2>/dev/null | head -n 1 || true)
+              # Fetch jobs JSON, then run jq with --arg so JOB_NAME is safely
+              # quoted (a `"` or other special character in package-name
+              # would otherwise break the jq filter and silently miss the
+              # match). Surface API errors instead of swallowing them.
+              if ! JOBS_JSON=$(gh api \
+                "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${ID}/jobs" 2>&1); then
+                echo "::warning::Failed to list jobs for run ${ID}: ${JOBS_JSON}"
+                continue
+              fi
+              MATCH=$(echo "$JOBS_JSON" \
+                | jq -r --arg job_name "$JOB_NAME" '.jobs[] | select(.name == $job_name) | .id' \
+                | head -n 1 || true)
               if [[ -n "$MATCH" ]]; then
                 RUN_ID="$ID"
                 JOB_ID="$MATCH"
@@ -129,11 +144,17 @@ jobs:
             sleep "$POLL_INTERVAL"
           done
 
-          # Phase 2: wait for the matched job to finish.
+          # Phase 2: wait for the matched job to finish. Surface API errors
+          # so a transient auth/rate-limit failure isn't retried silently
+          # until the job timeout fires.
           while true; do
-            JOB_STATE=$(gh api \
+            if ! JOB_STATE=$(gh api \
               "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/jobs/${JOB_ID}" \
-              --jq '"\(.status):\(.conclusion // "-")"' 2>/dev/null || echo "error:-")
+              --jq '"\(.status):\(.conclusion // "-")"' 2>&1); then
+              echo "::error::Failed to query docs render job state: ${JOB_STATE}"
+              echo "::error::See https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
+              exit 1
+            fi
             case "$JOB_STATE" in
               completed:success)
                 echo "docs render succeeded — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
