@@ -23,18 +23,24 @@ on:
         required: true
         type: string   # 'ter' | 'docs' | 'packagist' | 'all'
       extension-key:
-        description: Extension key as registered on TER/docs.typo3.org
-        required: true
+        description: |
+          Deprecated, no longer consumed. publish-to-ter.yml now resolves the
+          extension key from composer.json. Kept as an optional input so
+          existing callers don't break — safe to omit.
+        required: false
         type: string
+        default: ''
       package-name:
         description: Composer package name
         required: true
         type: string
       vendor:
-        description: docs.typo3.org vendor segment
+        description: |
+          Deprecated, no longer consumed. The docs.typo3.org URL is derived
+          from package-name now. Safe to omit.
         required: false
         type: string
-        default: netresearch
+        default: ''
     secrets:
       TYPO3_TER_ACCESS_TOKEN:
         required: false

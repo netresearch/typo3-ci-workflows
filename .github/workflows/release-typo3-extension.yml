@@ -40,10 +40,12 @@ on:
         required: true
         type: string
       vendor:
-        description: 'docs.typo3.org vendor segment (owner of the docs URL)'
+        description: |
+          Deprecated, no longer consumed. The docs.typo3.org URL is derived
+          from package-name now. Safe to omit.
         required: false
         type: string
-        default: netresearch
+        default: ''
       include-sbom:
         description: Include SPDX and CycloneDX SBOMs as release assets
         required: false
@@ -286,7 +288,6 @@ jobs:
         env:
           PACKAGE: ${{ inputs.package-name }}
           KEY: ${{ inputs.extension-key }}
-          VENDOR: ${{ inputs.vendor }}
           VERSION: ${{ needs.build-and-sign.outputs.version }}
           TER_RESULT: ${{ needs.publish-to-ter.result }}
           PKGST_RESULT: ${{ needs.verify-packagist.result }}
