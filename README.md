@@ -348,6 +348,29 @@ jobs:
 | `timeout-minutes` | number | `30` | Job timeout in minutes |
 | `artifact-path` | string | `Tests/E2E/Playwright/reports/` | Path to Playwright reports |
 | `web-dir` | string | `.Build/Web` | TYPO3 web directory (document root) |
+| `typo3-versions` | string (JSON) | `'[""]'` | Matrix dimension: TYPO3 core version constraints (e.g. `'["^13.4.21","^14.3"]'`). Empty entry = use composer.json as-is. Each entry runs as a separate job. |
+| `typo3-packages` | string (JSON) | `'["typo3/cms-core"]'` | Packages whose constraints get bumped per `typo3-versions` matrix entry, applied via `composer require --no-update` (or `composer require --with-all-dependencies` when a `composer.lock` is committed) before install. |
+| `setup-variants` | string (JSON) | `'[""]'` | Matrix dimension: setup variant names (e.g. `'["bootstrap","core-only","fsc-set"]'`). Passed to `setup-script` and tests as `$E2E_VARIANT`. |
+| `setup-script` | string | `''` | Path to a custom setup script (relative to repo root). When set, replaces the entire built-in pipeline — the script must install deps, set up TYPO3, start any servers, and run tests. Receives `E2E_VARIANT`, `E2E_TYPO3_VERSION`, `E2E_TYPO3_PACKAGES` as env vars. Use this for extensions with comprehensive containerized setups (Apache+PHP-FPM, custom DB seeding, Content Blocks fixtures). |
+
+### Matrix expansion across setup variants
+
+Many TYPO3 extensions need to be tested against several "extension neighborhoods" to catch regressions that are only visible in specific configurations — e.g. a vanilla TYPO3 install with no `fluid_styled_content` site set behaves differently than one with Bootstrap Package, and bugs that show up in one setup are silently masked in the other. Use `typo3-versions` × `setup-variants` to fan out:
+
+```yaml
+jobs:
+  e2e:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/e2e.yml@main
+    permissions:
+      contents: read
+    with:
+      typo3-versions: '["^13.4.21","^14.3"]'
+      setup-variants: '["bootstrap","core-only","fsc-set"]'
+      setup-script: 'Build/Scripts/runTests.sh'   # reads $E2E_VARIANT, $E2E_TYPO3_VERSION, $E2E_TYPO3_PACKAGES
+      artifact-path: 'Build/test-results/'
+```
+
+This produces 6 jobs (2 TYPO3 versions × 3 variants), each isolated. The setup script branches on `$E2E_VARIANT` to install the right neighborhood (e.g. with/without `bk2k/bootstrap-package`, with/without `typo3/cms-fluid-styled-content`).
 
 ---
 
