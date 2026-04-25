@@ -1,0 +1,32 @@
+# Rector-only PHPStan config for Netresearch TYPO3 extensions.
+#
+# Why a separate file: Rector loads the project's PHPStan config through
+# its bundled phpstan.phar — which does not have ergebnis/phpstan-rules
+# registered, because phpstan/extension-installer only writes its
+# GeneratedConfig.php into the project's vendor/, not into the Rector phar.
+# As a result, the `parameters: ergebnis: { ... }` block in the regular
+# shared phpstan.neon trips a Nette\Schema\ValidationException
+# ("Unexpected item 'parameters › ergebnis'") when Rector loads it.
+#
+# This file mirrors the type-inference bits Rector actually needs (level,
+# treatPhpDocTypesAsCertain, excludePaths) and skips the ergebnis schema
+# entirely. The shared config/rector/rector.php points
+# `$rectorConfig->phpstanConfig()` here by default.
+#
+# Extensions normally do NOT need to include this file directly — they
+# inherit it through the shared rector.php. If an extension wants to
+# tighten Rector's type inference further, it can add its own neon and
+# call `$rectorConfig->phpstanConfig()` explicitly (which appends).
+
+parameters:
+    level: 10
+
+    treatPhpDocTypesAsCertain: false
+    inferPrivatePropertyTypeFromConstructor: true
+
+    excludePaths:
+        - %currentWorkingDirectory%/.Build/*
+        - %currentWorkingDirectory%/ext_emconf.php
+
+    bootstrapFiles:
+        - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/stubs/phpunit-attributes.php

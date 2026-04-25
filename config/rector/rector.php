@@ -67,7 +67,20 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
         $rectorConfig->paths($paths);
 
         $rectorConfig->skip([$projectRoot . '/ext_emconf.php']);
-        $rectorConfig->phpstanConfig($projectRoot . '/Build/phpstan.neon');
+
+        // Point Rector at the dedicated phpstan-rector.neon shipped in
+        // this package — NOT the project's Build/phpstan.neon. Rector
+        // loads its phpstan config through its bundled phpstan.phar,
+        // which does not have ergebnis/phpstan-rules registered, so the
+        // `parameters: ergebnis: { ... }` block in the regular shared
+        // neon trips Nette\Schema\ValidationException
+        // ("Unexpected item 'parameters › ergebnis'"). The Rector-only
+        // neon has the same level/exclude bits Rector needs but skips
+        // the ergebnis schema entirely.
+        $rectorConfig->phpstanConfig(
+            __DIR__ . '/../phpstan/phpstan-rector.neon',
+        );
+
         $rectorConfig->phpVersion(80200);
     }
 
