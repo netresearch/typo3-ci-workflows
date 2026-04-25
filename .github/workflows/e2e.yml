@@ -432,8 +432,17 @@ jobs:
       # like "^14.3" contain `^` which is technically allowed but
       # awkward. We strip everything outside [A-Za-z0-9._-] to keep
       # artifact names predictable and grep-friendly.
+      #
+      # `if: always()` is essential — without it, this step is skipped
+      # when a prior test/setup step exits non-zero, and the suffix
+      # consumed by Upload test results (also `if: always()`) becomes
+      # the empty string. Multiple matrix entries then collide on the
+      # base artifact name "playwright-report" and only one upload
+      # survives. We specifically need the suffix when things are
+      # failing, so the step must always run.
       - name: Compute artifact suffix
         id: artifact-suffix
+        if: always()
         env:
           MATRIX_TYPO3: ${{ matrix.typo3 }}
           MATRIX_VARIANT: ${{ matrix.variant }}
