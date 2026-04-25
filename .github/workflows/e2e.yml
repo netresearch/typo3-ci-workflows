@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       php-version:
-        description: PHP version
+        description: PHP version (used in default mode; setup-script may override)
         type: string
         default: '8.4'
       node-version:
@@ -12,7 +12,7 @@ on:
         type: string
         default: '24'
       typo3-setup-extensions:
-        description: Run extension:setup after TYPO3 setup
+        description: Run extension:setup after TYPO3 setup (default mode only)
         type: boolean
         default: true
       playwright-browser:
@@ -20,11 +20,11 @@ on:
         type: string
         default: 'chromium'
       test-command:
-        description: E2E test command
+        description: E2E test command (default mode only — setup-script owns its test invocation)
         type: string
         default: 'npm run test:e2e'
       db-image:
-        description: Database Docker image
+        description: Database Docker image (default mode only)
         type: string
         default: 'mariadb:11.4'
       php-extensions:
@@ -40,22 +40,88 @@ on:
         type: string
         default: 'Tests/E2E/Playwright/reports/'
       web-dir:
-        description: TYPO3 web directory (document root for PHP server)
+        description: TYPO3 web directory (document root for PHP server, default mode only)
         type: string
         default: '.Build/Web'
+
+      # Matrix dimensions — both default to a single empty entry, preserving
+      # the original single-job behavior for existing consumers. Pass a
+      # multi-entry JSON array to expand the matrix.
+      typo3-versions:
+        description: >-
+          JSON array of TYPO3 core version constraints to test against
+          (e.g. '["^13.4.21","^14.3"]'). Each entry runs as a separate
+          matrix job, with the constraint applied to packages listed in
+          `typo3-packages` via `composer require --no-update`. The empty
+          string ("") means "use composer.json as-is, no override". Default
+          '[""]' = single job using existing composer.json.
+        type: string
+        default: '[""]'
+      typo3-packages:
+        description: >-
+          JSON array of TYPO3 packages whose constraints get bumped per
+          matrix entry. Only used when `typo3-versions` contains
+          non-empty entries.
+        type: string
+        default: '["typo3/cms-core"]'
+      setup-variants:
+        description: >-
+          JSON array of setup variant names. Each variant runs as a
+          separate matrix job. Variant name is passed to `setup-script`
+          as $E2E_VARIANT and (in default mode) to `test-command` env.
+          Use this to test the extension under different sitepackage /
+          fluid-styled-content / Bootstrap-Package combinations.
+          Default '[""]' = single job, no variant axis.
+        type: string
+        default: '[""]'
+
+      # Custom setup hook for extensions whose E2E setup doesn't fit the
+      # default workflow shape (e.g. containerized Apache+PHP-FPM,
+      # custom DB seeding, Content Blocks fixture installation, etc.)
+      setup-script:
+        description: >-
+          Path to a custom setup script (relative to repo root). When
+          provided, the script REPLACES the entire default pipeline —
+          it is responsible for installing dependencies, setting up
+          TYPO3, starting any servers, AND running the tests. The
+          workflow only handles checkout, env setup, and artifact
+          upload around it. Env vars passed in: E2E_VARIANT,
+          E2E_TYPO3_VERSION, E2E_TYPO3_PACKAGES (JSON array). Empty
+          string (default) = use built-in default pipeline.
+        type: string
+        default: ''
 
 permissions: {}
 
 jobs:
   e2e:
-    name: Playwright E2E Tests
+    # Surface the matrix entry in the job name so multi-variant runs are
+    # distinguishable in CI logs. Falls back to a plain "E2E" label when
+    # neither matrix axis is in use.
+    name: >-
+      ${{ matrix.typo3 != '' && matrix.variant != ''
+            && format('E2E (TYPO3 {0}, {1})', matrix.typo3, matrix.variant)
+          || matrix.typo3 != ''
+            && format('E2E (TYPO3 {0})', matrix.typo3)
+          || matrix.variant != ''
+            && format('E2E ({0})', matrix.variant)
+          || 'E2E' }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        typo3: ${{ fromJSON(inputs.typo3-versions) }}
+        variant: ${{ fromJSON(inputs.setup-variants) }}
 
     services:
       db:
+        # The MariaDB service is always started (GitHub Actions doesn't
+        # support conditional services). In scripted mode, custom setup
+        # scripts that bring their own DB simply ignore this service —
+        # it adds ~5s to job startup but no other cost.
         image: ${{ inputs.db-image }}
         env:
           MYSQL_ROOT_PASSWORD: root
@@ -87,21 +153,61 @@ jobs:
           extensions: ${{ inputs.php-extensions }}
           coverage: none
 
+      # ─── Scripted mode ─────────────────────────────────────────────
+      # When `setup-script` is provided, the consumer-supplied script
+      # owns the full lifecycle (install deps, setup DB, start servers,
+      # run tests). The workflow just hands it the matrix env vars and
+      # runs it.
+      - name: Run custom setup script
+        if: inputs.setup-script != ''
+        env:
+          E2E_VARIANT: ${{ matrix.variant }}
+          E2E_TYPO3_VERSION: ${{ matrix.typo3 }}
+          E2E_TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
+          SETUP_SCRIPT: ${{ inputs.setup-script }}
+        run: bash "$SETUP_SCRIPT"
+
+      # ─── Default mode ──────────────────────────────────────────────
+      # Original built-in pipeline, gated on `setup-script` being empty.
+      # Each step below is a no-op in scripted mode.
       - name: Get Composer cache directory
+        if: inputs.setup-script == ''
         id: composer-cache
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Composer dependencies
+        if: inputs.setup-script == ''
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-e2e-${{ inputs.php-version }}-${{ hashFiles('**/composer.json') }}
-          restore-keys: ${{ runner.os }}-composer-e2e-${{ inputs.php-version }}-
+          key: ${{ runner.os }}-composer-e2e-${{ inputs.php-version }}-${{ matrix.typo3 }}-${{ matrix.variant }}-${{ hashFiles('**/composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-e2e-${{ inputs.php-version }}-${{ matrix.typo3 }}-${{ matrix.variant }}-
+            ${{ runner.os }}-composer-e2e-${{ inputs.php-version }}-
 
       - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-progress
+        if: inputs.setup-script == ''
+        env:
+          TYPO3_VERSION: ${{ matrix.typo3 }}
+          TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
+        run: |
+          # If a TYPO3 version constraint is specified for this matrix
+          # entry, override the consumer's composer.json constraints
+          # for the listed packages before installing.
+          if [[ -n "$TYPO3_VERSION" ]]; then
+            PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+              echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+              exit 1
+            }
+            for pkg in $PACKAGES; do
+              echo "Bumping ${pkg} to ${TYPO3_VERSION} for this matrix entry"
+              composer require --no-update --no-interaction "${pkg}:${TYPO3_VERSION}"
+            done
+          fi
+          composer install --prefer-dist --no-progress
 
       - name: Ensure typo3/cms-install is available
+        if: inputs.setup-script == ''
         # `bin/typo3 setup` (used by the next step) is provided by
         # typo3/cms-install. Many extensions don't declare it as a dev
         # dependency, so install it on-demand if missing. Match the major
@@ -122,6 +228,7 @@ jobs:
             "typo3/cms-install:^${MAJOR}.0"
 
       - name: Setup TYPO3
+        if: inputs.setup-script == ''
         run: |
           # Wait for database
           DB_READY=false
@@ -204,6 +311,7 @@ jobs:
           .Build/bin/typo3 cache:flush
 
       - name: Detect npm lock file
+        if: inputs.setup-script == ''
         id: npm-lockfile
         # TYPO3 extensions frequently gitignore package-lock.json, but
         # actions/setup-node with cache='npm' and `npm ci` both require it.
@@ -217,19 +325,20 @@ jobs:
           fi
 
       - name: Setup Node.js (with npm cache)
-        if: steps.npm-lockfile.outputs.present == 'true'
+        if: inputs.setup-script == '' && steps.npm-lockfile.outputs.present == 'true'
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: ${{ inputs.node-version }}
           cache: 'npm'
 
       - name: Setup Node.js (no cache)
-        if: steps.npm-lockfile.outputs.present != 'true'
+        if: inputs.setup-script == '' && steps.npm-lockfile.outputs.present != 'true'
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: ${{ inputs.node-version }}
 
       - name: Install npm dependencies
+        if: inputs.setup-script == ''
         run: |
           if [[ "${{ steps.npm-lockfile.outputs.present }}" == "true" ]]; then
             npm ci
@@ -238,9 +347,13 @@ jobs:
           fi
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps ${{ inputs.playwright-browser }}
+        if: inputs.setup-script == ''
+        env:
+          BROWSER: ${{ inputs.playwright-browser }}
+        run: npx playwright install --with-deps "$BROWSER"
 
       - name: Start PHP server
+        if: inputs.setup-script == ''
         env:
           WEB_DIR: ${{ inputs.web-dir }}
         run: |
@@ -274,28 +387,51 @@ jobs:
           fi
 
       - name: Run E2E tests
+        if: inputs.setup-script == ''
         env:
           TYPO3_BASE_URL: http://localhost:8080
-        run: ${{ inputs.test-command }}
+          E2E_VARIANT: ${{ matrix.variant }}
+          E2E_TYPO3_VERSION: ${{ matrix.typo3 }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: bash -c "$TEST_COMMAND"
 
+      # ─── Common: artifact upload (both modes) ──────────────────────
       - name: Upload test results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: playwright-report
+          # Disambiguate artifact name across matrix entries to avoid
+          # GitHub's "artifact already exists" error for multi-variant runs.
+          name: >-
+            playwright-report${{
+              (matrix.typo3 != '' || matrix.variant != '')
+                && format('-{0}{1}{2}',
+                          matrix.typo3,
+                          (matrix.typo3 != '' && matrix.variant != '') && '-' || '',
+                          matrix.variant)
+              || ''
+            }}
           path: ${{ inputs.artifact-path }}
           retention-days: 7
 
       - name: Upload PHP server logs
+        if: inputs.setup-script == '' && failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
         with:
-          name: php-server-logs
+          name: >-
+            php-server-logs${{
+              (matrix.typo3 != '' || matrix.variant != '')
+                && format('-{0}{1}{2}',
+                          matrix.typo3,
+                          (matrix.typo3 != '' && matrix.variant != '') && '-' || '',
+                          matrix.variant)
+              || ''
+            }}
           path: /tmp/php-server.log
           retention-days: 3
 
       - name: Stop PHP server
-        if: always()
+        if: inputs.setup-script == '' && always()
         run: |
           if [ -f /tmp/php-server.pid ]; then
             kill "$(cat /tmp/php-server.pid)" 2>/dev/null || true
