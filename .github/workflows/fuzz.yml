@@ -47,11 +47,26 @@ on:
 permissions: {}
 
 jobs:
+  preflight:
+    # Skip post-merge `push` runs whose SHA was already validated by a
+    # successful `merge_group` run. See .github/actions/preflight-gate.
+    name: Preflight (event gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        uses: netresearch/typo3-ci-workflows/.github/actions/preflight-gate@main
+
   fuzz-tests:
+    needs: preflight
     name: Fuzz Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: inputs.run-fuzz-tests
+    if: inputs.run-fuzz-tests && needs.preflight.outputs.run == 'true'
     permissions:
       contents: read
     steps:
@@ -93,10 +108,11 @@ jobs:
         run: .Build/bin/phpunit -c "$PHPUNIT_CONFIG" --testsuite "$FUZZ_SUITE" --no-coverage --colors=never
 
   mutation-testing:
+    needs: preflight
     name: Mutation Testing (Infection)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: inputs.run-mutation-tests
+    if: inputs.run-mutation-tests && needs.preflight.outputs.run == 'true'
     permissions:
       contents: read
     steps:

@@ -17,7 +17,23 @@ on:
 permissions: {}
 
 jobs:
+  preflight:
+    # Skip post-merge `push` runs whose SHA was already validated by a
+    # successful `merge_group` run. See .github/actions/preflight-gate.
+    name: Preflight (event gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        uses: netresearch/typo3-ci-workflows/.github/actions/preflight-gate@main
+
   php-licenses:
+    needs: preflight
+    if: needs.preflight.outputs.run == 'true'
     name: PHP License Audit
     runs-on: ubuntu-latest
     timeout-minutes: 10

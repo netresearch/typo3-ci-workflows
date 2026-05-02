@@ -94,7 +94,23 @@ on:
 permissions: {}
 
 jobs:
+  preflight:
+    # Skip post-merge `push` runs whose SHA was already validated by a
+    # successful `merge_group` run. See .github/actions/preflight-gate.
+    name: Preflight (event gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        uses: netresearch/typo3-ci-workflows/.github/actions/preflight-gate@main
+
   e2e:
+    needs: preflight
+    if: needs.preflight.outputs.run == 'true'
     # Surface the matrix entry in the job name so multi-variant runs are
     # distinguishable in CI logs. Falls back to a plain "E2E" label when
     # neither matrix axis is in use.

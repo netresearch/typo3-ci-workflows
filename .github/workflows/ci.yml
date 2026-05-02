@@ -117,9 +117,24 @@ on:
 permissions: {}
 
 jobs:
+  preflight:
+    # Skip post-merge `push` runs whose SHA was already validated by a
+    # successful `merge_group` run. See .github/actions/preflight-gate.
+    name: Preflight (event gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        uses: netresearch/typo3-ci-workflows/.github/actions/preflight-gate@main
+
   lint:
+    needs: preflight
     name: Lint
-    if: ${{ inputs.run-lint }}
+    if: ${{ inputs.run-lint && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -181,8 +196,9 @@ jobs:
 
   # CGL runs on first PHP version only - code style results are PHP-version-independent
   cgl:
+    needs: preflight
     name: Code Style
-    if: ${{ inputs.run-cgl }}
+    if: ${{ inputs.run-cgl && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -241,8 +257,9 @@ jobs:
           fi
 
   phpstan:
+    needs: preflight
     name: PHPStan
-    if: ${{ inputs.run-phpstan }}
+    if: ${{ inputs.run-phpstan && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -350,8 +367,9 @@ jobs:
 
   # Rector runs on first PHP version only - rule application is PHP-version-independent
   rector:
+    needs: preflight
     name: Rector
-    if: ${{ inputs.run-rector }}
+    if: ${{ inputs.run-rector && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -404,8 +422,9 @@ jobs:
           fi
 
   unit-tests:
+    needs: preflight
     name: Unit Tests
-    if: ${{ inputs.run-unit-tests }}
+    if: ${{ inputs.run-unit-tests && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -524,8 +543,9 @@ jobs:
           fail_ci_if_error: false
 
   functional-tests:
+    needs: preflight
     name: Functional Tests
-    if: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' }}
+    if: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -664,8 +684,9 @@ jobs:
           fail_ci_if_error: false
 
   functional-tests-sqlite:
+    needs: preflight
     name: Functional Tests SQLite
-    if: ${{ inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' }}
+    if: ${{ inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

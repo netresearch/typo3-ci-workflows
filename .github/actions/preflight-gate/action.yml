@@ -1,0 +1,83 @@
+name: Preflight Gate
+description: >-
+  Decide whether the calling reusable workflow should execute on this event.
+  Returns "true" for everything except `push` to a branch where the same SHA
+  has already been validated by a successful `merge_group` run — the post-merge
+  push run is then a known duplicate and is skipped to save compute.
+
+inputs:
+  required-event-conclusions:
+    description: >-
+      Comma-separated list of `merge_group` run conclusions that count as
+      "already validated". Default is "success" only — change to e.g.
+      "success,neutral" if the calling repo's quality gate accepts neutral.
+    required: false
+    default: success
+
+outputs:
+  run:
+    description: >-
+      "true" if the calling workflow should execute, "false" if it should
+      skip as a known duplicate. Always "true" for non-push events. Failure
+      to query the actions API (e.g. missing `actions: read` permission) is
+      treated as "true" — the gate fails open so a misconfigured consumer
+      still gets CI coverage.
+    value: ${{ steps.gate.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - id: gate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        EVENT: ${{ github.event_name }}
+        SHA: ${{ github.sha }}
+        ALLOWED_CONCLUSIONS: ${{ inputs.required-event-conclusions }}
+      run: |
+        set -euo pipefail
+
+        # Non-push events: never the duplicate case — always run.
+        if [ "$EVENT" != "push" ]; then
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::preflight: event=$EVENT — running."
+          exit 0
+        fi
+
+        # On push: skip only if a successful merge_group run for this exact SHA
+        # exists. That proves the merge queue already validated this tree.
+        # Repos without a merge queue, admin-bypass pushes, and direct pushes
+        # to non-default branches all produce no merge_group run → CI runs.
+        # API failure (missing permission, transient error) → fail open.
+        list_url="repos/${REPO}/actions/runs?head_sha=${SHA}&event=merge_group&per_page=20"
+        runs_json=$(gh api "$list_url" 2>/dev/null || echo '{"workflow_runs":[]}')
+
+        # Build a jq filter from the allow-list of conclusions.
+        # Default ("success") gives: select(.conclusion == "success")
+        IFS=',' read -ra allowed <<<"$ALLOWED_CONCLUSIONS"
+        jq_select=""
+        for c in "${allowed[@]}"; do
+          c_trim=$(echo "$c" | tr -d '[:space:]')
+          [ -z "$c_trim" ] && continue
+          if [ -z "$jq_select" ]; then
+            jq_select=".conclusion == \"$c_trim\""
+          else
+            jq_select="$jq_select or .conclusion == \"$c_trim\""
+          fi
+        done
+        [ -z "$jq_select" ] && jq_select='.conclusion == "success"'
+
+        matched=$(echo "$runs_json" \
+          | jq "[.workflow_runs[] | select($jq_select)] | length" 2>/dev/null \
+          || echo 0)
+        # Paranoia: clamp to integer.
+        [[ "$matched" =~ ^[0-9]+$ ]] || matched=0
+
+        if [ "$matched" -gt 0 ]; then
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::preflight: skipping push run — $matched merge_group run(s) on SHA $SHA already validated this tree."
+        else
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::preflight: running — no qualifying merge_group run found for SHA $SHA (event=$EVENT)."
+        fi
