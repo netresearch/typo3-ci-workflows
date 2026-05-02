@@ -1,9 +1,10 @@
 name: Preflight Gate
 description: >-
   Decide whether the calling reusable workflow should execute on this event.
-  Returns "true" for everything except `push` to a branch where the same SHA
-  has already been validated by a successful `merge_group` run — the post-merge
-  push run is then a known duplicate and is skipped to save compute.
+  Returns "true" for everything except a `push` to the default branch where
+  the **same workflow file** already produced a successful `merge_group` run
+  on the same SHA — that post-merge push run is then a known duplicate and is
+  skipped to save compute.
 
 inputs:
   required-event-conclusions:
@@ -18,10 +19,10 @@ outputs:
   run:
     description: >-
       "true" if the calling workflow should execute, "false" if it should
-      skip as a known duplicate. Always "true" for non-push events. Failure
-      to query the actions API (e.g. missing `actions: read` permission) is
-      treated as "true" — the gate fails open so a misconfigured consumer
-      still gets CI coverage.
+      skip as a known duplicate. Always "true" for non-push events, pushes
+      to non-default branches, and any case where the actions API call
+      fails (missing `actions: read` permission, transient error). The gate
+      fails open so a misconfigured consumer still gets CI coverage.
     value: ${{ steps.gate.outputs.run }}
 
 runs:
@@ -34,6 +35,9 @@ runs:
         REPO: ${{ github.repository }}
         EVENT: ${{ github.event_name }}
         SHA: ${{ github.sha }}
+        REF_NAME: ${{ github.ref_name }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
         ALLOWED_CONCLUSIONS: ${{ inputs.required-event-conclusions }}
       run: |
         set -euo pipefail
@@ -45,39 +49,50 @@ runs:
           exit 0
         fi
 
-        # On push: skip only if a successful merge_group run for this exact SHA
-        # exists. That proves the merge queue already validated this tree.
-        # Repos without a merge queue, admin-bypass pushes, and direct pushes
-        # to non-default branches all produce no merge_group run → CI runs.
-        # API failure (missing permission, transient error) → fail open.
-        list_url="repos/${REPO}/actions/runs?head_sha=${SHA}&event=merge_group&per_page=20"
+        # Push to a non-default branch: merge_group lands on the default branch
+        # only, so a same-SHA push elsewhere (e.g. fast-forwarded release branch)
+        # is a separate context that should still run CI.
+        if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::preflight: push to non-default branch ($REF_NAME) — running."
+          exit 0
+        fi
+
+        # Extract the calling workflow file name (e.g. "ci.yml") from
+        # github.workflow_ref. Format: <owner>/<repo>/<path>@<ref>
+        # — strip the @<ref> suffix, then take everything after the last "/".
+        WORKFLOW_FILE="${WORKFLOW_REF%@*}"
+        WORKFLOW_FILE="${WORKFLOW_FILE##*/}"
+        if [ -z "$WORKFLOW_FILE" ]; then
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "::warning::preflight: could not derive workflow file from \$WORKFLOW_REF — running (fail open)."
+          exit 0
+        fi
+
+        # Scope the lookup to *this* workflow file only — a different workflow
+        # succeeding on merge_group for the same SHA does not prove THIS
+        # workflow already ran. per_page=100 is enough headroom for any
+        # realistic re-run history; one page suffices.
+        list_url="repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?head_sha=${SHA}&event=merge_group&per_page=100"
         runs_json=$(gh api "$list_url" 2>/dev/null || echo '{"workflow_runs":[]}')
 
-        # Build a jq filter from the allow-list of conclusions.
-        # Default ("success") gives: select(.conclusion == "success")
-        IFS=',' read -ra allowed <<<"$ALLOWED_CONCLUSIONS"
-        jq_select=""
-        for c in "${allowed[@]}"; do
-          c_trim=$(echo "$c" | tr -d '[:space:]')
-          [ -z "$c_trim" ] && continue
-          if [ -z "$jq_select" ]; then
-            jq_select=".conclusion == \"$c_trim\""
-          else
-            jq_select="$jq_select or .conclusion == \"$c_trim\""
-          fi
-        done
-        [ -z "$jq_select" ] && jq_select='.conclusion == "success"'
-
-        matched=$(echo "$runs_json" \
-          | jq "[.workflow_runs[] | select($jq_select)] | length" 2>/dev/null \
-          || echo 0)
+        # Filter inside jq using --arg so the conclusion list never has to be
+        # spliced into a jq expression as raw shell text.
+        matched=$(echo "$runs_json" | jq \
+          --arg allowed "$ALLOWED_CONCLUSIONS" \
+          '[
+             ($allowed | split(",") | map(gsub("\\s+"; "")) | map(select(length > 0))) as $allow
+             | .workflow_runs[]
+             | select(.conclusion as $c | $allow | index($c))
+           ] | length' \
+          2>/dev/null || echo 0)
         # Paranoia: clamp to integer.
         [[ "$matched" =~ ^[0-9]+$ ]] || matched=0
 
         if [ "$matched" -gt 0 ]; then
           echo "run=false" >> "$GITHUB_OUTPUT"
-          echo "::notice::preflight: skipping push run — $matched merge_group run(s) on SHA $SHA already validated this tree."
+          echo "::notice::preflight: skipping push run — workflow $WORKFLOW_FILE has $matched merge_group run(s) on SHA $SHA already validating this tree."
         else
           echo "run=true" >> "$GITHUB_OUTPUT"
-          echo "::notice::preflight: running — no qualifying merge_group run found for SHA $SHA (event=$EVENT)."
+          echo "::notice::preflight: running — no qualifying merge_group run for workflow $WORKFLOW_FILE on SHA $SHA."
         fi
