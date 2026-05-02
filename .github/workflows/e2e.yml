@@ -96,7 +96,11 @@ permissions: {}
 jobs:
   preflight:
     # Skip post-merge `push` runs whose SHA was already validated by a
-    # successful `merge_group` run. See .github/actions/preflight-gate.
+    # successful `merge_group` run on the SAME workflow. The logic is
+    # inlined (rather than a composite action) because cross-repo
+    # reusable workflows cannot reference a same-repo composite action
+    # via `./` syntax, and pinning a self-reference to a SHA creates a
+    # chicken-and-egg between workflow change and SHA bump.
     name: Preflight (event gate)
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -111,7 +115,63 @@ jobs:
           egress-policy: audit
 
       - id: gate
-        uses: netresearch/typo3-ci-workflows/.github/actions/preflight-gate@main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+
+          # Non-push events: never the duplicate case — always run.
+          if [ "$EVENT" != "push" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: event=$EVENT — running."
+            exit 0
+          fi
+
+          # Push to a non-default branch: merge_group lands on the default
+          # branch only, so a same-SHA push elsewhere is a separate context
+          # that should still run CI.
+          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: push to non-default branch ($REF_NAME) — running."
+            exit 0
+          fi
+
+          # Derive the calling workflow file name from github.workflow_ref
+          # (format: <owner>/<repo>/<path>@<ref>).
+          WORKFLOW_FILE="${WORKFLOW_REF%@*}"
+          WORKFLOW_FILE="${WORKFLOW_FILE##*/}"
+          if [ -z "$WORKFLOW_FILE" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::preflight: could not derive workflow file from \$WORKFLOW_REF — running (fail open)."
+            exit 0
+          fi
+
+          # Scope the lookup to *this* workflow file only — another workflow
+          # succeeding on merge_group for the same SHA does not prove THIS
+          # workflow already ran. Failure to query (missing actions:read,
+          # transient error) → fail open ("run=true").
+          list_url="repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?head_sha=${SHA}&event=merge_group&per_page=100"
+          runs_json=$(gh api "$list_url" 2>/dev/null || echo '{"workflow_runs":[]}')
+
+          matched=$(echo "$runs_json" \
+            | jq '[.workflow_runs[] | select(.conclusion == "success")] | length' 2>/dev/null \
+            || echo 0)
+          [[ "$matched" =~ ^[0-9]+$ ]] || matched=0
+
+          if [ "$matched" -gt 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: skipping push run — workflow $WORKFLOW_FILE has $matched merge_group run(s) on SHA $SHA already validating this tree."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: running — no qualifying merge_group run for workflow $WORKFLOW_FILE on SHA $SHA."
+          fi
 
   e2e:
     needs: preflight
