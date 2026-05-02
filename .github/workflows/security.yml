@@ -27,11 +27,31 @@ on:
 permissions: {}
 
 jobs:
+  preflight:
+    # Skip post-merge `push` runs whose SHA was already validated by a
+    # successful `merge_group` run. See .github/actions/preflight-gate.
+    name: Preflight (event gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - id: gate
+        uses: netresearch/typo3-ci-workflows/.github/actions/preflight-gate@main
+
   composer-audit:
+    needs: preflight
     name: Composer Audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: ${{ !inputs.skip-composer-audit }}
+    if: ${{ !inputs.skip-composer-audit && needs.preflight.outputs.run == 'true' }}
     permissions:
       contents: read
     steps:
@@ -74,10 +94,11 @@ jobs:
         run: composer audit --format=plain --abandoned=report
 
   opengrep:
+    needs: preflight
     name: SAST (Opengrep)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ !inputs.skip-opengrep }}
+    if: ${{ !inputs.skip-opengrep && needs.preflight.outputs.run == 'true' }}
     permissions:
       contents: read
       security-events: write
