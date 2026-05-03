@@ -210,9 +210,12 @@ jobs:
           for file in *; do
             [ -f "$file" ] || continue
             case "$file" in
-              *.bundle) continue ;;  # don't sign already-generated bundles
+              *.sigstore.json) continue ;;  # don't sign already-generated signature bundles
             esac
-            cosign sign-blob --yes "$file" --bundle "${file}.bundle"
+            # Use .sigstore.json (Sigstore bundle format) so OSSF Scorecard
+            # recognizes the artifact as signed. The bytes are identical to
+            # cosign's --bundle output; only the extension differs.
+            cosign sign-blob --yes "$file" --bundle "${file}.sigstore.json"
           done
 
       - name: Generate build-provenance attestation
@@ -375,7 +378,7 @@ jobs:
 
             ```bash
             cosign verify-blob \
-              --bundle ${{ inputs.archive-prefix }}-${{ needs.build-and-sign.outputs.version }}.zip.bundle \
+              --bundle ${{ inputs.archive-prefix }}-${{ needs.build-and-sign.outputs.version }}.zip.sigstore.json \
               --certificate-identity-regexp "https://github.com/${{ github.repository_owner }}/.*" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
               ${{ inputs.archive-prefix }}-${{ needs.build-and-sign.outputs.version }}.zip
