@@ -37,8 +37,6 @@ jobs:
     name: Preflight (event gate)
     runs-on: ubuntu-latest
     timeout-minutes: 1
-    permissions:
-      actions: read
     outputs:
       run: ${{ steps.gate.outputs.run }}
     steps:
