@@ -12,7 +12,7 @@
         "ergebnis/phpstan-rules": "^2.6",
         "friendsofphp/php-cs-fixer": "^3.65",
         "giorgiosironi/eris": "^1.0",
-        "infection/infection": "^0.29 || ^0.30 || ^0.31 || ^0.32",
+        "infection/infection": "^0.29 || ^0.30 || ^0.31 || ^0.32 || ^0.33",
         "nikic/php-fuzzer": "^0.0.11",
         "overtrue/phplint": "^9.5",
         "phpat/phpat": "^0.12",
