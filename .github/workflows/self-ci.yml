@@ -216,8 +216,10 @@ jobs:
               # Skip local references (./)
               [[ "$ref" == ./* ]] && continue
 
-              # Skip self-references to this repo's reusable workflows
-              [[ "$ref" == netresearch/typo3-ci-workflows/* ]] && continue
+              # Skip first-party Netresearch reusable workflows: by policy
+              # they track @main and are never SHA-pinned (third-party
+              # actions still require a full SHA pin below).
+              [[ "$ref" == netresearch/* ]] && continue
 
               # Skip docker:// references pinned by digest (@sha256:...)
               [[ "$ref" == docker://*@sha256:* ]] && continue
@@ -238,3 +240,10 @@ jobs:
             echo "Pin actions to full commit SHAs (e.g., uses: actions/checkout@<sha> # v6.0.2)"
             exit 1
           fi
+
+  zizmor:
+    name: zizmor
+    permissions:
+      contents: read
+      security-events: write
+    uses: netresearch/.github/.github/workflows/zizmor.yml@main
