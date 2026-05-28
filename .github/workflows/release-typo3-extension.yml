@@ -184,6 +184,11 @@ jobs:
           path: .
           format: spdx-json
           output-file: dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.sbom.spdx.json
+          # This job is least-privilege (contents: read). The dedicated
+          # "Create GitHub Release" job (contents: write) attaches all assets.
+          # sbom-action defaults to upload-release-assets: true, which fails
+          # here with "Resource not accessible by integration".
+          upload-release-assets: false
 
       - name: Generate SBOM (CycloneDX)
         if: inputs.include-sbom
@@ -192,6 +197,8 @@ jobs:
           path: .
           format: cyclonedx-json
           output-file: dist/${{ inputs.archive-prefix }}-${{ steps.version.outputs.version }}.sbom.cdx.json
+          # See SPDX step above: contents: read job must not attach release assets.
+          upload-release-assets: false
 
       - name: Generate checksums
         run: |
