@@ -180,7 +180,10 @@ jobs:
       - name: Install Opengrep
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o "$HOME/.local/bin/opengrep" \
+          # Retry to ride out transient GitHub release-CDN errors (e.g. HTTP 504)
+          # that otherwise fail the whole security job on a flaky download.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
+            -o "$HOME/.local/bin/opengrep" \
             "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/opengrep_manylinux_x86"
           echo "${OPENGREP_SHA256}  $HOME/.local/bin/opengrep" | sha256sum -c -
           chmod +x "$HOME/.local/bin/opengrep"
