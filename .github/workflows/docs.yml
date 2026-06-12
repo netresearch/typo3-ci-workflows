@@ -27,8 +27,8 @@ on:
 permissions: {}
 
 env:
-  # typo3-documentation/render-guides 0.39.0
-  RENDER_GUIDES_IMAGE: ghcr.io/typo3-documentation/render-guides@sha256:000ef5260cfa8e687d3a75fe9302efa8e09b52f31d162af6f4a35c0a059d87d4
+  # typo3-documentation/render-guides 0.39.1
+  RENDER_GUIDES_IMAGE: ghcr.io/typo3-documentation/render-guides@sha256:6080cbe815ae702e11a932924cdbcf6ec934fbdf9568931a5ed6bafc4b69959c
 
 jobs:
   render:
