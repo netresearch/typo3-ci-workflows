@@ -296,7 +296,9 @@ jobs:
           restore-keys: ${{ runner.os }}-composer-cgl-
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-progress
+        run: |
+          composer config --no-plugins audit.block-insecure false
+          composer install --prefer-dist --no-progress
 
       - name: Run code style check
         env:
@@ -405,6 +407,7 @@ jobs:
           for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
+          composer config --no-plugins audit.block-insecure false
           composer install --prefer-dist --no-progress
 
       - name: Run PHPStan
@@ -467,7 +470,9 @@ jobs:
           restore-keys: ${{ runner.os }}-composer-rector-
 
       - name: Install dependencies
-        run: composer install --prefer-dist --no-progress
+        run: |
+          composer config --no-plugins audit.block-insecure false
+          composer install --prefer-dist --no-progress
 
       - name: Run Rector
         env:
@@ -570,6 +575,7 @@ jobs:
           for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
+          composer config --no-plugins audit.block-insecure false
           composer install --prefer-dist --no-progress
 
       - name: Run unit tests
@@ -705,6 +711,7 @@ jobs:
           for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
+          composer config --no-plugins audit.block-insecure false
           composer install --prefer-dist --no-progress
 
       - name: Run functional tests
@@ -830,6 +837,7 @@ jobs:
           for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
+          composer config --no-plugins audit.block-insecure false
           composer install --prefer-dist --no-progress
 
       - name: Run functional tests
