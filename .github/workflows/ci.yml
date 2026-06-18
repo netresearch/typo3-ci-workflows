@@ -424,6 +424,14 @@ jobs:
           for pkg in $PACKAGES; do
             composer require --no-update "$pkg:${TYPO3_VERSION}"
           done
+          # phpstan/phpstan-phpunit (^2.0, currently 2.0.16) does not yet model
+          # PHPUnit 13's mock-builder API, so analyzing test mocks under PHPUnit
+          # 13 produces false "undefined method InvocationStubber::with()" /
+          # "willReturn() on mixed" errors (PHP 8.4/8.5 resolve PHPUnit 13 via
+          # typo3/testing-framework). Pin PHPUnit < 13 for STATIC ANALYSIS ONLY;
+          # the Unit/Functional jobs still run the full PHPUnit matrix. Remove
+          # this cap once phpstan-phpunit supports PHPUnit 13.
+          composer require --dev --no-update "phpunit/phpunit:<13"
           composer config --no-plugins audit.block-insecure false
           composer install --prefer-dist --no-progress
 
