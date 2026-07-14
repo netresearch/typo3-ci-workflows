@@ -311,17 +311,24 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [build-and-sign, publish-to-ter, verify-packagist, verify-docs]
-    # Run only if every non-skipped publish reached success. This enforces
-    # "release-last": the GitHub release is a receipt of a successful run, and
-    # never a canvas that gets edited afterwards. If any publish failed, no
-    # release is created and the orchestrator must be re-run to finish.
+    # Run only if every publish that is under our control reached success. This
+    # enforces "release-last": the GitHub release is a receipt of a successful
+    # run, and never a canvas that gets edited afterwards. If TER or Packagist
+    # failed, no release is created and the orchestrator must be re-run.
+    #
+    # verify-docs is deliberately NOT part of this gate: docs.typo3.org renders
+    # via the external Intercept webhook, which can be down or slow at tag time
+    # (a 500 from docs-hook.typo3.org once blocked an otherwise-complete
+    # release). Its result is reported in the evidence block, and the render
+    # catches up on the next Intercept delivery — it must never hold back the
+    # GitHub release, TER, or Packagist. verify-docs stays in `needs` only so
+    # its result is available to the evidence step.
     if: >-
       ${{
         always()
         && needs.build-and-sign.result == 'success'
         && (needs.publish-to-ter.result == 'success' || needs.publish-to-ter.result == 'skipped')
         && (needs.verify-packagist.result == 'success' || needs.verify-packagist.result == 'skipped')
-        && (needs.verify-docs.result == 'success' || needs.verify-docs.result == 'skipped')
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -374,6 +381,11 @@ jobs:
               echo "- Documentation: [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/) — render verified"
             elif [[ "$DOCS_RESULT" == "skipped" ]]; then
               echo "- Documentation: skipped"
+            else
+              # Render not yet confirmed (Intercept webhook down/slow at tag
+              # time). The release is published regardless; the render catches
+              # up on the next Intercept delivery.
+              echo "- Documentation: render pending — will appear at [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/)"
             fi
             echo "$DELIMITER"
           } >> "$GITHUB_OUTPUT"
