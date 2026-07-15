@@ -104,6 +104,28 @@ on:
         type: string
         default: xdebug
 
+      # Path gating
+      skip-paths:
+        description: >-
+          Newline-separated glob list. On `pull_request` events ONLY, the whole
+          workflow is gated off when EVERY changed file matches one of these
+          globs — e.g. a docs-only PR need not run an 8-cell functional matrix.
+          Patterns are shell `case` globs, so `*` also crosses `/`
+          (`Documentation/*` matches `Documentation/a/b.rst`).
+
+          Gating happens INSIDE preflight, not via the caller's `paths-ignore`.
+          That is deliberate and load-bearing: a branch ruleset names the matrix
+          checks as required, and a workflow that never STARTS never reports
+          them, so `paths-ignore` would leave docs PRs permanently BLOCKED. A
+          job that runs and reports `skipped` satisfies the ruleset.
+
+          Fails open (runs everything) on any doubt: an API error, a truncated
+          file list, or a single changed file outside the globs. `merge_group`
+          and `push` are never gated, so nothing can reach the default branch
+          unvalidated. Default '' = never skip.
+        type: string
+        default: ''
+
       # Incompatible dev deps
       remove-dev-deps:
         description: 'JSON array of dev deps to remove for TYPO3 version compat (e.g. [{"dep":"saschaegerer/phpstan-typo3","only-for":"^13"}])'
@@ -162,8 +184,57 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
+          SKIP_PATHS: ${{ inputs.skip-paths }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+
+          # Path gate — pull_request only. merge_group and push are never gated:
+          # nothing may reach the default branch unvalidated.
+          if [ "$EVENT" = "pull_request" ] && [ -n "$(printf %s "$SKIP_PATHS" | tr -d '[:space:]')" ]; then
+            # The compare endpoint lives under the Contents API, so it needs only
+            # `contents: read` — the scope every caller already grants. The
+            # pulls/{n}/files endpoint would need `pull-requests: read`, which
+            # the byte-governed checks.yml callers cannot be given.
+            compare=$(gh api "repos/${REPO}/compare/${PR_BASE_SHA}...${PR_HEAD_SHA}" 2>/dev/null) || compare=""
+            files=$(printf %s "$compare" | jq -r '.files[]?.filename' 2>/dev/null) || files=""
+            count=$(printf %s "$compare" | jq -r '.files | length' 2>/dev/null) || count=0
+            [[ "$count" =~ ^[0-9]+$ ]] || count=0
+
+            if [ -z "$files" ] || [ "$count" -eq 0 ]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::preflight: could not list changed files — running (fail open)."
+              exit 0
+            elif [ "$count" -ge 300 ]; then
+              # compare paginates commits, not files: .files caps at 300 and is
+              # silently truncated, so an unmatched file could hide past the cap.
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::preflight: $count changed files reaches the compare API cap — running (fail open)."
+              exit 0
+            fi
+
+            unmatched=""
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              matched=0
+              while IFS= read -r pat; do
+                pat="$(printf %s "$pat" | tr -d '[:space:]')"
+                [ -z "$pat" ] && continue
+                # shellcheck disable=SC2254 # glob expansion in the pattern is the point
+                case "$f" in $pat) matched=1; break ;; esac
+              done <<< "$SKIP_PATHS"
+              if [ "$matched" = "0" ]; then unmatched="$f"; break; fi
+            done <<< "$files"
+
+            if [ -n "$unmatched" ]; then
+              echo "::notice::preflight: '$unmatched' is outside skip-paths — running."
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::preflight: all $count changed file(s) match skip-paths — skipping."
+              exit 0
+            fi
+          fi
 
           # Non-push events: never the duplicate case — always run.
           if [ "$EVENT" != "push" ]; then
