@@ -208,6 +208,7 @@ jobs:
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov |
 | `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (branch + path coverage, matches local `XDEBUG_MODE=coverage`) or `pcov` (line-only, ~3-10× faster) |
 | `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |
+| `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |
 | `cgl-command` | string | auto-detect | Override CGL command |
 | `phpstan-command` | string | auto-detect | Override PHPStan command |
 | `rector-command` | string | auto-detect | Override Rector command |
@@ -230,6 +231,44 @@ Commands are auto-detected from composer scripts (in order):
 - **Functional tests:** `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
 
 CGL and Rector run on the first PHP version only (code style is PHP-version-independent). PHPStan and tests run on the full matrix.
+
+> [!WARNING]
+> **Your composer script must forward `"$@"`, or coverage silently uploads nothing.**
+> The flags above are appended by composer as `<script> -- --coverage-clover=…`. A script wrapped in `sh -c '…'` receives them as `$0` of the *wrapper*, not as tool flags, so PHPUnit never sees them — no report is written, and because the Codecov step uses `fail_ci_if_error: false`, the upload of a nonexistent file passes silently. `--filter` is swallowed the same way.
+>
+> ```jsonc
+> // Broken: flags land in $0 and vanish.
+> "ci:test:php:unit": "sh -c 'if [ -n \"${CI:-}\" ]; then phpunit --testsuite unit; else ./Build/Scripts/runTests.sh -s unit; fi'"
+>
+> // Fixed: "$@" in each branch, and `--` terminates the sh -c script.
+> "ci:test:php:unit": "sh -c 'if [ -n \"${CI:-}\" ]; then phpunit --testsuite unit \"$@\"; else ./Build/Scripts/runTests.sh -s unit \"$@\"; fi' --"
+> ```
+>
+> Check for it: `composer ci:test:php:unit -- --filter NoSuchTest` should report no tests. If it runs the whole suite, the flags are being swallowed and your coverage has never been uploaded.
+> A PHPUnit config also needs a `<source>` block, or PHPUnit answers with `No filter is configured, code coverage will not be processed` and writes nothing.
+
+### Path gating
+
+`skip-paths` gates a whole workflow off when a PR touches nothing that could affect it — a docs-only PR need not run an 8-cell functional matrix.
+
+```yaml
+    with:
+      skip-paths: |
+        Documentation/*
+        *.md
+```
+
+Patterns are shell `case` globs, so `*` also crosses `/` (`Documentation/*` matches `Documentation/a/b.rst`, and `*.md` matches any `.md` at any depth).
+
+> [!IMPORTANT]
+> **Use this instead of the caller's `paths-ignore`, not alongside it.** Branch rulesets name the matrix jobs as required checks, and a workflow that never *starts* never reports them — `paths-ignore` leaves docs PRs permanently BLOCKED. Gating inside `preflight` means the jobs still run and report `skipped`, which satisfies the ruleset.
+
+Safety properties:
+
+- **`pull_request` only.** `merge_group` and `push` are never gated, so nothing reaches the default branch unvalidated.
+- **All-or-nothing.** One changed file outside the globs runs everything — a PR mixing docs and source is never skipped.
+- **Fails open.** API errors, or a file list at the compare endpoint's 300-file cap, run everything.
+- Needs only `contents: read` (uses the compare endpoint, not `pulls/{n}/files`).
 
 ---
 
@@ -342,6 +381,8 @@ jobs:
 | `node-version` | string | `24` | Node.js version |
 | `typo3-setup-extensions` | boolean | `true` | Run extension:setup after TYPO3 setup |
 | `playwright-browser` | string | `chromium` | Playwright browser to install |
+| `php-server-workers` | string | `'1'` | Worker processes for the built-in `php -S` server. Raise to at least the Playwright worker count before setting `workers > 1`, or the suite serialises at the web server. |
+| `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |
 | `test-command` | string | `npm run test:e2e` | E2E test command |
 | `db-image` | string | `mariadb:11.4` | Database Docker image |
 | `php-extensions` | string | `mysqli, pdo_mysql, gd, intl, curl, zip` | PHP extensions to install |
