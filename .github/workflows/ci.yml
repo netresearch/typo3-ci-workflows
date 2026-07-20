@@ -42,6 +42,10 @@ on:
         description: Run PHPUnit functional tests
         type: boolean
         default: false
+      run-acceptance-tests:
+        description: Run PHPUnit acceptance tests
+        type: boolean
+        default: false
 
       # Tool commands (empty = auto-detect from composer scripts)
       cgl-command:
@@ -62,6 +66,10 @@ on:
         default: ''
       functional-test-command:
         description: Functional test command (default uses composer ci:test:php:functional)
+        type: string
+        default: ''
+      acceptance-test-command:
+        description: Acceptance test command (default uses composer ci:test:php:acceptance)
         type: string
         default: ''
 
@@ -706,6 +714,108 @@ jobs:
           files: coverage-unit.xml
           flags: unit
           fail_ci_if_error: false
+
+  acceptance-tests:
+    needs: preflight
+    name: Acceptance Tests
+    if: ${{ inputs.run-acceptance-tests && needs.preflight.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON(inputs.php-versions) }}
+        typo3: ${{ fromJSON(inputs.typo3-versions) }}
+        exclude: ${{ fromJSON(inputs.matrix-exclude) }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: ${{ inputs.php-extensions }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-acceptance-${{ matrix.php }}-${{ matrix.typo3 }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-acceptance-${{ matrix.php }}-${{ matrix.typo3 }}-
+            ${{ runner.os }}-composer-acceptance-${{ matrix.php }}-
+
+      - name: Remove incompatible dev deps
+        env:
+          REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
+          TYPO3_VERSION: ${{ matrix.typo3 }}
+        run: |
+          if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
+          echo "$REMOVE_DEV_DEPS" | python3 -c "
+          import json, os, sys, subprocess
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
+          typo3 = os.environ['TYPO3_VERSION']
+          for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
+              only_for = entry.get('only-for', '')
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+          "
+
+      - name: Install TYPO3
+        env:
+          TYPO3_VERSION: ${{ matrix.typo3 }}
+          TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
+        run: |
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            exit 1
+          }
+          for pkg in $PACKAGES; do
+            composer require --no-update "$pkg:${TYPO3_VERSION}"
+          done
+          composer config --no-plugins audit.block-insecure false
+          composer install --prefer-dist --no-progress
+
+      - name: Run acceptance tests
+        env:
+          ACCEPTANCE_TEST_COMMAND: ${{ inputs.acceptance-test-command }}
+        run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          if [[ -n "$ACCEPTANCE_TEST_COMMAND" ]]; then
+            bash -euo pipefail -c "$ACCEPTANCE_TEST_COMMAND"
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:acceptance'; then
+            composer ci:test:php:acceptance
+          else
+            echo "::notice::No acceptance test script found. Skipping. Add ci:test:php:acceptance to composer scripts or provide acceptance-test-command input."
+          fi
 
   functional-tests:
     needs: preflight
