@@ -203,6 +203,7 @@ jobs:
 | `run-rector` | boolean | `true` | Run Rector dry-run |
 | `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
 | `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
+| `run-acceptance-tests` | boolean | `false` | Run PHPUnit acceptance tests |
 | `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
 | `db-image` | string | `mysql:9.6` | Docker image for database service |
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov |
@@ -214,6 +215,7 @@ jobs:
 | `rector-command` | string | auto-detect | Override Rector command |
 | `unit-test-command` | string | auto-detect | Override unit test command |
 | `functional-test-command` | string | auto-detect | Override functional test command |
+| `acceptance-test-command` | string | auto-detect | Override acceptance test command |
 
 ### Secrets
 
@@ -229,6 +231,7 @@ Commands are auto-detected from composer scripts (in order):
 - **Rector:** `ci:test:php:rector`, `check:php:rector`
 - **Unit tests:** `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:unit`, `check:tests:unit`, `test:unit`
 - **Functional tests:** `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
+- **Acceptance tests:** `ci:test:php:acceptance`
 
 CGL and Rector run on the first PHP version only (code style is PHP-version-independent). PHPStan and tests run on the full matrix.
 
