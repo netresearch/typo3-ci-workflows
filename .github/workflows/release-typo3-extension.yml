@@ -188,7 +188,10 @@ jobs:
               # sends that person a notification. Wrap bare mentions in backticks
               # so they render as text. Skips occurrences already preceded by a
               # backtick or a word character (code spans, e-mail addresses).
-              LOG=$(printf '%s\n' "$LOG" | sed -E 's/(^|[^`[:alnum:]_])@([[:alnum:]][[:alnum:]-]*)/\1`@\2`/g')
+              # BT holds a literal backtick: writing one inside the sed script
+              # would trip shellcheck SC2016.
+              BT=$(printf '\140')
+              LOG=$(printf '%s\n' "$LOG" | sed -E "s/(^|[^${BT}[:alnum:]_])@([[:alnum:]][[:alnum:]-]*)/\\1${BT}@\\2${BT}/g")
               echo "$LOG"
               echo ""
             fi
