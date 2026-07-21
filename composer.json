@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
-        "a9f/typo3-fractor": "^0.5",
+        "a9f/typo3-fractor": "^1.0",
         "captainhook/captainhook": "^5.28",
         "captainhook/hook-installer": "^1.0",
         "dg/bypass-finals": "^1.9",
