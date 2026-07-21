@@ -181,6 +181,17 @@ jobs:
               if [[ -z "${LOG// }" ]]; then
                 LOG=$(git log --no-merges --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD")
               fi
+              # Commit subjects are pasted into the release body verbatim, so a
+              # literal "@name" in a subject (e.g. "use @main for reusable
+              # workflows") becomes a GitHub user mention: it links a wholly
+              # unrelated account, lists it under the release's contributors and
+              # sends that person a notification. Wrap bare mentions in backticks
+              # so they render as text. Skips occurrences already preceded by a
+              # backtick or a word character (code spans, e-mail addresses).
+              # BT holds a literal backtick: writing one inside the sed script
+              # would trip shellcheck SC2016.
+              BT=$(printf '\140')
+              LOG=$(printf '%s\n' "$LOG" | sed -E "s/(^|[^${BT}[:alnum:]_])@([[:alnum:]][[:alnum:]-]*)/\\1${BT}@\\2${BT}/g")
               echo "$LOG"
               echo ""
             fi
