@@ -46,6 +46,12 @@ on:
         description: Run PHPUnit acceptance tests
         type: boolean
         default: false
+      run-docs:
+        description: >-
+          Render the TYPO3 documentation to validate Documentation/guides.xml
+          (skipped automatically when the repo has no Documentation/guides.xml).
+        type: boolean
+        default: true
 
       # Tool commands (empty = auto-detect from composer scripts)
       cgl-command:
@@ -1079,3 +1085,52 @@ jobs:
           files: coverage-functional.xml
           flags: functional
           fail_ci_if_error: false
+
+  # Detect whether the repo ships rendered documentation. Split from the
+  # render job because a reusable-workflow (`uses:`) job cannot itself check
+  # out the repo to decide whether to run — it needs a preceding job's output.
+  detect-docs:
+    needs: preflight
+    name: Detect Documentation
+    if: ${{ inputs.run-docs && needs.preflight.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      present: ${{ steps.detect.outputs.present }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - id: detect
+        shell: bash
+        run: |
+          if [ -f Documentation/guides.xml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Documentation/guides.xml found — the docs render will validate it."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Documentation/guides.xml — skipping docs render."
+          fi
+
+  # Render the documentation with the pinned render-guides image. The strict
+  # `configure` step in docs.yml fails the job on an invalid guides.xml
+  # (malformed XML declaration, disallowed attributes such as extension-key on
+  # <project>, …), so such errors are caught here instead of surfacing later
+  # on docs.typo3.org. Reuses docs.yml as the single source of truth for the
+  # render image and logic.
+  docs:
+    needs: detect-docs
+    if: ${{ needs.detect-docs.outputs.present == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docs.yml
+    with:
+      upload-artifact: false
