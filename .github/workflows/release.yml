@@ -96,7 +96,14 @@ jobs:
           else
             {
               echo "notes<<$DELIMITER"
-              git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD"
+              # Wrap bare "@name" mentions from commit subjects in backticks —
+              # pasted verbatim into the release body they would link an
+              # unrelated GitHub account, list it under the release's
+              # contributors and notify that person. Occurrences preceded by a
+              # backtick or a word character (code spans, e-mail addresses,
+              # "action@v4" refs) are left alone.
+              git log --pretty=format:"- %s" "${PREVIOUS_TAG}..HEAD" \
+                | sed -E 's/(^|[^`[:alnum:]_])@([[:alnum:]][[:alnum:]-]*)/\1`@\2`/g'
               echo ""
               echo "$DELIMITER"
             } >> "$GITHUB_OUTPUT"
