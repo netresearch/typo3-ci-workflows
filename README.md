@@ -201,6 +201,7 @@ jobs:
 | `run-cgl` | boolean | `true` | Run code style check (PHP-CS-Fixer) |
 | `run-phpstan` | boolean | `true` | Run PHPStan static analysis |
 | `run-rector` | boolean | `true` | Run Rector dry-run |
+| `run-fractor` | boolean | `false` | Run Fractor dry-run (TYPO3/Fluid migrations) |
 | `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
 | `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
 | `run-acceptance-tests` | boolean | `false` | Run PHPUnit acceptance tests |
@@ -213,6 +214,7 @@ jobs:
 | `cgl-command` | string | auto-detect | Override CGL command |
 | `phpstan-command` | string | auto-detect | Override PHPStan command |
 | `rector-command` | string | auto-detect | Override Rector command |
+| `fractor-command` | string | auto-detect | Override Fractor command |
 | `unit-test-command` | string | auto-detect | Override unit test command |
 | `functional-test-command` | string | auto-detect | Override functional test command |
 | `acceptance-test-command` | string | auto-detect | Override acceptance test command |
