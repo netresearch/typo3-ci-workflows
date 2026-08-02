@@ -61,6 +61,14 @@ on:
         required: false
         type: boolean
         default: false
+      derive-tags-from-composer:
+        description: >-
+          Derive the TER tags from composer.json keywords, dropping the terms
+          TER already implies. Off by default; see publish-to-ter.yml for why
+          enabling it hands tag curation over to the repository.
+        required: false
+        type: boolean
+        default: false
       skip-packagist:
         description: Skip Packagist publish + verification
         required: false
@@ -289,6 +297,7 @@ jobs:
       # create-release runs after this job, so publish-to-ter cannot read the
       # release body it would otherwise prefer. Hand it the same notes.
       release-notes: ${{ needs.build-and-sign.outputs.release-notes }}
+      derive-tags-from-composer: ${{ inputs.derive-tags-from-composer }}
     # Explicit secret pass-through (NOT `secrets: inherit`) so a
     # compromised action in the called workflow can't reach unrelated
     # org secrets. Forwards only the TER token actually needed.
