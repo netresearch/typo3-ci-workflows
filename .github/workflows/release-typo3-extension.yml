@@ -286,6 +286,9 @@ jobs:
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
       ref: ${{ github.ref }}
+      # create-release runs after this job, so publish-to-ter cannot read the
+      # release body it would otherwise prefer. Hand it the same notes.
+      release-notes: ${{ needs.build-and-sign.outputs.release-notes }}
     # Explicit secret pass-through (NOT `secrets: inherit`) so a
     # compromised action in the called workflow can't reach unrelated
     # org secrets. Forwards only the TER token actually needed.

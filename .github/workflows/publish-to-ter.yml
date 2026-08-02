@@ -12,6 +12,15 @@ on:
         required: false
         type: string
         default: ''
+      release-notes:
+        description: >-
+          Changelog text for TER's upload comment. Pass the notes the caller
+          already generated; without it this workflow can only read the GitHub
+          release body, which does not exist yet when the release is created
+          after publishing, leaving TER with the bare fallback link.
+        required: false
+        type: string
+        default: ''
       verify-timeout-minutes:
         description: Max minutes to wait for TER to serve the published version
         required: false
@@ -210,11 +219,26 @@ jobs:
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.release-notes }}
         run: |
           COMMENT=""
 
-          # 1. Prefer GitHub release notes (curated, may cover multiple versions)
-          if [[ -n "$TAG" ]]; then
+          # 0. Prefer notes handed over by the caller. The release-typo3-extension
+          # pipeline creates the GitHub release *after* this job, so the lookup
+          # below cannot find a body during a normal tag-triggered release and
+          # every upload would fall through to the bare link. Callers that
+          # already generated the notes pass them in instead.
+          if [[ -n "${RELEASE_NOTES// }" ]]; then
+            COMMENT=$(
+              printf '%s' "$RELEASE_NOTES" \
+                | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
+            )
+          fi
+
+          # 1. Otherwise read the GitHub release body (curated, may cover
+          # multiple versions). Applies when the release already exists, e.g. a
+          # re-publish or a caller that publishes to TER after creating it.
+          if [[ -z "${COMMENT// }" ]] && [[ -n "$TAG" ]]; then
             RELEASE_BODY=$(gh release view "$TAG" --json body --jq '.body' 2>/dev/null || true)
             if [[ -n "${RELEASE_BODY// }" ]]; then
               # Strip HTML tags and limit length for TER (max ~2000 chars).
