@@ -125,6 +125,18 @@ on:
           coverage fidelity.
         type: string
         default: xdebug
+      upload-test-results:
+        description: >-
+          Upload per-test JUnit reports to Codecov Test Analytics (flaky-test
+          detection, per-test durations). PHPUnit writes the report via
+          --log-junit, which does not change how the tests run. Needs the same
+          CODECOV_TOKEN as the coverage upload. Off by default so consumers
+          opt in explicitly. Only applies to the built-in
+          ci:test:php:unit/functional invocations -- a custom
+          unit-test-command/functional-test-command must emit
+          junit-unit.xml/junit-functional.xml itself to feed the upload.
+        type: boolean
+        default: false
 
       # Path gating
       skip-paths:
@@ -758,15 +770,20 @@ jobs:
         env:
           UNIT_TEST_COMMAND: ${{ inputs.unit-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          EXTRA_ARGS=()
+          if [[ "$UPLOAD_TEST_RESULTS" == "true" ]]; then
+            EXTRA_ARGS+=(--log-junit=junit-unit.xml)
+          fi
           if [[ -n "$UNIT_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$UNIT_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:unit'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:unit -- --coverage-clover=coverage-unit.xml
+              composer ci:test:php:unit -- --coverage-clover=coverage-unit.xml "${EXTRA_ARGS[@]}"
             else
-              composer ci:test:php:unit -- --no-coverage
+              composer ci:test:php:unit -- --no-coverage "${EXTRA_ARGS[@]}"
             fi
           elif echo "$SCRIPTS" | grep -q 'ci:tests:unit'; then
             composer ci:tests:unit
@@ -784,6 +801,23 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-unit.xml
+          flags: unit
+          fail_ci_if_error: false
+
+      # Runs on failure too, deliberately: a run whose tests failed is exactly
+      # the one Test Analytics is for. Gating this on success would upload only
+      # green runs and leave the flaky-test view blind to every failure.
+      # codecov/test-results-action is deprecated in favour of codecov-action
+      # with report_type: test_results (underscore -- `report-type` is not
+      # defined on this action and would be silently ignored), so the JUnit
+      # upload reuses the same pinned SHA as the coverage upload above.
+      - name: Upload test results to Codecov
+        if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-unit.xml') != '' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit-unit.xml
           flags: unit
           fail_ci_if_error: false
 
@@ -996,6 +1030,7 @@ jobs:
         env:
           FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
           typo3DatabaseDriver: ${{ inputs.functional-test-db == 'postgres' && 'pdo_pgsql' || 'mysqli' }}
           typo3DatabaseHost: 127.0.0.1
           typo3DatabasePort: ${{ inputs.functional-test-db == 'postgres' && '5432' || '3306' }}
@@ -1004,13 +1039,17 @@ jobs:
           typo3DatabasePassword: root
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          EXTRA_ARGS=()
+          if [[ "$UPLOAD_TEST_RESULTS" == "true" ]]; then
+            EXTRA_ARGS+=(--log-junit=junit-functional.xml)
+          fi
           if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml
+              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml "${EXTRA_ARGS[@]}"
             else
-              composer ci:test:php:functional -- --no-coverage
+              composer ci:test:php:functional -- --no-coverage "${EXTRA_ARGS[@]}"
             fi
           elif echo "$SCRIPTS" | grep -q 'ci:tests:functional'; then
             composer ci:tests:functional
@@ -1028,6 +1067,17 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-functional.xml
+          flags: functional
+          fail_ci_if_error: false
+
+      # See the unit job for why this runs on failure and uses report_type.
+      - name: Upload test results to Codecov
+        if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-functional.xml') != '' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit-functional.xml
           flags: functional
           fail_ci_if_error: false
 
@@ -1122,16 +1172,21 @@ jobs:
         env:
           FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
           typo3DatabaseDriver: pdo_sqlite
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          EXTRA_ARGS=()
+          if [[ "$UPLOAD_TEST_RESULTS" == "true" ]]; then
+            EXTRA_ARGS+=(--log-junit=junit-functional.xml)
+          fi
           if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml
+              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml "${EXTRA_ARGS[@]}"
             else
-              composer ci:test:php:functional -- --no-coverage
+              composer ci:test:php:functional -- --no-coverage "${EXTRA_ARGS[@]}"
             fi
           elif echo "$SCRIPTS" | grep -q 'ci:tests:functional'; then
             composer ci:tests:functional
@@ -1149,6 +1204,17 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-functional.xml
+          flags: functional
+          fail_ci_if_error: false
+
+      # See the unit job for why this runs on failure and uses report_type.
+      - name: Upload test results to Codecov
+        if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-functional.xml') != '' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit-functional.xml
           flags: functional
           fail_ci_if_error: false
 
