@@ -361,7 +361,7 @@ jobs:
               value = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', value)
               return value
 
-          lines, buffer = [], ''
+          lines, buffer, fenced = [], '', False
 
           def flush():
               global buffer
@@ -371,6 +371,18 @@ jobs:
 
           for raw in os.environ['COMMENT_RAW'].splitlines():
               text = raw.strip()
+              if re.match(r'^(```|~~~)', text):
+                  # Drop the fence marker, keep what it delimits.
+                  flush()
+                  fenced = not fenced
+                  continue
+              if fenced:
+                  # Commands and samples: keep the line and its indentation,
+                  # and leave markers alone — a `*` in a shell glob is not
+                  # emphasis.
+                  flush()
+                  lines.append(raw.rstrip())
+                  continue
               bullet = re.match(r'^[-*+]\s+(.*)$', text)
               if not text:
                   flush()
