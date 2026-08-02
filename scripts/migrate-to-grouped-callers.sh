@@ -209,8 +209,6 @@ CIEOF
     permissions:
       contents: read
       security-events: write
-    secrets:
-      GITLEAKS_LICENSE: \${{ secrets.GITLEAKS_LICENSE }}
 
 SECEOF
 
