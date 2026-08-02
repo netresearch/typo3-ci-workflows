@@ -85,6 +85,17 @@ on:
         required: false
         type: string
         default: ''
+      derive-tags-from-composer:
+        description: >-
+          Derive the TER tags from composer.json `keywords`, dropping the terms
+          TER already implies (typo3, php, extension, cms …) because every
+          listing there is a TYPO3 extension and those carry no information.
+          Keeps one vocabulary in the repository instead of three. Ignored when
+          `tags` is set explicitly. Off by default: tags REPLACE, so enabling
+          this hands curation in the TER UI over to the repository.
+        required: false
+        type: boolean
+        default: false
       issues-url:
         description: Override for the "issues" URL in TER metadata. Defaults to ${repo}/issues.
         required: false
@@ -476,6 +487,7 @@ jobs:
           REPO: ${{ github.repository }}
           MANUAL_INPUT: ${{ inputs.manual-url }}
           TAGS_INPUT: ${{ inputs.tags }}
+          DERIVE_TAGS: ${{ inputs.derive-tags-from-composer }}
           ISSUES_INPUT: ${{ inputs.issues-url }}
           REPOSITORY_INPUT: ${{ inputs.repository-url }}
         run: |
@@ -510,6 +522,39 @@ jobs:
             echo "  manual=$MANUAL_INPUT"
           else
             echo "  manual=(preserving TER's existing value)"
+          fi
+          # A TER listing is a TYPO3 extension by definition, so platform terms
+          # carry no information there — unlike on GitHub, where they are what
+          # makes a repository findable at all. Derive from the one vocabulary
+          # in the repository and report what was dropped rather than filtering
+          # silently.
+          if [[ -z "$TAGS_INPUT" && "$DERIVE_TAGS" == "true" ]]; then
+            TAGS_INPUT=$(python3 <<'PY'
+          import json, sys
+
+          IMPLIED_BY_TER = {
+              'typo3', 'typo3-cms', 'typo3cms', 'typo3-extension', 'typo3ext',
+              'extension', 'extensions', 'cms', 'php', 'ter',
+          }
+          try:
+              keywords = json.load(open('composer.json', encoding='utf-8')).get('keywords', [])
+          except (OSError, ValueError):
+              sys.exit(0)
+
+          kept, dropped = [], []
+          for keyword in keywords:
+              value = str(keyword).strip()
+              if not value:
+                  continue
+              (dropped if value.lower() in IMPLIED_BY_TER else kept).append(value)
+
+          if dropped:
+              print(f"  dropped as implied by TER: {', '.join(dropped)}", file=sys.stderr)
+          if not kept:
+              print('  composer.json keywords yielded no TER-specific tag', file=sys.stderr)
+          sys.stdout.write(','.join(kept))
+          PY
+            )
           fi
           # Omitted unless set: tailor sends only non-null options, and TER
           # replaces the entire tag list with whatever arrives.
