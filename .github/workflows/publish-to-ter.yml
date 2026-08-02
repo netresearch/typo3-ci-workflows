@@ -232,19 +232,67 @@ jobs:
         run: |
           COMMENT=""
 
-          # 0. Prefer notes handed over by the caller. The release-typo3-extension
-          # pipeline creates the GitHub release *after* this job, so the lookup
-          # below cannot find a body during a normal tag-triggered release and
-          # every upload would fall through to the bare link. Callers that
-          # already generated the notes pass them in instead.
-          if [[ -n "${RELEASE_NOTES// }" ]]; then
+          # 0. Prefer the CHANGELOG section for this version. It is curated,
+          # committed, and present at the tagged commit — unlike the GitHub
+          # release body, which does not exist yet on a tag-triggered release,
+          # and unlike the generated notes, which are just "Initial release" for
+          # a first release. Absent file or absent section yields nothing and
+          # falls through.
+          if [[ -f CHANGELOG.md ]]; then
+            COMMENT=$(python3 - "$VERSION" CHANGELOG.md <<'PY'
+          import re, sys
+          version, path = sys.argv[1], sys.argv[2]
+          try:
+              text = open(path, encoding='utf-8').read()
+          except OSError:
+              sys.exit(0)
+          # Matches "## [1.2.3] - 2026-01-01", "## 1.2.3" and "## v1.2.3".
+          heading = re.compile(r'^##\s+\[?v?' + re.escape(version) + r'\]?.*$', re.M)
+          found = heading.search(text)
+          if not found:
+              sys.exit(0)
+          rest = text[found.end():]
+          following = re.search(r'^##\s+', rest, re.M)
+          section = (rest[:following.start()] if following else rest).strip()
+          # TER shows the upload comment as plain text and keeps newlines, so a
+          # hard-wrapped CHANGELOG would arrive as ragged short lines. Join the
+          # continuation lines of each paragraph and list item; keep blank
+          # lines, headings and item boundaries.
+          out, buffer = [], ''
+          def flush():
+              global buffer
+              if buffer:
+                  out.append(buffer)
+                  buffer = ''
+          for line in section.splitlines():
+              stripped = line.strip()
+              if not stripped:
+                  flush()
+                  out.append('')
+              elif stripped.startswith('#') or re.match(r'^([-*+]|\d+\.)\s', stripped):
+                  flush()
+                  buffer = stripped
+              else:
+                  buffer = f'{buffer} {stripped}'.strip()
+          flush()
+          sys.stdout.write('\n'.join(out).strip()[:1900])
+          PY
+            )
+          fi
+
+          # 1. Otherwise use notes handed over by the caller. The
+          # release-typo3-extension pipeline creates the GitHub release *after*
+          # this job, so the lookup below cannot find a body during a normal
+          # tag-triggered release and every upload would fall through to the
+          # bare link. Callers that already generated the notes pass them in.
+          if [[ -z "${COMMENT// }" ]] && [[ -n "${RELEASE_NOTES// }" ]]; then
             COMMENT=$(
               printf '%s' "$RELEASE_NOTES" \
                 | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
             )
           fi
 
-          # 1. Otherwise read the GitHub release body (curated, may cover
+          # 2. Otherwise read the GitHub release body (curated, may cover
           # multiple versions). Applies when the release already exists, e.g. a
           # re-publish or a caller that publishes to TER after creating it.
           if [[ -z "${COMMENT// }" ]] && [[ -n "$TAG" ]]; then
