@@ -21,6 +21,15 @@ on:
         required: false
         type: string
         default: ''
+      force-republish:
+        description: >-
+          Upload even when the version is already on TER. TER accepts a
+          re-upload of the same version number and overwrites the stored upload
+          comment, which is the only way to correct a comment on a published
+          version. Off by default so the normal release path stays idempotent.
+        required: false
+        type: boolean
+        default: false
       verify-timeout-minutes:
         description: Max minutes to wait for TER to serve the published version
         required: false
@@ -306,10 +315,20 @@ jobs:
         env:
           KEY: ${{ steps.extkey.outputs.key }}
           VERSION: ${{ steps.version.outputs.version }}
+          FORCE: ${{ inputs.force-republish }}
         run: |
           # HEAD the download URL: 200 => version already published, skip.
           # This makes the workflow idempotent so republishing a tag after a
           # partial failure is a safe no-op on the TER side.
+          #
+          # force-republish overrides that. Refreshing the upload comment of a
+          # published version requires re-uploading it, so the guard would
+          # otherwise make the documented comment-repair procedure a no-op.
+          if [[ "$FORCE" == "true" ]]; then
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+            echo "force-republish requested — uploading $VERSION regardless of TER state"
+            exit 0
+          fi
           URL="https://extensions.typo3.org/extension/download/${KEY}/${VERSION}/zip"
           STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -I --max-time 15 "$URL" || echo "000")
           if [[ "$STATUS" == "200" ]]; then
