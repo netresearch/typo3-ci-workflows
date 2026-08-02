@@ -75,6 +75,16 @@ on:
         required: false
         type: string
         default: ''
+      tags:
+        description: >-
+          Comma-separated TER tags, for the listing's discoverability. Empty
+          (default) leaves TER's tags untouched. Setting it REPLACES the whole
+          list on every release — `tailor ter:update` sends the field verbatim
+          and TER overwrites it — so include every tag that should remain, and
+          expect anything curated in the TER UI to be overwritten.
+        required: false
+        type: string
+        default: ''
       issues-url:
         description: Override for the "issues" URL in TER metadata. Defaults to ${repo}/issues.
         required: false
@@ -254,28 +264,7 @@ jobs:
           rest = text[found.end():]
           following = re.search(r'^##\s+', rest, re.M)
           section = (rest[:following.start()] if following else rest).strip()
-          # TER shows the upload comment as plain text and keeps newlines, so a
-          # hard-wrapped CHANGELOG would arrive as ragged short lines. Join the
-          # continuation lines of each paragraph and list item; keep blank
-          # lines, headings and item boundaries.
-          out, buffer = [], ''
-          def flush():
-              global buffer
-              if buffer:
-                  out.append(buffer)
-                  buffer = ''
-          for line in section.splitlines():
-              stripped = line.strip()
-              if not stripped:
-                  flush()
-                  out.append('')
-              elif stripped.startswith('#') or re.match(r'^([-*+]|\d+\.)\s', stripped):
-                  flush()
-                  buffer = stripped
-              else:
-                  buffer = f'{buffer} {stripped}'.strip()
-          flush()
-          sys.stdout.write('\n'.join(out).strip()[:1900])
+          sys.stdout.write(section[:1900])
           PY
             )
           fi
@@ -342,7 +331,59 @@ jobs:
             fi
           fi
 
-          # 3. Append link to GitHub releases
+          # 5. Render for TER. The comment is stored as plain text: TER escapes
+          # HTML and turns newlines into <br>, so Markdown markers show up
+          # verbatim and hard-wrapped source arrives as ragged short lines.
+          # Carry the structure over with characters that survive that, and
+          # drop the markers that do not. No Unicode "bold" — those code points
+          # read badly in screen readers and break find-in-page.
+          if [[ -n "${COMMENT// }" ]]; then
+            COMMENT=$(COMMENT_RAW="$COMMENT" python3 <<'PY'
+          import os, re, sys
+
+          def inline(value):
+              value = re.sub(r'`([^`]+)`', r'\1', value)
+              value = re.sub(r'\[([^\]]+)\]\(([^)\s]+)\)', r'\1 (\2)', value)
+              value = re.sub(r'<(https?://[^>\s]+)>', r'\1', value)
+              value = re.sub(r'\*\*([^*]+)\*\*', r'\1', value)
+              value = re.sub(r'(?<![A-Za-z0-9_])_([^_]+)_(?![A-Za-z0-9_])', r'\1', value)
+              value = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', value)
+              return value
+
+          lines, buffer = [], ''
+
+          def flush():
+              global buffer
+              if buffer:
+                  lines.append(inline(buffer))
+                  buffer = ''
+
+          for raw in os.environ['COMMENT_RAW'].splitlines():
+              text = raw.strip()
+              bullet = re.match(r'^[-*+]\s+(.*)$', text)
+              if not text:
+                  flush()
+                  lines.append('')
+              elif text.startswith('#'):
+                  flush()
+                  lines.append(inline(re.sub(r'^#+\s*', '', text)).rstrip(':') + ':')
+              elif bullet:
+                  flush()
+                  buffer = '• ' + bullet.group(1)
+              elif re.match(r'^\d+\.\s', text):
+                  flush()
+                  buffer = text
+              else:
+                  buffer = f'{buffer} {text}'.strip()
+          flush()
+
+          result = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+          sys.stdout.write(result[:1900])
+          PY
+            )
+          fi
+
+          # 6. Append link to GitHub releases
           if [[ -n "${COMMENT// }" ]]; then
             COMMENT="${COMMENT}
 
@@ -434,6 +475,7 @@ jobs:
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           MANUAL_INPUT: ${{ inputs.manual-url }}
+          TAGS_INPUT: ${{ inputs.tags }}
           ISSUES_INPUT: ${{ inputs.issues-url }}
           REPOSITORY_INPUT: ${{ inputs.repository-url }}
         run: |
@@ -468,6 +510,14 @@ jobs:
             echo "  manual=$MANUAL_INPUT"
           else
             echo "  manual=(preserving TER's existing value)"
+          fi
+          # Omitted unless set: tailor sends only non-null options, and TER
+          # replaces the entire tag list with whatever arrives.
+          if [[ -n "$TAGS_INPUT" ]]; then
+            TAILOR_ARGS+=("--tags=$TAGS_INPUT")
+            echo "  tags=$TAGS_INPUT"
+          else
+            echo "  tags=(preserving TER's existing value)"
           fi
           echo "  issues=$ISSUES_URL"
           echo "  repository=$REPOSITORY_URL"
