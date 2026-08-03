@@ -84,7 +84,14 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
         $rectorConfig->phpVersion(80200);
     }
 
-    // Common code-quality rule sets
+    // Common code-quality rule sets.
+    //
+    // SetList::STRICT_BOOLEANS is deliberately absent: Rector 2.6.0 removed the
+    // constant, and every consumer's Rector job died with "Undefined constant
+    // Rector\Set\ValueObject\SetList::STRICT_BOOLEANS" the moment CI resolved
+    // that release. Rector's own deprecation says the set was "mostly risky and
+    // not practical" and points at codeQuality and codingStyle instead, both of
+    // which are already listed below — so nothing is lost by dropping it.
     $rectorConfig->sets([
         SetList::CODE_QUALITY,
         SetList::CODING_STYLE,
@@ -92,7 +99,6 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
         SetList::EARLY_RETURN,
         SetList::INSTANCEOF,
         SetList::PRIVATIZATION,
-        SetList::STRICT_BOOLEANS,
         SetList::TYPE_DECLARATION,
         LevelSetList::UP_TO_PHP_82,
     ]);
