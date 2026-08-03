@@ -653,16 +653,28 @@ jobs:
               match = re.search(r'\d+(?:\.\d+)*', str(value))
               return tuple(int(part) for part in match.group(0).split('.')) if match else ()
 
-          def load(name):
+          # Every input is caller-supplied, so a wrong SHAPE has to fail as
+          # clearly as a syntax error: an object where a list belongs would
+          # otherwise surface as a bare Python AttributeError in the log.
+          def load(name, of_objects=False):
               try:
-                  return json.loads(os.environ[name])
+                  value = json.loads(os.environ[name])
               except json.JSONDecodeError as error:
                   print(f'::error::Invalid JSON in {name} input: {error}')
                   sys.exit(1)
+              if not isinstance(value, list):
+                  print(f'::error::{name} must be a JSON array, got {type(value).__name__}.')
+                  sys.exit(1)
+              if of_objects:
+                  for entry in value:
+                      if not isinstance(entry, dict):
+                          print(f'::error::{name} entries must be JSON objects, got {type(entry).__name__}: {entry!r}')
+                          sys.exit(1)
+              return value
 
           php_versions = sorted(load('PHP_VERSIONS'), key=rank, reverse=True)
           typo3_versions = sorted(load('TYPO3_VERSIONS'), key=rank, reverse=True)
-          excluded = {(entry.get('php'), entry.get('typo3')) for entry in load('MATRIX_EXCLUDE')}
+          excluded = {(entry.get('php'), entry.get('typo3')) for entry in load('MATRIX_EXCLUDE', of_objects=True)}
 
           for php in php_versions:
               for typo3 in typo3_versions:
