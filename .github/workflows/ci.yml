@@ -30,6 +30,27 @@ on:
         description: Run PHPStan static analysis
         type: boolean
         default: true
+      run-phpstan-unpinned:
+        description: >-
+          Run the advisory PHPStan pass against the PHPUnit the matrix really
+          resolves. The blocking PHPStan matrix caps PHPUnit below 13 so that
+          consumers can migrate their test code on their own schedule, which
+          means static analysis never sees the PHPUnit that the PHP 8.4/8.5
+          cells actually run — a PHPUnit-13-only finding stays invisible until
+          somebody installs from scratch locally. This pass closes that gap:
+          one cell (the highest non-excluded php/typo3 combination, because
+          that one resolves the newest PHPUnit), no cap, reported as
+          annotations. Requires run-phpstan.
+        type: boolean
+        default: true
+      phpstan-unpinned-blocking:
+        description: >-
+          Make the unpinned PHPStan pass fail the build instead of warning.
+          Off by default: turning it on repo-wide would redden every consumer
+          that still has PHPUnit-13 findings. Turn it on per repo once that
+          repo is clean, so the cleanup cannot silently regress.
+        type: boolean
+        default: false
       run-rector:
         description: Run Rector dry-run
         type: boolean
@@ -573,6 +594,204 @@ jobs:
           else
             echo "::notice::No PHPStan script found. Skipping. Add ci:test:php:phpstan to composer scripts or provide phpstan-command input."
           fi
+
+  # Advisory counterpart to the PHPStan job above. That job caps PHPUnit below
+  # 13 so the blocking matrix stays stable while consumers migrate their test
+  # code; the cost is that static analysis never sees the PHPUnit half the
+  # matrix runs. This job removes the cap on ONE cell — the highest
+  # non-excluded php/typo3 combination, which is the one that resolves the
+  # newest PHPUnit — and reports what the capped job cannot see.
+  #
+  # It warns rather than fails by default (phpstan-unpinned-blocking), so a new
+  # PHPUnit deprecation surfaces as an annotation on the PR that introduces it
+  # instead of turning every consumer red on the day it is released. Because
+  # the capped job must be green for the run to pass, everything this job
+  # reports IS the PHPUnit delta.
+  phpstan-unpinned:
+    needs: preflight
+    name: PHPStan (unpinned PHPUnit)
+    if: ${{ inputs.run-phpstan && inputs.run-phpstan-unpinned && needs.preflight.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The matrix is an input, not a context this job can index into, and
+      # GitHub expressions have no "last element" — so pick the cell here.
+      # Highest PHP wins because PHPUnit's floor is a PHP version (13 needs
+      # >= 8.4.1); within that PHP, highest TYPO3, skipping matrix-exclude.
+      - name: Select the highest matrix cell
+        id: cell
+        env:
+          PHP_VERSIONS: ${{ inputs.php-versions }}
+          TYPO3_VERSIONS: ${{ inputs.typo3-versions }}
+          MATRIX_EXCLUDE: ${{ inputs.matrix-exclude }}
+        run: |
+          python3 -c "
+          import json, os, re, sys
+
+          def rank(value):
+              # '8.4' -> (8, 4); '^13.4' -> (13, 4). Anything without digits
+              # sorts lowest rather than blowing up the whole job.
+              match = re.search(r'\d+(?:\.\d+)*', str(value))
+              return tuple(int(part) for part in match.group(0).split('.')) if match else ()
+
+          def load(name):
+              try:
+                  return json.loads(os.environ[name])
+              except json.JSONDecodeError as error:
+                  print(f'::error::Invalid JSON in {name} input: {error}')
+                  sys.exit(1)
+
+          php_versions = sorted(load('PHP_VERSIONS'), key=rank, reverse=True)
+          typo3_versions = sorted(load('TYPO3_VERSIONS'), key=rank, reverse=True)
+          excluded = {(entry.get('php'), entry.get('typo3')) for entry in load('MATRIX_EXCLUDE')}
+
+          for php in php_versions:
+              for typo3 in typo3_versions:
+                  if (php, typo3) in excluded:
+                      continue
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
+                      handle.write(f'php={php}\ntypo3={typo3}\n')
+                  print(f'Analysing PHP {php} / TYPO3 {typo3} — the cell that resolves the newest PHPUnit.')
+                  sys.exit(0)
+
+          print('::error::php-versions x typo3-versions is empty or fully covered by matrix-exclude.')
+          sys.exit(1)
+          "
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ steps.cell.outputs.php }}
+          extensions: ${{ inputs.php-extensions }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      # Separate cache namespace from the capped PHPStan job: same php/typo3,
+      # deliberately different PHPUnit resolution.
+      - name: Cache Composer dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-unpinned-${{ steps.cell.outputs.php }}-${{ steps.cell.outputs.typo3 }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-unpinned-${{ steps.cell.outputs.php }}-${{ steps.cell.outputs.typo3 }}-
+            ${{ runner.os }}-composer-unpinned-${{ steps.cell.outputs.php }}-
+
+      - name: Remove incompatible dev deps
+        env:
+          REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
+          TYPO3_VERSION: ${{ steps.cell.outputs.typo3 }}
+        run: |
+          if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
+          echo "$REMOVE_DEV_DEPS" | python3 -c "
+          import json, os, sys, subprocess
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
+          typo3 = os.environ['TYPO3_VERSION']
+          for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
+              only_for = entry.get('only-for', '')
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+          "
+
+      # No `phpunit/phpunit:<13` here — that omission is the entire point of
+      # this job. Everything else mirrors the capped PHPStan job.
+      - name: Install TYPO3
+        env:
+          TYPO3_VERSION: ${{ steps.cell.outputs.typo3 }}
+          TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
+        run: |
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            exit 1
+          }
+          for pkg in $PACKAGES; do
+            composer require --no-update "$pkg:${TYPO3_VERSION}"
+          done
+          composer config --no-plugins audit.block-insecure false
+          composer install --prefer-dist --no-progress
+
+          RESOLVED=$(composer show phpunit/phpunit --format=json 2>/dev/null | jq -r '.versions[0] // empty') || RESOLVED=""
+          echo "RESOLVED_PHPUNIT=${RESOLVED:-not installed}" >> "$GITHUB_ENV"
+          echo "PHPUnit resolved for static analysis: ${RESOLVED:-not installed}"
+
+      - name: Run PHPStan against the unpinned PHPUnit
+        env:
+          PHPSTAN_COMMAND: ${{ inputs.phpstan-command }}
+          BLOCKING: ${{ inputs.phpstan-unpinned-blocking }}
+        run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          if [[ -n "$PHPSTAN_COMMAND" ]]; then
+            COMMAND="$PHPSTAN_COMMAND"
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:phpstan'; then
+            COMMAND='composer ci:test:php:phpstan -- --error-format=github'
+          elif echo "$SCRIPTS" | grep -q 'ci:phpstan'; then
+            COMMAND='composer ci:phpstan -- --error-format=github'
+          elif echo "$SCRIPTS" | grep -q 'ci:stan'; then
+            COMMAND='composer ci:stan'
+          elif echo "$SCRIPTS" | grep -q 'check:php:stan'; then
+            COMMAND='composer check:php:stan'
+          elif echo "$SCRIPTS" | grep -q 'code:phpstan'; then
+            COMMAND='composer code:phpstan'
+          else
+            echo "::notice::No PHPStan script found. Skipping. Add ci:test:php:phpstan to composer scripts or provide phpstan-command input."
+            exit 0
+          fi
+
+          set +e
+          bash -euo pipefail -c "$COMMAND"
+          STATUS=$?
+          set -e
+
+          if [[ "$STATUS" -eq 0 ]]; then
+            echo "PHPStan is clean against PHPUnit ${RESOLVED_PHPUNIT}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [[ "$BLOCKING" == "true" ]]; then
+            echo "::error::PHPStan failed against PHPUnit ${RESOLVED_PHPUNIT} and phpstan-unpinned-blocking is on."
+            exit "$STATUS"
+          fi
+
+          {
+            echo "### PHPStan findings hidden by the PHPUnit cap"
+            echo
+            echo "The blocking PHPStan job analyses against \`phpunit/phpunit:<13\`."
+            echo "This job analysed against **PHPUnit ${RESOLVED_PHPUNIT}** — the version this cell really runs — and found errors."
+            echo
+            echo "They are listed as annotations above. Typical causes are \`->method()->with()\` without \`expects()\`"
+            echo "(removed in PHPUnit 14) and calls to methods PHPUnit has since deprecated."
+            echo
+            echo "Not failing the build: set \`phpstan-unpinned-blocking: true\` once this repo is clean."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::PHPStan reports errors against PHPUnit ${RESOLVED_PHPUNIT}, which the blocking PHPStan job cannot see. Not failing the build (phpstan-unpinned-blocking is off)."
 
   # Rector runs on first PHP version only - rule application is PHP-version-independent
   rector:
