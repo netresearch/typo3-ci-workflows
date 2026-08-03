@@ -201,6 +201,8 @@ jobs:
 | `run-lint` | boolean | `true` | Run PHP syntax lint |
 | `run-cgl` | boolean | `true` | Run code style check (PHP-CS-Fixer) |
 | `run-phpstan` | boolean | `true` | Run PHPStan static analysis |
+| `run-phpstan-unpinned` | boolean | `true` | Additionally analyse one cell against the PHPUnit the matrix really resolves. Warns, does not fail. See [PHPStan and the PHPUnit cap](#phpstan-and-the-phpunit-cap). |
+| `phpstan-unpinned-blocking` | boolean | `false` | Make that pass fail the build instead of warning. Turn on per repo once it is clean. |
 | `run-rector` | boolean | `true` | Run Rector dry-run |
 | `run-fractor` | boolean | `false` | Run Fractor dry-run (TYPO3/Fluid migrations) |
 | `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
@@ -269,6 +271,26 @@ CGL and Rector run on a single PHP version — `php-versions[0]`, or `rector-php
 >
 > Check for it: `composer ci:test:php:unit -- --filter NoSuchTest` should report no tests. If it runs the whole suite, the flags are being swallowed and your coverage has never been uploaded.
 > A PHPUnit config also needs a `<source>` block, or PHPUnit answers with `No filter is configured, code coverage will not be processed` and writes nothing.
+
+### PHPStan and the PHPUnit cap
+
+The **PHPStan** job installs `phpunit/phpunit:<13` before analysing. Your test jobs do not — on PHP 8.4/8.5, `typo3/testing-framework` resolves PHPUnit 13. Static analysis therefore runs against a PHPUnit that half the matrix never executes.
+
+The cap exists because PHPUnit 13 narrowed `Stub::method()` to return `InvocationStubber`, which declares no `with*()`. Every `->method()->with()` chain without `expects()` becomes a PHPStan `method.notFound`, and PHPUnit deprecates the same call at runtime ("will no longer be possible in PHPUnit 14"). Those findings are real, not a `phpstan-phpunit` gap — but turning them on for every consumer at once would redden repos that have not migrated yet.
+
+So the **PHPStan (unpinned PHPUnit)** job analyses one cell — the highest non-excluded `php`/`typo3` combination, which resolves the newest PHPUnit — with no cap, and reports what the capped job cannot see:
+
+| Outcome | Job result | What you get |
+|---------|------------|--------------|
+| Clean | pass | Resolved PHPUnit version in the step summary |
+| Errors, `phpstan-unpinned-blocking: false` (default) | pass | PHPStan annotations on the diff, plus a warning and a step summary |
+| Errors, `phpstan-unpinned-blocking: true` | **fail** | Same annotations, build fails |
+
+The capped job must be green for the run to pass, so anything this job reports is the PHPUnit delta and nothing else.
+
+Turn `phpstan-unpinned-blocking: true` on once your repo is clean, so the cleanup cannot regress. When every consumer is there, the cap and this job both go away.
+
+Set `run-phpstan-unpinned: false` to skip the extra job (one job per run).
 
 ### Path gating
 
