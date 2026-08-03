@@ -195,6 +195,7 @@ jobs:
 | `php-versions` | string | `'["8.4"]'` | JSON array of PHP versions |
 | `typo3-versions` | string | `'["^13.4"]'` | JSON array of TYPO3 versions |
 | `matrix-exclude` | string | `'[]'` | JSON array of `{php, typo3}` combinations to exclude |
+| `rector-php-version` | string | `''` | PHP version for the Rector job; empty falls back to `php-versions[0]`. Set it when `php-versions` varies by event — see below |
 | `typo3-packages` | string | `'["typo3/cms-core"]'` | JSON array of TYPO3 packages to require |
 | `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
 | `run-lint` | boolean | `true` | Run PHP syntax lint |
@@ -238,7 +239,23 @@ Commands are auto-detected from composer scripts (in order):
 - **Functional tests:** `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
 - **Acceptance tests:** `ci:test:php:acceptance`
 
-CGL and Rector run on the first PHP version only (code style is PHP-version-independent). PHPStan and tests run on the full matrix.
+CGL and Rector run on a single PHP version — `php-versions[0]`, or `rector-php-version` for Rector when that input is set. PHPStan and tests run on the full matrix.
+
+> [!WARNING]
+> **Set `rector-php-version` if `php-versions` varies by event.**
+> Since Rector 2.6.0 the PHPUnit rule set is activated from the *installed* phpunit, and phpunit's resolution follows the PHP version. A caller that narrows the matrix for the merge queue, e.g.
+>
+> ```yaml
+> php-versions: ${{ github.event_name == 'merge_group' && '["8.4"]' || '["8.2","8.3","8.4","8.5"]' }}
+> ```
+>
+> then runs Rector on 8.2 for the pull request and on 8.4 in the queue. Different PHP, different phpunit, different rule set: the PR goes green and the merge group goes red on an unchanged commit, and the queue entry is dropped without a failing check on the PR itself. Pin the job instead:
+>
+> ```yaml
+> rector-php-version: '8.2'
+> ```
+>
+> Choose the version the code is meant to satisfy. For a library supporting a PHP range, that is normally the lowest supported version — a rule set activated by a newer phpunit can emit code the oldest supported one cannot run.
 
 > [!WARNING]
 > **Your composer script must forward `"$@"`, or coverage silently uploads nothing.**

@@ -16,6 +16,14 @@ on:
         description: JSON array of {php, typo3} combinations to exclude
         type: string
         default: '[]'
+      rector-php-version:
+        description: >-
+          PHP version the Rector job runs on. Empty falls back to the first
+          entry of php-versions. Set this whenever php-versions varies by
+          event, or Rector will judge the same commit by two different rule
+          sets.
+        type: string
+        default: ''
 
       # Feature flags
       run-lint:
@@ -793,7 +801,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::warning::PHPStan reports errors against PHPUnit ${RESOLVED_PHPUNIT}, which the blocking PHPStan job cannot see. Not failing the build (phpstan-unpinned-blocking is off)."
 
-  # Rector runs on first PHP version only - rule application is PHP-version-independent
+  # Rector runs on a single PHP version. That version is part of the verdict:
+  # since Rector 2.6.0 the PHPUnit rule set is activated from the *installed*
+  # phpunit, and phpunit's resolution follows the PHP version. A consumer whose
+  # php-versions differs per event (a narrower merge_group matrix, say) would
+  # otherwise have its PR judged by one rule set and its merge group by another
+  # — green PR, red queue, on an unchanged commit. Set rector-php-version to
+  # pin the job; php-versions[0] stays the fallback for consumers with a
+  # single, event-independent matrix.
   rector:
     needs: preflight
     name: Rector
@@ -815,7 +830,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: ${{ fromJSON(inputs.php-versions)[0] }}
+          php-version: ${{ inputs.rector-php-version || fromJSON(inputs.php-versions)[0] }}
           extensions: ${{ inputs.php-extensions }}
           tools: composer:v2
           coverage: none
