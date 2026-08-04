@@ -150,7 +150,11 @@ jobs:
           exit "$STATUS"
 
       - name: Composer validate
-        run: composer validate --strict
+        # Not --strict: this package EXISTS to pin the rule-generating tools
+        # (rector/rector, ssch/typo3-rector) to exact versions, and --strict
+        # promotes composer's "exact version constraints should be avoided"
+        # warning to a failure. Schema violations still fail without --strict.
+        run: composer validate
 
   lint-shell:
     name: Lint Shell
