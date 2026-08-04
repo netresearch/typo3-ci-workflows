@@ -1,16 +1,20 @@
 # Explicit includes for all PHPStan plugins provided by typo3-ci-workflows.
 # Use this file when phpstan/extension-installer cannot run (e.g., --no-plugins).
 #
-# Usage in your Build/phpstan.neon:
+# Usage in your Build/phpstan.neon (adjust .Build to your repo's composer
+# vendor-dir, e.g. .build):
 #   includes:
 #       - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/includes-no-extension-installer.neon
 #       - phpstan-baseline.neon
 
+# Paths are relative to THIS file (four levels up = the vendor dir), so they
+# resolve for any vendor-dir the consuming repo uses — the previous absolute
+# form hardcoded .Build and broke .build repos.
 includes:
-    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-strict-rules/rules.neon
-    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-deprecation-rules/rules.neon
-    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-phpunit/extension.neon
-    - %currentWorkingDirectory%/.Build/vendor/phpstan/phpstan-phpunit/rules.neon
-    - %currentWorkingDirectory%/.Build/vendor/saschaegerer/phpstan-typo3/extension.neon
-    - %currentWorkingDirectory%/.Build/vendor/phpat/phpat/extension.neon
-    - %currentWorkingDirectory%/.Build/vendor/ergebnis/phpstan-rules/rules.neon
+    - ../../../../phpstan/phpstan-strict-rules/rules.neon
+    - ../../../../phpstan/phpstan-deprecation-rules/rules.neon
+    - ../../../../phpstan/phpstan-phpunit/extension.neon
+    - ../../../../phpstan/phpstan-phpunit/rules.neon
+    - ../../../../saschaegerer/phpstan-typo3/extension.neon
+    - ../../../../phpat/phpat/extension.neon
+    - ../../../../ergebnis/phpstan-rules/rules.neon

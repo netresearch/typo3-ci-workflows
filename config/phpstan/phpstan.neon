@@ -19,7 +19,8 @@
 # Override individual `ergebnis.*.enabled` flags in your extension's
 # phpstan.neon to tighten or loosen per-project.
 #
-# Extensions include this file in their own phpstan.neon:
+# Extensions include this file in their own phpstan.neon (adjust .Build to
+# your repo's composer vendor-dir, e.g. .build):
 #
 #   includes:
 #       - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/phpstan.neon
@@ -73,11 +74,20 @@ parameters:
             enabled: true
 
     excludePaths:
+        # Both vendor-dir spellings in use across the org (.Build and .build).
+        # Wildcard patterns are exempt from PHPStan's path-existence check, so
+        # listing the variant a repo does not use is harmless (verified on
+        # PHPStan 2.2.7).
         - %currentWorkingDirectory%/.Build/*
+        - %currentWorkingDirectory%/.build/*
         - %currentWorkingDirectory%/ext_emconf.php
 
     bootstrapFiles:
-        - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/stubs/phpunit-attributes.php
+        # Relative to THIS file (PHPStan resolves relative paths against the
+        # config file that declares them), so it works for any vendor-dir the
+        # consuming repo uses — the previous absolute form hardcoded .Build
+        # and broke every .build repo.
+        - stubs/phpunit-attributes.php
 
     ignoreErrors:
         # --- Test infrastructure (affects all extensions) ---

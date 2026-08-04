@@ -25,8 +25,14 @@ parameters:
     inferPrivatePropertyTypeFromConstructor: true
 
     excludePaths:
+        # Both vendor-dir spellings in use across the org; wildcard patterns
+        # skip PHPStan's path-existence check, so the unused variant is
+        # harmless.
         - %currentWorkingDirectory%/.Build/*
+        - %currentWorkingDirectory%/.build/*
         - %currentWorkingDirectory%/ext_emconf.php
 
     bootstrapFiles:
-        - %currentWorkingDirectory%/.Build/vendor/netresearch/typo3-ci-workflows/config/phpstan/stubs/phpunit-attributes.php
+        # Relative to THIS file — works for any consuming vendor-dir; the
+        # previous absolute form hardcoded .Build and broke .build repos.
+        - stubs/phpunit-attributes.php
