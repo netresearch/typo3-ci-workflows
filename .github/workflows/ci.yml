@@ -1529,3 +1529,68 @@ jobs:
     uses: ./.github/workflows/docs.yml
     with:
       upload-artifact: false
+
+  # One stable check name for the whole workflow, so a branch ruleset has
+  # something it can require on EVERY event.
+  #
+  # Requiring the individual job checks does not work once a merge queue is
+  # involved. Their names encode the matrix cell (`Unit Tests (8.3, ^14.3)`),
+  # and a consumer may deliberately narrow the matrix per event — passing
+  # `php-versions` conditionally on `github.event_name == 'merge_group'` is a
+  # documented pattern and several repos use it. A context required from a
+  # pull-request run then never appears on the merge_group ref, the queue entry
+  # waits for it, and GitHub dequeues the pull request at
+  # `check_response_timeout_minutes`. Measured 2026-08-05: 21 of 69 required
+  # contexts never reported on a merge_group ref and a pull request sat in the
+  # queue past the 60-minute timeout.
+  #
+  # This job depends on every other one and reports a single name that is
+  # independent of the matrix, so `ci / All CI checks` is satisfiable from a
+  # pull request and from the queue alike. `always()` is what makes it report
+  # at all when something upstream failed or was skipped.
+  gate:
+    name: All CI checks
+    needs:
+      - preflight
+      - lint
+      - cgl
+      - phpstan
+      - phpstan-unpinned
+      - rector
+      - fractor
+      - unit-tests
+      - acceptance-tests
+      - functional-tests
+      - functional-tests-sqlite
+      - detect-docs
+      - docs
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      # `skipped` counts as passing: a job switched off by an input, or gated
+      # out by the preflight, has nothing to say about this commit. Only
+      # `failure` and `cancelled` fail the gate. `phpstan-unpinned` needs no
+      # special case — it decides for itself whether to fail, via
+      # `phpstan-unpinned-blocking`, and exits 0 while advisory.
+      - name: Fail unless every job succeeded or was skipped
+        shell: bash
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          bad=$(jq -r '
+            to_entries[]
+            | select(.value.result != "success" and .value.result != "skipped")
+            | "\(.key)=\(.value.result)"' <<<"$RESULTS")
+          if [ -n "$bad" ]; then
+            echo "::error::CI gate failed — $(tr "\n" " " <<<"$bad")"
+            exit 1
+          fi
+          jq -r 'to_entries[] | "  \(.key): \(.value.result)"' <<<"$RESULTS"
+          echo "All jobs succeeded or were skipped."
