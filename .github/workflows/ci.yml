@@ -966,6 +966,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.php-extensions }}
           tools: composer:v2
+          ini-values: zend.assertions=1
           coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
 
       - name: Get Composer cache directory
@@ -1110,6 +1111,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.php-extensions }}
           tools: composer:v2
+          ini-values: zend.assertions=1
           coverage: none
 
       - name: Get Composer cache directory
@@ -1228,6 +1230,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.php-extensions }}, pdo_mysql, pdo_sqlite, pdo_pgsql
           tools: composer:v2
+          ini-values: zend.assertions=1
           coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
 
       - name: Get Composer cache directory
@@ -1370,6 +1373,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.php-extensions }}, pdo_sqlite
           tools: composer:v2
+          ini-values: zend.assertions=1
           coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
 
       - name: Get Composer cache directory
