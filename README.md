@@ -196,6 +196,7 @@ jobs:
 | `typo3-versions` | string | `'["^13.4"]'` | JSON array of TYPO3 versions |
 | `matrix-exclude` | string | `'[]'` | JSON array of `{php, typo3}` combinations to exclude |
 | `rector-php-version` | string | `''` | PHP version for the Rector job; empty falls back to `php-versions[0]`. Set it when `php-versions` varies by event — see below |
+| `cgl-php-version` | string | `''` | PHP version for the Code Style job; empty falls back to `php-versions[0]`. Set it when the code style toolchain needs a newer PHP than the repo's support floor (the dev meta-package requires `php ^8.2`) |
 | `typo3-packages` | string | `'["typo3/cms-core"]'` | JSON array of TYPO3 packages to require |
 | `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
 | `run-lint` | boolean | `true` | Run PHP syntax lint |
@@ -239,7 +240,7 @@ Commands are auto-detected from composer scripts (in order):
 - **Functional tests:** `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
 - **Acceptance tests:** `ci:test:php:acceptance`
 
-CGL and Rector run on a single PHP version — `php-versions[0]`, or `rector-php-version` for Rector when that input is set. PHPStan and tests run on the full matrix.
+CGL and Rector run on a single PHP version — `php-versions[0]`, or `cgl-php-version` / `rector-php-version` when the respective input is set. PHPStan and tests run on the full matrix.
 
 > [!WARNING]
 > **Set `rector-php-version` if `php-versions` varies by event.**
