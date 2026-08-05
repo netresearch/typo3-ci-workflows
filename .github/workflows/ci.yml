@@ -24,6 +24,15 @@ on:
           sets.
         type: string
         default: ''
+      cgl-php-version:
+        description: >-
+          PHP version the Code Style job runs on. Empty falls back to the
+          first entry of php-versions. Set this whenever the code style
+          toolchain needs a newer PHP than the repo's support floor (the
+          dev meta-package requires php ^8.2), so the order of php-versions
+          does not become load-bearing.
+        type: string
+        default: ''
 
       # Feature flags
       run-lint:
@@ -408,7 +417,8 @@ jobs:
             echo ".gitattributes: OK (has export-ignore rules)"
           fi
 
-  # CGL runs on first PHP version only - code style results are PHP-version-independent
+  # CGL runs on a single PHP version (cgl-php-version, falling back to
+  # php-versions[0]) - code style results are PHP-version-independent
   cgl:
     needs: preflight
     name: Code Style
@@ -430,7 +440,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: ${{ fromJSON(inputs.php-versions)[0] }}
+          php-version: ${{ inputs.cgl-php-version || fromJSON(inputs.php-versions)[0] }}
           extensions: ${{ inputs.php-extensions }}
           tools: composer:v2
           coverage: none
