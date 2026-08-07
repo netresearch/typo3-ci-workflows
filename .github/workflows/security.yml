@@ -231,6 +231,27 @@ jobs:
           read -r -a ARGS <<< "$OPENGREP_CONFIG" || :
           opengrep scan "${ARGS[@]}" --sarif --output opengrep.sarif .
 
+      - name: Drop nosemgrep-suppressed findings from the SARIF
+        # Opengrep honours `nosemgrep` comments for its exit status — a file
+        # whose only finding is suppressed exits 0 — but the SARIF it writes
+        # still carries those results, flagged `suppressions: [{"kind":
+        # "inSource"}]`. GitHub code scanning does not act on that flag, so a
+        # finding a developer reviewed and documented in the source stays open
+        # in the Security tab indefinitely, indistinguishable from one nobody
+        # has looked at. Dropping them here makes the upload agree with the
+        # gating that already happened.
+        #
+        # Writes to a second file and moves it into place only on success, so
+        # a jq failure cannot leave a truncated SARIF behind.
+        if: always() && hashFiles('opengrep.sarif') != ''
+        run: |
+          before=$(jq '[.runs[].results[]] | length' opengrep.sarif)
+          jq '(.runs[].results) |= map(select((.suppressions // []) | length == 0))' \
+            opengrep.sarif > opengrep.filtered.sarif
+          after=$(jq '[.runs[].results[]] | length' opengrep.filtered.sarif)
+          mv opengrep.filtered.sarif opengrep.sarif
+          echo "::notice::Opengrep SARIF: $((before - after)) suppressed finding(s) dropped, ${after} uploaded"
+
       - name: Upload SARIF to code scanning
         if: always()
         uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
