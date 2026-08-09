@@ -1,0 +1,316 @@
+name: Assemble Changelog
+
+# Turns per-change fragment files into a released CHANGELOG.md section.
+#
+# WHY THIS EXISTS
+# ===============
+# A shared `CHANGELOG.md` is the one file every pull request edits at the same
+# place — right under `## [Unreleased]`. Every PR after the first one to merge
+# therefore conflicts, and the conflict is always the same shape: both sides
+# added a bullet. Measured on netresearch/t3x-nr-llm, 2026-08-09: 28 of 28
+# pairings of eight open PRs conflicted, in CHANGELOG.md and in nothing else.
+#
+# `.gitattributes` with `merge=union` is the git-native answer and does NOT
+# work here: GitHub ignores repository-supplied merge drivers server-side, in
+# pull requests and in the merge queue alike. Nor is it a ruleset matter —
+# rulesets gate a merge, they do not decide how it resolves.
+#
+# Fragments remove the conflict by construction: one file per change, no two
+# pull requests touching the same path. This workflow assembles them at release
+# time into exactly the section shape `publish-to-ter.yml` already parses.
+#
+# OPT-IN
+# ======
+# Nothing here changes a repository that does not call it. A repository adopts
+# fragments by creating the directory, adding fragments in its pull requests,
+# and calling this workflow from its release-preparation flow.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version being released, without a leading "v" (e.g. "0.27.0")'
+        required: true
+        type: string
+      fragments-dir:
+        description: 'Directory holding the fragment files'
+        required: false
+        type: string
+        default: 'Changelog.d'
+      changelog-file:
+        description: 'Changelog to write the assembled section into'
+        required: false
+        type: string
+        default: 'CHANGELOG.md'
+      release-date:
+        description: 'Release date as YYYY-MM-DD; empty uses today (UTC)'
+        required: false
+        type: string
+        default: ''
+      commit:
+        description: >-
+          Commit the assembled changelog and the fragment deletions. The commit
+          is created through the GitHub API so it carries GitHub's signature —
+          a plain `git commit` on a runner is unsigned and is refused by a
+          repository with a required_signatures ruleset.
+        required: false
+        type: boolean
+        default: true
+      branch:
+        description: 'Branch to commit to; empty uses the ref the workflow runs on'
+        required: false
+        type: string
+        default: ''
+      allow-empty:
+        description: >-
+          Succeed when there is no fragment at all. Off by default: a release
+          with nothing to say is far more often a forgotten fragment than a
+          deliberate silence.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      section:
+        description: 'The assembled markdown section, without its version heading'
+        value: ${{ jobs.assemble.outputs.section }}
+      fragment-count:
+        description: 'Number of fragments consumed'
+        value: ${{ jobs.assemble.outputs.count }}
+
+# CALLER REQUIREMENTS
+# ===================
+# When calling this reusable workflow, the caller's job-level
+# `permissions:` block MUST grant at least this full set, otherwise
+# the run fails with `startup_failure` before any job executes
+# (GitHub rejects the workflow at startup when the reusable declares
+# a permission the caller did not grant). NOTE: setting ANY scope in a
+# `permissions:` block forces every UNLISTED scope to `none`, and a job
+# that omits `permissions:` inherits the repository default
+# (default_workflow_permissions) — so a repo hardened to `read` will
+# startup-fail here unless these scopes are granted explicitly.
+#
+#   jobs:
+#     changelog:
+#       uses: netresearch/typo3-ci-workflows/.github/workflows/changelog-assemble.yml@main
+#       with:
+#         version: ${{ inputs.version }}
+#       permissions:
+#         contents: write
+permissions: {}
+
+jobs:
+  assemble:
+    name: Assemble changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      section: ${{ steps.assemble.outputs.section }}
+      count: ${{ steps.assemble.outputs.count }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      - name: Assemble
+        id: assemble
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          FRAGMENTS_DIR: ${{ inputs.fragments-dir }}
+          CHANGELOG_FILE: ${{ inputs.changelog-file }}
+          RELEASE_DATE: ${{ inputs.release-date }}
+          ALLOW_EMPTY: ${{ inputs.allow-empty }}
+        run: |
+          python3 - <<'PY'
+          import datetime, os, pathlib, re, sys
+
+          version   = os.environ['VERSION'].strip().lstrip('v')
+          frag_dir  = pathlib.Path(os.environ['FRAGMENTS_DIR'])
+          changelog = pathlib.Path(os.environ['CHANGELOG_FILE'])
+          date      = os.environ['RELEASE_DATE'].strip() or datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+          allow_empty = os.environ['ALLOW_EMPTY'] == 'true'
+
+          def fail(msg):
+              print(f'::error::{msg}')
+              sys.exit(1)
+
+          if not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?', version):
+              fail(f'version "{version}" is not a semantic version')
+
+          # Keep a Changelog's order, and the only headings the released section
+          # may contain. A fragment naming anything else fails the run rather
+          # than inventing a heading nobody reads.
+          ORDER = ['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security']
+          TYPES = {t.lower(): t for t in ORDER}
+
+          # `<anything>.<type>.md`. The stem is free — a PR number, an issue
+          # number, a slug — and only decides the order within its group, so a
+          # numeric stem sorts predictably without carrying meaning.
+          all_md = sorted(frag_dir.glob('*.md')) if frag_dir.is_dir() else []
+          # A file without a `.<type>` segment would be skipped by the glob and
+          # its change would vanish from the release without a word. Name it.
+          untyped = [p for p in all_md if p.name.count('.') < 2]
+          if untyped:
+              fail(
+                  'fragment(s) without a type segment: '
+                  + ', '.join(str(p) for p in untyped)
+                  + ' — expected <name>.<type>.md'
+              )
+          fragments = all_md
+
+          grouped = {t: [] for t in ORDER}
+          for path in fragments:
+              kind = path.name.rsplit('.', 2)[-2].lower()
+              if kind not in TYPES:
+                  fail(
+                      f'{path}: unknown fragment type "{kind}". '
+                      f'Expected one of: {", ".join(sorted(TYPES))}.'
+                  )
+              body = path.read_text(encoding='utf-8').strip()
+              if not body:
+                  fail(f'{path}: empty fragment')
+              # A fragment is the bullet's body; the leading marker is added
+              # here so a fragment cannot decide its own list formatting.
+              body = re.sub(r'^[-*]\s+', '', body)
+              lines = body.split('\n')
+              entry = '- ' + lines[0]
+              for line in lines[1:]:
+                  entry += '\n' + ('  ' + line if line.strip() else '')
+              grouped[TYPES[kind]].append(entry)
+
+          if not fragments:
+              if not allow_empty:
+                  fail(
+                      f'no fragments in {frag_dir}/ — refusing to release a version with an '
+                      f'empty changelog section. Pass allow-empty: true if that is intended.'
+                  )
+              print(f'::warning::no fragments in {frag_dir}/, releasing an empty section')
+
+          section = '\n\n'.join(
+              f'### {kind}\n\n' + '\n'.join(entries)
+              for kind, entries in grouped.items() if entries
+          )
+
+          heading = f'## [{version}] - {date}'
+          text    = changelog.read_text(encoding='utf-8') if changelog.exists() else (
+              '# Changelog\n\nAll notable changes to this project are documented here.\n'
+          )
+
+          if re.search(r'^##\s+\[?v?' + re.escape(version) + r'\]?', text, re.M):
+              fail(f'{changelog} already has a section for {version}')
+
+          block = heading + '\n\n' + section + '\n'
+
+          # Insert AFTER the Unreleased block and before the newest released
+          # section. Unreleased is left alone deliberately: a repository
+          # migrating to fragments still has hand-written entries there, and
+          # silently folding them into a release would attribute them to a
+          # version nobody checked them against.
+          unreleased = re.search(r'^##\s+\[?Unreleased\]?.*$', text, re.M | re.I)
+          if unreleased:
+              rest  = text[unreleased.end():]
+              nxt   = re.search(r'^##\s+', rest, re.M)
+              stray = (rest[:nxt.start()] if nxt else rest).strip()
+              if stray:
+                  print(
+                      '::warning::[Unreleased] still holds hand-written entries; they stay '
+                      'there and are NOT part of this release section'
+                  )
+              at = unreleased.end() + (nxt.start() if nxt else len(rest))
+              text = text[:at] + block + '\n' + text[at:]
+          else:
+              first = re.search(r'^##\s+', text, re.M)
+              at    = first.start() if first else len(text)
+              sep   = '' if text[:at].endswith('\n\n') else '\n'
+              text  = text[:at] + sep + block + '\n' + text[at:]
+
+          changelog.write_text(text, encoding='utf-8')
+
+          removed = [str(p) for p in fragments]
+          for p in fragments:
+              p.unlink()
+
+          out = pathlib.Path(os.environ['GITHUB_OUTPUT'])
+          with out.open('a', encoding='utf-8') as fh:
+              fh.write(f'count={len(fragments)}\n')
+              fh.write('section<<CHANGELOG_SECTION_EOF\n')
+              fh.write(section + '\n')
+              fh.write('CHANGELOG_SECTION_EOF\n')
+              fh.write('removed<<REMOVED_EOF\n')
+              fh.write('\n'.join(removed) + '\n')
+              fh.write('REMOVED_EOF\n')
+
+          print(f'Assembled {len(fragments)} fragment(s) into {changelog} as {heading}')
+          PY
+
+      - name: Commit
+        if: inputs.commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ inputs.branch || github.ref_name }}
+          VERSION: ${{ inputs.version }}
+          CHANGELOG_FILE: ${{ inputs.changelog-file }}
+          REMOVED: ${{ steps.assemble.outputs.removed }}
+        run: |
+          set -euo pipefail
+
+          # createCommitOnBranch, not `git commit` + `git push`: a commit made
+          # through the API is signed by GitHub, and a repository with a
+          # required_signatures ruleset refuses an unsigned one. It is also
+          # atomic — the changelog and the fragment deletions land together or
+          # not at all — and it fails loudly on a stale expectedHeadOid instead
+          # of force-pushing over a concurrent commit.
+          # exported: the python heredoc below reads it from the environment
+          export HEAD_OID
+          HEAD_OID=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
+
+          # The whole GraphQL body is built as one JSON document and piped in.
+          # `gh api graphql -f input=...` would send a STRING where the mutation
+          # declares a CreateCommitOnBranchInput object, which fails on type.
+          python3 - <<'PY' > payload.json
+          import base64, json, os, pathlib
+
+          changelog = pathlib.Path(os.environ['CHANGELOG_FILE'])
+          removed   = [l.strip() for l in os.environ['REMOVED'].splitlines() if l.strip()]
+
+          print(json.dumps({
+              'query': (
+                  'mutation($input: CreateCommitOnBranchInput!) {'
+                  ' createCommitOnBranch(input: $input) { commit { oid url } } }'
+              ),
+              'variables': {
+                  'input': {
+                      'branch': {
+                          'repositoryNameWithOwner': os.environ['REPO'],
+                          'branchName': os.environ['BRANCH'],
+                      },
+                      'message': {
+                          'headline': f"docs(changelog): assemble {os.environ['VERSION']} from fragments",
+                          'body': 'Generated by changelog-assemble.yml. Fragments consumed and removed.',
+                      },
+                      'fileChanges': {
+                          'additions': [{
+                              'path': str(changelog),
+                              'contents': base64.b64encode(changelog.read_bytes()).decode('ascii'),
+                          }],
+                          'deletions': [{'path': p} for p in removed],
+                      },
+                      'expectedHeadOid': os.environ['HEAD_OID'],
+                  },
+              },
+          }))
+          PY
+
+          OID=$(gh api graphql --input payload.json --jq '.data.createCommitOnBranch.commit.oid')
+          rm -f payload.json
+          echo "Committed $OID to $BRANCH"
