@@ -1,0 +1,160 @@
+name: Changelog Fragment Check
+
+# Fails a pull request that changes shipped code without adding a changelog
+# fragment.
+#
+# Separate from `changelog-assemble.yml`, and separately opt-in: assembly works
+# without this gate, but without it a fragment is simply forgotten and the
+# release section quietly loses the entry. A convention nothing enforces decays
+# into a convention nobody follows.
+#
+# Deliberately NOT a required check by default — a repository decides that in
+# its own ruleset. This workflow only reports.
+#
+# INJECTION
+# =========
+# The only event interpolation is `github.event.pull_request.number`, an
+# integer. Everything an author controls — labels, file names, branch names —
+# is fetched through the API into an environment variable and read from the
+# environment by the script. Nothing author-supplied is ever interpolated into
+# a `run:` body, where it would be shell source.
+
+on:
+  workflow_call:
+    inputs:
+      fragments-dir:
+        description: 'Directory a fragment must be added to'
+        required: false
+        type: string
+        default: 'Changelog.d'
+      paths-ignore:
+        description: >-
+          Newline-separated fnmatch patterns whose changes need no fragment.
+          A pull request touching ONLY these paths passes. Defaults cover the
+          places where a change is not user-visible.
+        required: false
+        type: string
+        default: |
+          .github/**
+          Build/**
+          Tests/**
+          docs/**
+          Documentation/**
+          *.md
+          .gitignore
+          .gitattributes
+          .editorconfig
+      skip-label:
+        description: >-
+          Label that waives the requirement. Applying it is a decision by a
+          human, which is the point — it is visible on the pull request rather
+          than hidden in a commit.
+        required: false
+        type: string
+        default: 'skip-changelog'
+
+# CALLER REQUIREMENTS
+# ===================
+# When calling this reusable workflow, the caller's job-level
+# `permissions:` block MUST grant at least this full set, otherwise
+# the run fails with `startup_failure` before any job executes
+# (GitHub rejects the workflow at startup when the reusable declares
+# a permission the caller did not grant). NOTE: setting ANY scope in a
+# `permissions:` block forces every UNLISTED scope to `none`, and a job
+# that omits `permissions:` inherits the repository default
+# (default_workflow_permissions) — so a repo hardened to `read` will
+# startup-fail here unless these scopes are granted explicitly.
+#
+#   jobs:
+#     changelog:
+#       uses: netresearch/typo3-ci-workflows/.github/workflows/changelog-check.yml@main
+#       permissions:
+#         contents: read
+#         pull-requests: read
+permissions: {}
+
+jobs:
+  check:
+    name: Changelog fragment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - name: Check for a fragment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FRAGMENTS_DIR: ${{ inputs.fragments-dir }}
+          PATHS_IGNORE: ${{ inputs.paths-ignore }}
+          SKIP_LABEL: ${{ inputs.skip-label }}
+        run: |
+          set -euo pipefail
+
+          LABELS=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '[.labels[].name] | join("\n")')
+          FILES=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | "\(.status)\t\(.filename)"')
+
+          LABELS="$LABELS" FILES="$FILES" python3 - <<'PY'
+          import fnmatch, os, sys
+
+          frag_dir = os.environ['FRAGMENTS_DIR'].rstrip('/')
+          ignore   = [p.strip() for p in os.environ['PATHS_IGNORE'].splitlines() if p.strip()]
+          skip     = os.environ['SKIP_LABEL'].strip()
+          labels   = [l.strip() for l in os.environ['LABELS'].splitlines() if l.strip()]
+
+          entries = []
+          for line in os.environ['FILES'].splitlines():
+              if '\t' in line:
+                  status, name = line.split('\t', 1)
+                  entries.append((status, name))
+
+          if skip and skip in labels:
+              print(f'Waived by the "{skip}" label.')
+              sys.exit(0)
+
+          added_fragment = [
+              n for s, n in entries
+              if n.startswith(frag_dir + '/') and s in ('added', 'renamed', 'modified')
+          ]
+          if added_fragment:
+              print('Fragment(s) found: ' + ', '.join(added_fragment))
+              sys.exit(0)
+
+          def ignored(name):
+              # A pattern without a slash also matches on the basename, so
+              # `*.md` covers `Documentation/Foo.md` the way a reader expects.
+              return any(
+                  fnmatch.fnmatch(name, pat)
+                  or ('/' not in pat and fnmatch.fnmatch(os.path.basename(name), pat))
+                  for pat in ignore
+              )
+
+          relevant = [n for _, n in entries if not ignored(n)]
+          if not relevant:
+              print('Only ignored paths changed; no fragment required.')
+              sys.exit(0)
+
+          print(f'::error::No changelog fragment in {frag_dir}/.')
+          print('')
+          print('These changed files are user-visible and need one:')
+          for n in relevant[:20]:
+              print(f'  {n}')
+          if len(relevant) > 20:
+              print(f'  ... and {len(relevant) - 20} more')
+          print('')
+          print(f'Add a file {frag_dir}/<name>.<type>.md, where <type> is one of')
+          print('added, changed, deprecated, removed, fixed, security. Its content is')
+          print('the changelog entry, without the leading "- ".')
+          print('')
+          print(f'If this change genuinely needs no entry, apply the "{skip}" label.')
+          sys.exit(1)
+          PY
