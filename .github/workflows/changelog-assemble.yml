@@ -118,6 +118,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.branch || github.ref }}
+          # The Commit step writes through GraphQL createCommitOnBranch with
+          # GH_TOKEN, never `git push`, so nothing here needs the credentials
+          # checkout would otherwise leave in .git/config for later steps and
+          # for anything that reads the workspace.
+          persist-credentials: false
 
       - name: Assemble
         id: assemble
