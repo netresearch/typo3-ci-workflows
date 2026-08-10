@@ -167,7 +167,34 @@ jobs:
           composer install --prefer-dist --no-progress
 
       - name: Run Composer Audit
-        run: composer audit --format=plain --abandoned=report
+        # The advisory endpoint is a network dependency of a REQUIRED check: when
+        # packagist.org answers 5xx, `composer audit` exits 100 and every PR in
+        # flight is thrown out of the merge queue (observed 2026-08-09,
+        # netresearch/t3x-nr-llm#686 — HTTP 502, identical run green 30 minutes
+        # earlier). `--ignore-unreachable` would fix that by making the audit
+        # pass SILENTLY on any outage, which turns a security gate off exactly
+        # when nobody notices. Retry instead, and only downgrade to a visible
+        # warning when the source stays unreachable — a real advisory still
+        # fails the job on the first attempt.
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if composer audit --format=plain --abandoned=report >audit.log 2>&1; then
+              cat audit.log
+              exit 0
+            fi
+            if grep -qiE 'could not be downloaded|failed to (open|download)|curl error|operation timed out' audit.log; then
+              echo "attempt ${attempt}/3: advisory source unreachable"
+              head -20 audit.log
+              [ "${attempt}" -lt 3 ] && sleep $((attempt * 15))
+              continue
+            fi
+            cat audit.log
+            exit 1
+          done
+          cat audit.log
+          echo "::warning title=Composer audit inconclusive::The advisory source was unreachable on all 3 attempts, so dependencies were NOT audited in this run. Re-run this job once the source is back."
+          exit 0
 
   opengrep:
     needs: preflight
