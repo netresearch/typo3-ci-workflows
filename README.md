@@ -208,6 +208,7 @@ jobs:
 | `phpstan-unpinned-blocking` | boolean | `false` | Make that pass fail the build instead of warning. Turn on per repo once it is clean. |
 | `run-rector` | boolean | `true` | Run Rector dry-run |
 | `run-fractor` | boolean | `false` | Run Fractor dry-run (TYPO3/Fluid migrations) |
+| `run-repo-checks` | boolean | `false` | Run the caller's own file checks (CHANGELOG shape, workflow hygiene, anything repo-specific), so an extension needs no workflow job of its own |
 | `run-unit-tests` | boolean | `true` | Run PHPUnit unit tests |
 | `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
 | `run-acceptance-tests` | boolean | `false` | Run PHPUnit acceptance tests |
@@ -222,6 +223,7 @@ jobs:
 | `phpstan-command` | string | auto-detect | Override PHPStan command |
 | `rector-command` | string | auto-detect | Override Rector command |
 | `fractor-command` | string | auto-detect | Override Fractor command |
+| `repo-checks-command` | string | auto-detect | Override the repo-checks command (default `composer ci:test:repo`). Must not need vendor — the job runs no `composer install`. |
 | `unit-test-command` | string | auto-detect | Override unit test command |
 | `functional-test-command` | string | auto-detect | Override functional test command |
 | `acceptance-test-command` | string | auto-detect | Override acceptance test command |
