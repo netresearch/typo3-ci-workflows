@@ -1072,11 +1072,19 @@ chmod +x Build/Scripts/runTests.sh
 cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.conf.dist Build/Scripts/runTests.conf   # optional
 ```
 
-Suites: `unit`, `unitCoverage`, `functional`, `functionalParallel`,
-`functionalCoverage`, `integration`, `fuzzy`, `mutation`, `e2e`,
-`architecture`, `lint`, `cgl`, `phpstan`, `rector`, `composer`,
-`composerUpdate`, `clean`. Databases: `-d sqlite|mariadb|mysql|postgres` with
-`-i <version>`; PHP with `-p`; a TYPO3 core constraint with `-t`.
+Suites: `unit`, `unitCoverage`, `unitCoveragePath`, `functional`,
+`functionalParallel`, `functionalCoverage`, `integration`, `fuzz` (or
+`fuzzy`), `mutation`, `e2e`, `architecture`, `lint`, `cgl`, `phpstan`,
+`phpstanBaseline`, `rector`, `composer`, `composerValidate`,
+`composerNormalize`, `composerUpdate`, `clean` (or `cleanCache`). Databases:
+`-d sqlite|mariadb|mysql|postgres` with `-i <version>`; PHP with `-p`; a TYPO3
+core constraint with `-t`.
+
+A suite that is genuinely one extension's own — rendering its documentation,
+publishing coverage, installing the lowest supported dependency set — does not
+need a fork: define `suite_<name>()` in `Build/Scripts/runTests.conf` and
+`-s <name>` calls it with the remaining arguments. The runner's own suites
+always win, so a conf can extend the list but not quietly redefine it.
 
 The runner resolves the extension root from the **working directory** (nearest
 ancestor with a `composer.json`), never from its own path — which is what makes
