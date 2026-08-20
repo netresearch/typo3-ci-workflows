@@ -283,8 +283,30 @@ PROJECT_ROOT="$(resolve_project_root)" || {
     echo "runTests.sh: no composer.json above ${PWD} — run this from inside the extension." >&2
     exit 1
 }
+# The extension already states its name; asking a conf file to repeat it is
+# how the two drift apart. `composer.json` is the source: the package name for
+# the slug, the TYPO3 extension key for the label. The directory name is only
+# the last resort, because in a worktree layout it is the branch, not the
+# extension.
+composer_value() {
+    # $1 jq path, $2 the key for the fallback read
+    local file="${PROJECT_ROOT}/composer.json"
+    [[ -f "${file}" ]] || return 0
+    if type jq >/dev/null 2>&1; then
+        jq -r "${1} // empty" "${file}" 2>/dev/null
+        return 0
+    fi
+    # jq is not guaranteed on a machine that only needs a container runtime.
+    # Both keys are plain strings, and in a composer-normalised file the first
+    # "name" is the package's own.
+    sed -n "s/.*\"${2}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "${file}" | head -n1
+}
+
+PROJECT_SLUG="${PROJECT_SLUG:-$(composer_value '.name' 'name')}"
+PROJECT_SLUG="${PROJECT_SLUG##*/}"
 PROJECT_SLUG="${PROJECT_SLUG:-$(basename "${PROJECT_ROOT}")}"
-PROJECT_LABEL="${PROJECT_LABEL:-${PROJECT_SLUG}}"
+PROJECT_LABEL="${PROJECT_LABEL:-$(composer_value '.extra["typo3/cms"]["extension-key"]' 'extension-key')}"
+PROJECT_LABEL="${PROJECT_LABEL:-${PROJECT_SLUG//-/_}}"
 PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-Build/phpunit.xml}"
 PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-Build/FunctionalTests.xml}"
 PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-Build/phpstan/phpstan.neon}"
@@ -294,9 +316,13 @@ INFECTION_CONFIG="${INFECTION_CONFIG:-infection.json.dist}"
 # functional phpunit config lists — a suite that is in the config but not here
 # runs in no job and reads as coverage.
 FUNCTIONAL_PARALLEL_PATHS="${FUNCTIONAL_PARALLEL_PATHS:-Tests/Functional}"
-# Only used by `-s e2e`, and only when no TYPO3_BASE_URL is in the environment.
-DDEV_HOSTNAME="${DDEV_HOSTNAME:-${PROJECT_SLUG}.ddev.site}"
-DDEV_BASE_URL="${DDEV_BASE_URL:-https://${DDEV_HOSTNAME}}"
+# Where `-s e2e` points its browser. The runner does not host anything and has
+# no opinion on what serves that URL — ddev, a container stack, a staging
+# system. TYPO3_BASE_URL from the environment wins; this is the fallback for a
+# repository whose target is always the same locally. No default: guessing a
+# URL means running a suite against whatever answers, which is how one
+# extension's tests ended up aimed at another extension's ddev host.
+E2E_BASE_URL="${E2E_BASE_URL:-}"
 IMAGE_PLAYWRIGHT="${IMAGE_PLAYWRIGHT:-mcr.microsoft.com/playwright:v1.60.0-noble}"
 DEFAULT_PHP_VERSION="${DEFAULT_PHP_VERSION:-8.5}"
 COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-0.1.x-dev}"
@@ -490,18 +516,15 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     e2e)
-        if [[ -n "${TYPO3_BASE_URL:-}" ]]; then
-            echo "Using TYPO3_BASE_URL from environment: ${TYPO3_BASE_URL}"
-        elif type "ddev" >/dev/null 2>&1 && ddev describe >/dev/null 2>&1; then
-            TYPO3_BASE_URL="${DDEV_BASE_URL}"
-            echo "Using ddev TYPO3 URL: ${TYPO3_BASE_URL}"
-        else
-            TYPO3_BASE_URL="${DDEV_BASE_URL}"
-            echo "Warning: No TYPO3 instance detected."
-            echo "E2E tests require a running TYPO3 instance."
-            echo "  1. Start ddev: ddev start"
-            echo "  2. Or set: TYPO3_BASE_URL=https://your-typo3.local $0 -s e2e"
+        TYPO3_BASE_URL="${TYPO3_BASE_URL:-${E2E_BASE_URL}}"
+        if [[ -z "${TYPO3_BASE_URL}" ]]; then
+            echo "runTests.sh: -s e2e needs the URL of a running TYPO3 to test against." >&2
+            echo "             Set it per run:   TYPO3_BASE_URL=https://your-typo3.local $0 -s e2e" >&2
+            echo "             or once for this extension, as E2E_BASE_URL in Build/Scripts/runTests.conf." >&2
+            clean_up
+            exit 1
         fi
+        echo "E2E target: ${TYPO3_BASE_URL}"
 
         mkdir -p .Build/.cache/npm
         mkdir -p node_modules
@@ -513,14 +536,19 @@ case ${TEST_SUITE} in
             exit 1
         fi
 
-        # Connect to ddev network if available
+        # A *.ddev.site target is not reachable from a container on the default
+        # network, so join ddev's and map the name to its router. The hostname
+        # comes out of the URL that was just resolved — nothing here configures
+        # ddev, it only reacts to a URL that happens to point at one.
         DDEV_PARAMS=""
-        if type "ddev" >/dev/null 2>&1 && ddev describe >/dev/null 2>&1; then
+        E2E_HOST="${TYPO3_BASE_URL#*://}"
+        E2E_HOST="${E2E_HOST%%/*}"
+        E2E_HOST="${E2E_HOST%%:*}"
+        if [[ "${E2E_HOST}" == *.ddev.site ]] && type "ddev" >/dev/null 2>&1 && ddev describe >/dev/null 2>&1; then
             ROUTER_IP=$(${CONTAINER_BIN} inspect ddev-router --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
             if [[ -n "${ROUTER_IP}" ]]; then
-                DDEV_PARAMS="--network ddev_default"
-                DDEV_PARAMS="${DDEV_PARAMS} --add-host ${DDEV_HOSTNAME}:${ROUTER_IP}"
-                echo "Connecting to ddev network (router IP: ${ROUTER_IP})"
+                DDEV_PARAMS="--network ddev_default --add-host ${E2E_HOST}:${ROUTER_IP}"
+                echo "Joining the ddev network for ${E2E_HOST} (router ${ROUTER_IP})"
             fi
         fi
 

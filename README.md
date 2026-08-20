@@ -1052,9 +1052,12 @@ An extension keeps two small files of its own:
 2. **`Build/Scripts/runTests.conf`** — optional, copied from
    `assets/Build/Scripts/runTests.conf.dist`, and only for values that differ
    from the defaults: PHPUnit/PHPStan/Rector config paths, the directories the
-   sharded functional run walks, the ddev hostname for `-s e2e`, the default
-   PHP version. Environment variables override it, so a one-off run needs no
-   edit: `DEFAULT_PHP_VERSION=8.3 Build/Scripts/runTests.sh -s unit`.
+   sharded functional run walks, the URL `-s e2e` tests against, the default
+   PHP version. The extension's own name is not among them — the container
+   network prefix and the label `-h` prints are read from `composer.json`
+   (package name, and `extra.typo3/cms.extension-key`). Environment variables
+   override the file, so a one-off run needs no edit:
+   `DEFAULT_PHP_VERSION=8.2 Build/Scripts/runTests.sh -s unit`.
 
 ```bash
 cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.stub.sh Build/Scripts/runTests.sh

@@ -10,8 +10,10 @@
 # An extension that needs something this file cannot express is telling you the
 # shared runner is missing a knob — add it there rather than forking the runner.
 
-# Container network prefix and the name in `-h` output.
-# Default: the directory name of the extension root.
+# Container network prefix and the name in `-h` output. Both are read from
+# composer.json — the package name for the slug, extra.typo3/cms.extension-key
+# for the label — so there is normally nothing to set here. Override only if
+# the extension wants a name it does not declare anywhere.
 #PROJECT_SLUG="nr-llm"
 #PROJECT_LABEL="nr_llm"
 
@@ -29,9 +31,11 @@
 # that is in the config but not here runs in no job and still reads as covered.
 #FUNCTIONAL_PARALLEL_PATHS="Tests/Functional Tests/E2E/Backend"
 
-# Only used by `-s e2e`, and only when TYPO3_BASE_URL is not already set.
-#DDEV_HOSTNAME="v14.nr-llm.ddev.site"
-#DDEV_BASE_URL="https://v14.nr-llm.ddev.site"
+# Where `-s e2e` points its browser, when TYPO3_BASE_URL is not in the
+# environment. The runner hosts nothing and does not care what serves it — a
+# ddev site, a container stack, a staging system. There is no default on
+# purpose: a guessed URL means testing against whatever answers.
+#E2E_BASE_URL="https://v14.nr-llm.ddev.site"
 
 # Default PHP for a run without `-p`, and the Playwright image for `-s e2e`.
 #DEFAULT_PHP_VERSION="8.5"
