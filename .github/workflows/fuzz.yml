@@ -7,7 +7,7 @@ on:
         description: 'PHP version for fuzz and mutation tests'
         required: false
         type: string
-        default: '8.4'
+        default: '8.5'
       php-extensions:
         description: 'PHP extensions to install (comma-separated)'
         required: false

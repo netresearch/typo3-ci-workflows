@@ -89,7 +89,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
           coverage: none
 
@@ -166,7 +166,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
           coverage: none
 
@@ -212,7 +212,18 @@ jobs:
           persist-credentials: false
 
       - name: Run ShellCheck on scripts
-        run: shellcheck --severity=warning scripts/migrate-to-grouped-callers.sh
+        run: |
+          set -euo pipefail
+          shellcheck --severity=warning scripts/migrate-to-grouped-callers.sh
+          # The shipped runner and its bootstrap are what every extension
+          # executes, so they are gated here rather than only where they land.
+          # The runner is checked at `error`: it descends from TYPO3 Core's
+          # runTests.sh, whose whole style is deliberate word splitting
+          # (${CONTAINER_COMMON_PARAMS} must become several docker arguments),
+          # so `warning` reports 23 findings that must not be "fixed". The
+          # stub is our own and is clean at the default severity.
+          shellcheck -x --severity=error assets/Build/Scripts/runTests.sh
+          shellcheck -x assets/Build/Scripts/runTests.stub.sh
 
       - name: Validate repo config files
         run: |

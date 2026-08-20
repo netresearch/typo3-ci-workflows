@@ -7,7 +7,7 @@ on:
         description: 'PHP version for composer audit'
         required: false
         type: string
-        default: '8.4'
+        default: '8.5'
       skip-composer-audit:
         description: 'Skip Composer dependency audit'
         required: false

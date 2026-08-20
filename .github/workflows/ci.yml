@@ -7,7 +7,7 @@ on:
       php-versions:
         description: JSON array of PHP versions
         type: string
-        default: '["8.4"]'
+        default: '["8.5"]'
       typo3-versions:
         description: JSON array of TYPO3 versions (e.g. '["^12.4", "^13.4"]')
         type: string
