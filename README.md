@@ -1053,7 +1053,10 @@ An extension keeps two small files of its own:
    `assets/Build/Scripts/runTests.conf.dist`, and only for values that differ
    from the defaults: PHPUnit/PHPStan/Rector config paths, the directories the
    sharded functional run walks, the URL `-s e2e` tests against, the default
-   PHP version. The extension's own name is not among them — the container
+   PHP version. The runner starts no TYPO3 for `-s e2e` and knows no local
+   environment by name; where the target is only reachable from another
+   container network, the conf defines `e2e_container_args()` and prints the
+   arguments to add. The extension's own name is not among them — the container
    network prefix and the label `-h` prints are read from `composer.json`
    (package name, and `extra.typo3/cms.extension-key`). Environment variables
    override the file, so a one-off run needs no edit:

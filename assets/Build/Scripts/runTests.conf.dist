@@ -32,10 +32,24 @@
 #FUNCTIONAL_PARALLEL_PATHS="Tests/Functional Tests/E2E/Backend"
 
 # Where `-s e2e` points its browser, when TYPO3_BASE_URL is not in the
-# environment. The runner hosts nothing and does not care what serves it — a
-# ddev site, a container stack, a staging system. There is no default on
-# purpose: a guessed URL means testing against whatever answers.
-#E2E_BASE_URL="https://v14.nr-llm.ddev.site"
+# environment. The runner starts no TYPO3 and does not care what serves this —
+# a local stack, a staging system, anything answering. There is no default on
+# purpose: a guessed URL means testing against whatever happens to answer.
+#E2E_BASE_URL="https://your-typo3.local"
+
+# Only when the e2e container cannot reach that URL on its own — a target
+# behind another container network, a name that resolves only there. Print the
+# arguments to add to the container; the runner adds nothing by itself and
+# knows no environment by name. Example for a local ddev site, which lives on
+# its own network:
+#
+#e2e_container_args() {
+#    local ip
+#    ip=$(${CONTAINER_BIN} inspect ddev-router \
+#        --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null) || return 0
+#    [ -n "${ip}" ] || return 0
+#    printf '%s' "--network ddev_default --add-host your-typo3.ddev.site:${ip}"
+#}
 
 # Default PHP for a run without `-p`, and the Playwright image for `-s e2e`.
 #DEFAULT_PHP_VERSION="8.5"

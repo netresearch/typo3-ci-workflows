@@ -225,14 +225,16 @@ Examples:
     # Run PHPStan analysis
     ./Build/Scripts/runTests.sh -s phpstan
 
-    # Run E2E tests (requires ddev or TYPO3_BASE_URL)
-    ddev start && ./Build/Scripts/runTests.sh -s e2e
+    # Run E2E tests against a TYPO3 you are already serving
+    TYPO3_BASE_URL=https://your-typo3.local ./Build/Scripts/runTests.sh -s e2e
 
 E2E Tests:
-    E2E tests require a running TYPO3 instance.
-    Options:
-        1. Start ddev: ddev start && ./Build/Scripts/runTests.sh -s e2e
-        2. Set URL: TYPO3_BASE_URL=https://your-typo3.local ./Build/Scripts/runTests.sh -s e2e
+    -s e2e drives a browser against a running TYPO3. This script does not
+    start one and does not care what does. Give it a URL, per run through
+    TYPO3_BASE_URL or once through E2E_BASE_URL in Build/Scripts/runTests.conf.
+
+    If the target is only reachable from another container network, define
+    e2e_container_args() in that same conf and print the arguments to add.
 EOF
     # Placeholder, not expansion: the heredoc is quoted so that nothing in
     # the help text can be executed or expanded by writing it.
@@ -536,24 +538,21 @@ case ${TEST_SUITE} in
             exit 1
         fi
 
-        # A *.ddev.site target is not reachable from a container on the default
-        # network, so join ddev's and map the name to its router. The hostname
-        # comes out of the URL that was just resolved — nothing here configures
-        # ddev, it only reacts to a URL that happens to point at one.
-        DDEV_PARAMS=""
-        E2E_HOST="${TYPO3_BASE_URL#*://}"
-        E2E_HOST="${E2E_HOST%%/*}"
-        E2E_HOST="${E2E_HOST%%:*}"
-        if [[ "${E2E_HOST}" == *.ddev.site ]] && type "ddev" >/dev/null 2>&1 && ddev describe >/dev/null 2>&1; then
-            ROUTER_IP=$(${CONTAINER_BIN} inspect ddev-router --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
-            if [[ -n "${ROUTER_IP}" ]]; then
-                DDEV_PARAMS="--network ddev_default --add-host ${E2E_HOST}:${ROUTER_IP}"
-                echo "Joining the ddev network for ${E2E_HOST} (router ${ROUTER_IP})"
-            fi
+        # The target may sit on a network this container cannot reach — a local
+        # stack behind its own router, a name that resolves nowhere else. That
+        # is a property of the developer's machine, not of the fleet, so the
+        # runner knows no environment by name: an extension whose target needs
+        # extra container arguments defines e2e_container_args() in
+        # Build/Scripts/runTests.conf and prints them. Nothing to configure for
+        # a target the container can already reach, which is every CI run.
+        E2E_EXTRA_ARGS=""
+        if declare -F e2e_container_args >/dev/null 2>&1; then
+            E2E_EXTRA_ARGS="$(e2e_container_args)"
+            [[ -n "${E2E_EXTRA_ARGS}" ]] && echo "e2e container arguments from runTests.conf: ${E2E_EXTRA_ARGS}"
         fi
 
         COMMAND="npm ci && npx playwright test $*"
-        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} ${DDEV_PARAMS} --name e2e-${SUFFIX} \
+        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} ${E2E_EXTRA_ARGS} --name e2e-${SUFFIX} \
             -e TYPO3_BASE_URL="${TYPO3_BASE_URL}" \
             -e CI="${CI:-}" \
             -e npm_config_cache="${ROOT_DIR}/.Build/.cache/npm" \
