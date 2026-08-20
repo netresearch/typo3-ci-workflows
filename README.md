@@ -1033,15 +1033,49 @@ This repository provides **two complementary ways** to run CI tooling:
 
 Both entrypoints share the **same tool configurations** (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, `Build/rector.php`, `Build/phpunit.xml`), ensuring local results match CI.
 
-### runTests.sh Template
+### runTests.sh — consumed, not copied
 
-A generic `runTests.sh` template is provided at `assets/Build/Scripts/runTests.sh.dist`. To use it:
+The Docker-based runner is versioned here and declared as a composer `bin`, so
+installing this package links it into the extension:
 
-1. Copy to your extension: `cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.sh.dist Build/Scripts/runTests.sh`
-2. Make executable: `chmod +x Build/Scripts/runTests.sh`
-3. Customize the extension-point variables at the top of the script (config paths, etc.)
+```
+.Build/bin/runTests.sh -> .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.sh
+```
 
-Supported commands: `unit`, `functional`, `fuzz`, `mutation`, `phpstan`, `cgl`, `cgl:fix`, `rector`, `rector:fix`, `ci`, `all`.
+An extension keeps two small files of its own:
+
+1. **`Build/Scripts/runTests.sh`** — a bootstrap stub, copied once from
+   `assets/Build/Scripts/runTests.stub.sh`. It exists because the runner
+   provisions the environment it lives in, so a fresh clone has no
+   `.Build/bin/` yet; the stub runs `composer install` in that case and hands
+   over. Keep it at that — anything it grows is drift.
+2. **`Build/Scripts/runTests.conf`** — optional, copied from
+   `assets/Build/Scripts/runTests.conf.dist`, and only for values that differ
+   from the defaults: PHPUnit/PHPStan/Rector config paths, the directories the
+   sharded functional run walks, the ddev hostname for `-s e2e`, the default
+   PHP version. Environment variables override it, so a one-off run needs no
+   edit: `DEFAULT_PHP_VERSION=8.3 Build/Scripts/runTests.sh -s unit`.
+
+```bash
+cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.stub.sh Build/Scripts/runTests.sh
+chmod +x Build/Scripts/runTests.sh
+cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.conf.dist Build/Scripts/runTests.conf   # optional
+```
+
+Suites: `unit`, `unitCoverage`, `functional`, `functionalParallel`,
+`functionalCoverage`, `integration`, `fuzzy`, `mutation`, `e2e`,
+`architecture`, `lint`, `cgl`, `phpstan`, `rector`, `composer`,
+`composerUpdate`, `clean`. Databases: `-d sqlite|mariadb|mysql|postgres` with
+`-i <version>`; PHP with `-p`; a TYPO3 core constraint with `-t`.
+
+The runner resolves the extension root from the **working directory** (nearest
+ancestor with a `composer.json`), never from its own path — which is what makes
+running it out of `vendor/` work at all. `RUNTESTS_PROJECT_ROOT` overrides it.
+
+> Replaced `assets/Build/Scripts/runTests.sh.dist`, a 224-line variant with no
+> Docker and no database handling that no extension ran. Extensions that forked
+> the TYPO3-Core-derived runner instead drifted into five different accepted
+> version lists; that drift is what this replaces (#178).
 
 ## Extension Setup
 

@@ -212,7 +212,18 @@ jobs:
           persist-credentials: false
 
       - name: Run ShellCheck on scripts
-        run: shellcheck --severity=warning scripts/migrate-to-grouped-callers.sh
+        run: |
+          set -euo pipefail
+          shellcheck --severity=warning scripts/migrate-to-grouped-callers.sh
+          # The shipped runner and its bootstrap are what every extension
+          # executes, so they are gated here rather than only where they land.
+          # The runner is checked at `error`: it descends from TYPO3 Core's
+          # runTests.sh, whose whole style is deliberate word splitting
+          # (${CONTAINER_COMMON_PARAMS} must become several docker arguments),
+          # so `warning` reports 23 findings that must not be "fixed". The
+          # stub is our own and is clean at the default severity.
+          shellcheck -x --severity=error assets/Build/Scripts/runTests.sh
+          shellcheck -x assets/Build/Scripts/runTests.stub.sh
 
       - name: Validate repo config files
         run: |

@@ -1,0 +1,42 @@
+# Per-extension settings for the shared test runner (.Build/bin/runTests.sh).
+#
+# Copy to Build/Scripts/runTests.conf and set only what differs from the
+# defaults shown. The file is sourced by the runner, so it is plain bash; the
+# environment still wins, which is what makes a one-off override possible
+# without editing anything:
+#
+#   DEFAULT_PHP_VERSION=8.3 Build/Scripts/runTests.sh -s unit
+#
+# An extension that needs something this file cannot express is telling you the
+# shared runner is missing a knob — add it there rather than forking the runner.
+
+# Container network prefix and the name in `-h` output.
+# Default: the directory name of the extension root.
+#PROJECT_SLUG="nr-llm"
+#PROJECT_LABEL="nr_llm"
+
+# PHPUnit configurations.
+#PHPUNIT_CONFIG="Build/phpunit.xml"
+#PHPUNIT_FUNCTIONAL_CONFIG="Build/FunctionalTests.xml"
+
+# Static analysis and refactoring configurations.
+#PHPSTAN_CONFIG="Build/phpstan/phpstan.neon"
+#RECTOR_CONFIG="Build/rector/rector.php"
+#INFECTION_CONFIG="infection.json.dist"
+
+# Directories the sharded functional run (`-s functionalParallel`) walks.
+# This MUST cover every directory the functional PHPUnit config lists: a suite
+# that is in the config but not here runs in no job and still reads as covered.
+#FUNCTIONAL_PARALLEL_PATHS="Tests/Functional Tests/E2E/Backend"
+
+# Only used by `-s e2e`, and only when TYPO3_BASE_URL is not already set.
+#DDEV_HOSTNAME="v14.nr-llm.ddev.site"
+#DDEV_BASE_URL="https://v14.nr-llm.ddev.site"
+
+# Default PHP for a run without `-p`, and the Playwright image for `-s e2e`.
+#DEFAULT_PHP_VERSION="8.5"
+#IMAGE_PLAYWRIGHT="mcr.microsoft.com/playwright:v1.60.0-noble"
+
+# Composer needs a root version for a package that has no tag in its own
+# checkout; only change this if the extension's branch alias differs.
+#COMPOSER_ROOT_VERSION="0.1.x-dev"

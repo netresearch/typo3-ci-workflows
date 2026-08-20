@@ -3,6 +3,9 @@
     "description": "Centralized dev-dependencies, configs, and CI tooling for Netresearch TYPO3 extensions",
     "type": "library",
     "license": "MIT",
+    "bin": [
+        "assets/Build/Scripts/runTests.sh"
+    ],
     "require": {
         "php": "^8.2",
         "a9f/typo3-fractor": "^1.0",
