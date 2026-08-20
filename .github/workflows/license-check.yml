@@ -33,6 +33,43 @@ on:
 #         contents: read
 permissions: {}
 
+# Composer aborts on the first transient network failure: its CurlDownloader
+# retries curl errno 6/7/16/28/92 (and 35/56 on "Connection reset by peer")
+# and throws on everything else, so an intermittent TLS abort against
+# api.github.com — errno 60, seen across several repositories — kills the job
+# and only a re-run clears it, which is also how a real regression gets waved
+# through. `composer_retry` retries up to three times, but only when the
+# failure output actually names a transport error; a dependency-resolution
+# failure still fails on the first attempt.
+env:
+  COMPOSER_RETRY: |
+    composer_retry() {
+      local attempt status log
+      log=$(mktemp)
+      for attempt in 1 2 3; do
+        set +e
+        composer "$@" 2>&1 | tee "$log"
+        status=${PIPESTATUS[0]}
+        set -e
+        if [[ "$status" == 0 ]]; then
+          rm -f "$log"
+          return 0
+        fi
+        if ! grep -qiE 'curl error|failed to download|could not be downloaded|could not fetch|could not resolve host|ssl certificate problem|operation timed out|connection reset' "$log"; then
+          rm -f "$log"
+          echo "::error::composer $* failed (exit $status) with no transport error in its output; not retried"
+          return "$status"
+        fi
+        if [[ "$attempt" == 3 ]]; then
+          rm -f "$log"
+          echo "::error::composer $* failed on all 3 attempts (exit $status)"
+          return "$status"
+        fi
+        echo "::warning::composer $* hit a network error (exit $status, attempt $attempt/3); retrying"
+        sleep $((attempt * 5))
+      done
+    }
+
 jobs:
   preflight:
     # Skip post-merge `push` runs whose SHA was already validated by a
@@ -142,7 +179,8 @@ jobs:
         run: |
           composer config --no-plugins allow-plugins true
           composer config --no-plugins audit.block-insecure false
-          composer install --prefer-dist --no-progress
+          eval "$COMPOSER_RETRY"
+          composer_retry install --prefer-dist --no-progress
 
       - name: Check licenses
         env:
