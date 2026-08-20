@@ -308,8 +308,12 @@ jobs:
           MYSQL_COLLATION: utf8mb4_unicode_ci
         ports:
           - 3306:3306
+        # `healthcheck.sh` ships only in mariadb images, so a consumer passing a
+        # mysql:* db-image never got a healthy service. The `||` fallback (run
+        # through `sh -c` by Docker) keeps mariadb's stronger readiness check —
+        # it waits for InnoDB, a ping does not — and covers mysql:* too.
         options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-cmd="healthcheck.sh --connect --innodb_initialized || mysqladmin ping --silent"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
