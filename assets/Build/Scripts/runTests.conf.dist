@@ -5,7 +5,7 @@
 # environment still wins, which is what makes a one-off override possible
 # without editing anything:
 #
-#   DEFAULT_PHP_VERSION=8.3 Build/Scripts/runTests.sh -s unit
+#   DEFAULT_PHP_VERSION=8.2 Build/Scripts/runTests.sh -s unit   # default is 8.5
 #
 # An extension that needs something this file cannot express is telling you the
 # shared runner is missing a knob — add it there rather than forking the runner.

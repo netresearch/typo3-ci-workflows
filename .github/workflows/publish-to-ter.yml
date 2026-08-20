@@ -6,7 +6,7 @@ on:
       php-version:
         description: PHP version for tailor
         type: string
-        default: '8.4'
+        default: '8.5'
       ref:
         description: Git ref (tag or SHA) to check out. Defaults to the event ref — set this explicitly when re-triggering from a workflow_dispatch against a branch to ensure the correct source is packaged.
         required: false

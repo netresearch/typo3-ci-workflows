@@ -178,7 +178,7 @@ jobs:
     permissions:
       contents: read
     with:
-      php-versions: '["8.2", "8.3", "8.4"]'
+      php-versions: '["8.2", "8.3", "8.4", "8.5"]'
       typo3-versions: '["^13.4", "^14.0"]'
       matrix-exclude: '[{"php":"8.2","typo3":"^14.0"}]'
       run-functional-tests: true
@@ -194,7 +194,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-versions` | string | `'["8.4"]'` | JSON array of PHP versions |
+| `php-versions` | string | `'["8.5"]'` | JSON array of PHP versions |
 | `typo3-versions` | string | `'["^13.4"]'` | JSON array of TYPO3 versions |
 | `matrix-exclude` | string | `'[]'` | JSON array of `{php, typo3}` combinations to exclude |
 | `rector-php-version` | string | `''` | PHP version for the Rector job; empty falls back to `php-versions[0]`. Set it when `php-versions` varies by event — see below |
@@ -418,7 +418,7 @@ jobs:
     permissions:
       contents: read
     with:
-      php-version: '8.4'
+      php-version: '8.5'
       db-image: 'mariadb:11.4'
       test-command: 'npm run test:e2e -- --project=chromium'
 ```
@@ -427,7 +427,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version |
+| `php-version` | string | `8.5` | PHP version |
 | `node-version` | string | `24` | Node.js version |
 | `typo3-setup-extensions` | boolean | `true` | Run extension:setup after TYPO3 setup |
 | `playwright-browser` | string | `chromium` | Playwright browser to install |
@@ -491,7 +491,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version for Composer audit |
+| `php-version` | string | `8.5` | PHP version for Composer audit |
 | `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
 | `skip-opengrep` | boolean | `false` | Skip Opengrep SAST scanning |
 | `opengrep-config` | string | `--config auto --error --severity WARNING` | Opengrep scan arguments (rules + behavior flags). See the [overrides above](#security) for report-only, ERROR-only, and INFO-blocking variants. |
@@ -563,7 +563,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version for license checking |
+| `php-version` | string | `8.5` | PHP version for license checking |
 | `forbidden-licenses` | string | `"(SSPL\|BSL)"` | Regex pattern for forbidden licenses |
 
 ---
@@ -790,7 +790,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version for tailor CLI |
+| `php-version` | string | `8.5` | PHP version for tailor CLI |
 | `ref` | string | _event ref_ | Git ref (tag or SHA) to check out. Set explicitly when re-triggering from `workflow_dispatch` against a branch. |
 | `verify-timeout-minutes` | number | `10` | Max minutes to wait for TER to serve the published version |
 | `verify-poll-interval-seconds` | number | `30` | Seconds between TER verification polls |
@@ -1011,7 +1011,7 @@ jobs:
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `php-version` | string | `8.4` | PHP version for tests |
+| `php-version` | string | `8.5` | PHP version for tests |
 | `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
 | `fuzz-testsuite` | string | `Fuzz` | PHPUnit testsuite name for fuzz tests |
 | `phpunit-config` | string | `Build/phpunit.xml` | Path to PHPUnit config |
