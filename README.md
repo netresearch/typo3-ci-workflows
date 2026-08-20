@@ -613,6 +613,28 @@ jobs:
 | `package-name` | string | **yes** | - | Composer package name (e.g., `netresearch/contexts`) |
 | `include-sbom` | boolean | no | `true` | Include SPDX and CycloneDX SBOMs |
 | `sign-artifacts` | boolean | no | `true` | Sign artifacts with Cosign keyless signing |
+| `make-latest` | boolean | no | `true` | Mark the release as the repository's "Latest". Set `false` on backport branches — see [Backport releases and the Latest badge](#backport-releases-and-the-latest-badge) |
+
+### Backport releases and the Latest badge
+
+GitHub's release API defaults `make_latest` to `true`, so a release cut from a maintenance branch takes the "Latest" badge and the `/releases/latest` redirect away from the newest version — `v2.0.12` off the `TYPO3-12` line displacing `v4.0.0`. Composer resolution is unaffected (it is constraint- and tag-based), the repository landing page is not.
+
+Set `make-latest: false` in the release caller on every branch that is not the top major line. `release-typo3-extension.yml` takes the same input.
+
+```yaml
+# .github/workflows/release.yml on branch TYPO3-12
+jobs:
+  release:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/release.yml@main
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      archive-prefix: my-extension
+      package-name: vendor/my-extension
+      make-latest: false
+```
 
 ---
 

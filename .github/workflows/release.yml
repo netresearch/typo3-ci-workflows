@@ -21,6 +21,16 @@ on:
         required: false
         type: boolean
         default: true
+      make-latest:
+        description: >-
+          Mark this release as the repository's "Latest" release. GitHub's API
+          defaults this to true, so a maintenance release cut from an older
+          major line takes the badge — and the /releases/latest redirect —
+          away from the newest version. Set false in the release workflow of
+          every backport branch; leave it at true on the top major line.
+        required: false
+        type: boolean
+        default: true
 
 # CALLER REQUIREMENTS
 # ===================
@@ -171,6 +181,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
+          make_latest: ${{ inputs.make-latest }}
           files: |
             dist/*
           body: |
