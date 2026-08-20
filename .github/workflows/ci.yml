@@ -1273,8 +1273,13 @@ jobs:
         ports:
           - 3306:3306
           - 5432:5432
+        # Docker runs --health-cmd through `sh -c`, so the `||` picks whichever
+        # client the image ships: mariadb >= 11 dropped the mysql* compatibility
+        # symlinks and has only mariadb-admin, mysql:* images have only
+        # mysqladmin. With mysqladmin alone, `db-image: mariadb:11.x` never
+        # turns healthy and the job dies with "Failed to initialize container".
         options: >-
-          --health-cmd="${{ inputs.functional-test-db == 'postgres' && 'pg_isready -U postgres' || 'mysqladmin ping --silent' }}"
+          --health-cmd="${{ inputs.functional-test-db == 'postgres' && 'pg_isready -U postgres' || 'mariadb-admin ping --silent || mysqladmin ping --silent' }}"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
