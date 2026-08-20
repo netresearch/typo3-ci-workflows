@@ -431,6 +431,7 @@ jobs:
 | `node-version` | string | `24` | Node.js version |
 | `typo3-setup-extensions` | boolean | `true` | Run extension:setup after TYPO3 setup |
 | `playwright-browser` | string | `chromium` | Playwright browser to install |
+| `playwright-install-timeout-minutes` | number | `5` | Wall-clock bound for one `playwright install` attempt; the step retries once. Browsers are cached under `~/.cache/ms-playwright`, so most runs never download. |
 | `php-server-workers` | string | `'1'` | Worker processes for the built-in `php -S` server. Raise to at least the Playwright worker count before setting `workers > 1`, or the suite serialises at the web server. |
 | `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |
 | `test-command` | string | `npm run test:e2e` | E2E test command |

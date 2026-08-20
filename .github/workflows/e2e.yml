@@ -19,6 +19,15 @@ on:
         description: Playwright browser to install
         type: string
         default: 'chromium'
+      playwright-install-timeout-minutes:
+        description: >-
+          Wall-clock bound for one `playwright install` attempt (default mode
+          only). The step makes two attempts, so the install can cost at most
+          twice this. Kept well under the job timeout on purpose: a stalled
+          browser download used to consume the whole job budget and surface as
+          a cancelled job rather than a failed download.
+        type: number
+        default: 5
       # Path gating
       skip-paths:
         description: >-
@@ -559,11 +568,72 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
+      # The browser bundle is the one download this workflow never cached, and
+      # `playwright install` has no timeout of its own: a stalled fetch sat
+      # there until the job budget ran out, cancelled the job, and — where the
+      # E2E check is required — ejected the pull request from the merge queue.
+      # The log then ends in "The operation was canceled" with nothing naming
+      # the download, so it reads like a test failure.
+      #
+      # Browser revisions are pinned per Playwright release, so the resolved
+      # version is the correct cache key.
+      - name: Resolve Playwright version
+        if: inputs.setup-script == ''
+        id: playwright-version
+        env:
+          # Top-level manifests only: this step runs after `npm ci`, so a `**`
+          # glob would walk node_modules.
+          MANIFEST_HASH: ${{ hashFiles('package-lock.json', 'package.json') }}
+        run: |
+          # Ask the installed binary, never `npx playwright` — npx would fetch
+          # the package when it is not a local dependency, and that fetch is
+          # outside the timeout added below.
+          version=""
+          if [[ -x node_modules/.bin/playwright ]]; then
+            version=$(node_modules/.bin/playwright --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || true
+          fi
+          # Fall back to the manifests when playwright is not a local
+          # dependency: coarser, still stable per commit.
+          echo "value=${version:-manifest-${MANIFEST_HASH}}" >> "$GITHUB_OUTPUT"
+          echo "Playwright cache key component: ${version:-manifest-${MANIFEST_HASH}}"
+
+      - name: Cache Playwright browsers
+        if: inputs.setup-script == ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ inputs.playwright-browser }}-${{ steps.playwright-version.outputs.value }}
+
       - name: Install Playwright browsers
         if: inputs.setup-script == ''
         env:
           BROWSER: ${{ inputs.playwright-browser }}
-        run: npx playwright install --with-deps "$BROWSER"
+          ATTEMPT_TIMEOUT_MINUTES: ${{ inputs.playwright-install-timeout-minutes }}
+        run: |
+          # `timeout` per attempt rather than step-level `timeout-minutes`: a
+          # step timeout cancels the step, and a cancelled step cannot retry.
+          # A cache hit makes this a fast no-op, so the bound only bites on an
+          # actual download.
+          for attempt in 1 2; do
+            set +e
+            timeout -k 30s "${ATTEMPT_TIMEOUT_MINUTES}m" npx playwright install --with-deps "$BROWSER"
+            status=$?
+            set -e
+
+            if [[ "$status" == 0 ]]; then
+              exit 0
+            fi
+            case "$status" in
+              124) reason="timed out after ${ATTEMPT_TIMEOUT_MINUTES}m" ;;
+              137) reason="killed 30s after the ${ATTEMPT_TIMEOUT_MINUTES}m timeout, having ignored SIGTERM" ;;
+              *)   reason="exit ${status}" ;;
+            esac
+            if [[ "$attempt" == 2 ]]; then
+              echo "::error::playwright install failed on both attempts (${reason})"
+              exit "$status"
+            fi
+            echo "::warning::playwright install attempt ${attempt} failed (${reason}); retrying once"
+          done
 
       - name: Start PHP server
         if: inputs.setup-script == ''
