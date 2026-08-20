@@ -185,9 +185,17 @@ Options:
             - rector: Rector code upgrades
             - unit: PHP unit tests (default)
             - unitCoverage: Unit tests with coverage
-            - fuzzy: Property-based (fuzzy) tests
+            - fuzz | fuzzy: Property-based (fuzzy) tests
             - mutation: Mutation testing
             - architecture: Architecture tests (PHPat via PHPStan)
+            - unitCoveragePath: Unit tests with path + branch coverage
+            - cleanCache: Clean temporary files (alias of clean)
+            - composerValidate: composer validate
+            - composerNormalize: composer normalize (-n for a dry run)
+            - phpstanBaseline: Regenerate the PHPStan baseline
+
+        A suite this list does not name may still exist: an extension defines
+        suite_<name>() in Build/Scripts/runTests.conf and -s <name> calls it.
 
     -d <sqlite|mariadb|mysql|postgres>
         Database for functional tests (default: sqlite)
@@ -311,6 +319,11 @@ PROJECT_LABEL="${PROJECT_LABEL:-$(composer_value '.extra["typo3/cms"]["extension
 PROJECT_LABEL="${PROJECT_LABEL:-${PROJECT_SLUG//-/_}}"
 PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-Build/phpunit.xml}"
 PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-Build/FunctionalTests.xml}"
+# A repository with one phpunit.xml selects by testsuite name instead of by
+# config file. Empty means "the config is the selection", which is the
+# separate-file layout.
+UNIT_TESTSUITE="${UNIT_TESTSUITE:-unit}"
+FUNCTIONAL_TESTSUITE="${FUNCTIONAL_TESTSUITE:-}"
 PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-Build/phpstan/phpstan.neon}"
 RECTOR_CONFIG="${RECTOR_CONFIG:-Build/rector/rector.php}"
 INFECTION_CONFIG="${INFECTION_CONFIG:-infection.json.dist}"
@@ -506,9 +519,27 @@ case ${TEST_SUITE} in
         clean_cache_files
         SUITE_EXIT_CODE=0
         ;;
+    cleanCache)
+        clean_cache_files
+        SUITE_EXIT_CODE=0
+        ;;
     composer)
         COMMAND=(composer "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name composer-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} -e CAPTAINHOOK_DISABLE=true ${IMAGE_PHP} "${COMMAND[@]}"
+        SUITE_EXIT_CODE=$?
+        ;;
+    composerNormalize)
+        if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
+            COMMAND=(composer normalize --dry-run)
+        else
+            COMMAND=(composer normalize)
+        fi
+        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name composer-normalize-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} -e CAPTAINHOOK_DISABLE=true ${IMAGE_PHP} "${COMMAND[@]}"
+        SUITE_EXIT_CODE=$?
+        ;;
+    composerValidate)
+        COMMAND=(composer validate "$@")
+        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name composer-validate-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} -e CAPTAINHOOK_DISABLE=true ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     composerUpdate)
@@ -641,7 +672,7 @@ case ${TEST_SUITE} in
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-coverage-${SUFFIX} -e XDEBUG_MODE=coverage ${CONTAINERPARAMS} ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
-    fuzzy)
+    fuzz|fuzzy)
         COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite fuzzy "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name fuzzy-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
@@ -666,6 +697,14 @@ case ${TEST_SUITE} in
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name phpstan-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
+    phpstanBaseline)
+        # Regenerating the baseline is the one command that must never be
+        # chained into a verification run: it rewrites what `-s phpstan`
+        # checks against.
+        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpstan analyse -c ${PHPSTAN_CONFIG} --generate-baseline -v"
+        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name phpstan-baseline-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
+        SUITE_EXIT_CODE=$?
+        ;;
     rector)
         if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
             COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/rector process --config ${RECTOR_CONFIG} --dry-run"
@@ -676,14 +715,22 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     unit)
-        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite unit "$@")
+        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite "${UNIT_TESTSUITE}" "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     unitCoverage)
         mkdir -p .Build/coverage
-        COMMAND=(php -d opcache.enable_cli=1 .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite unit --coverage-clover=.Build/coverage/unit.xml --coverage-html=.Build/coverage/html-unit --coverage-text "$@")
+        COMMAND=(php -d opcache.enable_cli=1 .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite "${UNIT_TESTSUITE}" --coverage-clover=.Build/coverage/unit.xml --coverage-html=.Build/coverage/html-unit --coverage-text "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-coverage-${SUFFIX} -e XDEBUG_MODE=coverage ${IMAGE_PHP} "${COMMAND[@]}"
+        SUITE_EXIT_CODE=$?
+        ;;
+    unitCoveragePath)
+        mkdir -p .Build/coverage
+        # Path and branch coverage need xdebug; pcov cannot produce them, and
+        # is disabled explicitly because an image carrying both would win.
+        COMMAND=(php -d opcache.enable_cli=1 -d pcov.enabled=0 .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite "${UNIT_TESTSUITE}" --path-coverage --coverage-clover=.Build/coverage/unit-path.xml --coverage-html=.Build/coverage/html-unit-path --coverage-text "$@")
+        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-coverage-path-${SUFFIX} -e XDEBUG_MODE=coverage ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     update)
@@ -692,10 +739,21 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     *)
-        load_help
-        echo "Invalid -s option: ${TEST_SUITE}" >&2
-        echo "${HELP}" >&2
-        exit 1
+        # A suite this runner does not know may still be the extension's own:
+        # rendering its documentation, publishing coverage, installing the
+        # lowest supported dependency set. Those are nobody else's business, so
+        # the conf defines suite_<name>() and gets called here with the
+        # remaining arguments — instead of the extension forking 600 lines to
+        # add twenty.
+        if declare -F "suite_${TEST_SUITE}" >/dev/null 2>&1; then
+            "suite_${TEST_SUITE}" "$@"
+            SUITE_EXIT_CODE=$?
+        else
+            load_help
+            echo "Invalid -s option: ${TEST_SUITE}" >&2
+            echo "${HELP}" >&2
+            exit 1
+        fi
         ;;
 esac
 

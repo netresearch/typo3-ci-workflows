@@ -21,6 +21,13 @@
 #PHPUNIT_CONFIG="Build/phpunit.xml"
 #PHPUNIT_FUNCTIONAL_CONFIG="Build/FunctionalTests.xml"
 
+# Which testsuite inside those configs to run. The defaults suit the layout
+# with a separate functional config: unit tests are the "unit" suite, and the
+# functional config needs no selection because it is the selection. An
+# extension keeping everything in one phpunit.xml names both.
+#UNIT_TESTSUITE="unit"
+#FUNCTIONAL_TESTSUITE="functional"
+
 # Static analysis and refactoring configurations.
 #PHPSTAN_CONFIG="Build/phpstan/phpstan.neon"
 #RECTOR_CONFIG="Build/rector/rector.php"
@@ -68,3 +75,14 @@
 # Composer needs a root version for a package that has no tag in its own
 # checkout; only change this if the extension's branch alias differs.
 #COMPOSER_ROOT_VERSION="0.1.x-dev"
+
+# A suite the shared runner does not have — rendering this extension's
+# documentation, publishing coverage, installing the lowest supported
+# dependency set. Define it here and `-s <name>` calls it with the remaining
+# arguments; the runner's own suites always win over a function of the same
+# name, so this extends rather than overrides.
+#
+#suite_renderDocumentation() {
+#    ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name docs-${SUFFIX} \
+#        ghcr.io/typo3-documentation/render-guides:latest --config=Documentation
+#}
