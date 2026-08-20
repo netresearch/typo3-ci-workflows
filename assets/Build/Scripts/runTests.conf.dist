@@ -37,6 +37,16 @@
 # purpose: a guessed URL means testing against whatever happens to answer.
 #E2E_BASE_URL="https://your-typo3.local"
 
+# When the target does not exist until the run creates it — an extension that
+# starts its own web container per run, whose hostname carries that run's
+# suffix — print the URL from a function instead. It runs after the runner's
+# own setup, and TYPO3_BASE_URL from the environment still wins over it:
+#
+#e2e_target() {
+#    start_my_stack >&2            # anything this needs, output to stderr
+#    printf '%s' "http://my-web-${SUFFIX}:80"
+#}
+
 # Only when the e2e container cannot reach that URL on its own — a target
 # behind another container network, a name that resolves only there. Print the
 # arguments to add to the container; the runner adds nothing by itself and

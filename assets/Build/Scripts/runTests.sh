@@ -518,11 +518,27 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     e2e)
+        # Three ways to name the target, in this order, because all three exist
+        # in the fleet today:
+        #   1. TYPO3_BASE_URL from the environment — the shared e2e workflow in
+        #      default mode serves TYPO3 itself and passes it in.
+        #   2. e2e_target() from the conf — for a target that does not exist
+        #      until the run creates it. t3x-rte_ckeditor_image starts its own
+        #      Apache container per run and reaches it under a name carrying
+        #      that run's suffix, which no static setting can express.
+        #   3. E2E_BASE_URL from the conf — a target that is always at the same
+        #      address, typically a local stack.
+        # No fourth way: with none of them set the run stops rather than
+        # guessing a host and testing against whatever answers.
+        if [[ -z "${TYPO3_BASE_URL:-}" ]] && declare -F e2e_target >/dev/null 2>&1; then
+            TYPO3_BASE_URL="$(e2e_target)"
+        fi
         TYPO3_BASE_URL="${TYPO3_BASE_URL:-${E2E_BASE_URL}}"
         if [[ -z "${TYPO3_BASE_URL}" ]]; then
             echo "runTests.sh: -s e2e needs the URL of a running TYPO3 to test against." >&2
-            echo "             Set it per run:   TYPO3_BASE_URL=https://your-typo3.local $0 -s e2e" >&2
-            echo "             or once for this extension, as E2E_BASE_URL in Build/Scripts/runTests.conf." >&2
+            echo "             Per run:      TYPO3_BASE_URL=https://your-typo3.local $0 -s e2e" >&2
+            echo "             Per extension: E2E_BASE_URL in Build/Scripts/runTests.conf," >&2
+            echo "                            or e2e_target() there when the run creates its own." >&2
             clean_up
             exit 1
         fi
