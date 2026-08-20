@@ -1052,9 +1052,19 @@ An extension keeps two small files of its own:
 2. **`Build/Scripts/runTests.conf`** — optional, copied from
    `assets/Build/Scripts/runTests.conf.dist`, and only for values that differ
    from the defaults: PHPUnit/PHPStan/Rector config paths, the directories the
-   sharded functional run walks, the ddev hostname for `-s e2e`, the default
-   PHP version. Environment variables override it, so a one-off run needs no
-   edit: `DEFAULT_PHP_VERSION=8.3 Build/Scripts/runTests.sh -s unit`.
+   sharded functional run walks, the URL `-s e2e` tests against, the default
+   PHP version. The runner starts no TYPO3 for `-s e2e` and knows no local
+   environment by name. It takes the target from `TYPO3_BASE_URL` (the shared
+   e2e workflow passes it in default mode), else from `e2e_target()` in the
+   conf when the run creates its own — `t3x-rte_ckeditor_image` starts an
+   Apache container per run and reaches it under a name carrying that run's
+   suffix — else from `E2E_BASE_URL`, and stops if none is set. Where the
+   container cannot reach that URL on the default network, the conf defines
+   `e2e_container_args()` and prints the arguments to add. The extension's own name is not among them — the container
+   network prefix and the label `-h` prints are read from `composer.json`
+   (package name, and `extra.typo3/cms.extension-key`). Environment variables
+   override the file, so a one-off run needs no edit:
+   `DEFAULT_PHP_VERSION=8.2 Build/Scripts/runTests.sh -s unit`.
 
 ```bash
 cp .Build/vendor/netresearch/typo3-ci-workflows/assets/Build/Scripts/runTests.stub.sh Build/Scripts/runTests.sh

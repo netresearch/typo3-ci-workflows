@@ -10,8 +10,10 @@
 # An extension that needs something this file cannot express is telling you the
 # shared runner is missing a knob — add it there rather than forking the runner.
 
-# Container network prefix and the name in `-h` output.
-# Default: the directory name of the extension root.
+# Container network prefix and the name in `-h` output. Both are read from
+# composer.json — the package name for the slug, extra.typo3/cms.extension-key
+# for the label — so there is normally nothing to set here. Override only if
+# the extension wants a name it does not declare anywhere.
 #PROJECT_SLUG="nr-llm"
 #PROJECT_LABEL="nr_llm"
 
@@ -29,9 +31,35 @@
 # that is in the config but not here runs in no job and still reads as covered.
 #FUNCTIONAL_PARALLEL_PATHS="Tests/Functional Tests/E2E/Backend"
 
-# Only used by `-s e2e`, and only when TYPO3_BASE_URL is not already set.
-#DDEV_HOSTNAME="v14.nr-llm.ddev.site"
-#DDEV_BASE_URL="https://v14.nr-llm.ddev.site"
+# Where `-s e2e` points its browser, when TYPO3_BASE_URL is not in the
+# environment. The runner starts no TYPO3 and does not care what serves this —
+# a local stack, a staging system, anything answering. There is no default on
+# purpose: a guessed URL means testing against whatever happens to answer.
+#E2E_BASE_URL="https://your-typo3.local"
+
+# When the target does not exist until the run creates it — an extension that
+# starts its own web container per run, whose hostname carries that run's
+# suffix — print the URL from a function instead. It runs after the runner's
+# own setup, and TYPO3_BASE_URL from the environment still wins over it:
+#
+#e2e_target() {
+#    start_my_stack >&2            # anything this needs, output to stderr
+#    printf '%s' "http://my-web-${SUFFIX}:80"
+#}
+
+# Only when the e2e container cannot reach that URL on its own — a target
+# behind another container network, a name that resolves only there. Print the
+# arguments to add to the container; the runner adds nothing by itself and
+# knows no environment by name. Example for a local ddev site, which lives on
+# its own network:
+#
+#e2e_container_args() {
+#    local ip
+#    ip=$(${CONTAINER_BIN} inspect ddev-router \
+#        --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null) || return 0
+#    [ -n "${ip}" ] || return 0
+#    printf '%s' "--network ddev_default --add-host your-typo3.ddev.site:${ip}"
+#}
 
 # Default PHP for a run without `-p`, and the Playwright image for `-s e2e`.
 #DEFAULT_PHP_VERSION="8.5"
