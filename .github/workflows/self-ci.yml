@@ -256,6 +256,25 @@ jobs:
         # than grepping for `exit 1` — text can sit in a branch nothing reaches.
         run: bash Build/Scripts/check-empty-suite-fails.sh .github/workflows/ci.yml
 
+      - name: Check that no testsuite name is hardcoded in a workflow
+        # extended-testing.yml carried `--testsuite="Unit Tests"` in seven
+        # places, which is one extension's spelling written into a shared
+        # workflow (#190). t3x-nr-vault built its own gate rather than adopt
+        # them, and said so in a comment.
+        run: |
+          set -euo pipefail
+          STATUS=0
+          for wf in .github/workflows/*.yml; do
+            hits=$(yq -o json '.jobs' "$wf" 2>/dev/null \
+              | jq -r '[.. | strings | select(test("--testsuite=\"[A-Za-z]"))] | length' 2>/dev/null || echo 0)
+            if [ "${hits:-0}" -gt 0 ]; then
+              echo "::error::$wf hardcodes $hits testsuite name(s); take them from an input"
+              STATUS=1
+            fi
+          done
+          [ "$STATUS" -eq 0 ] && echo "no hardcoded testsuite names"
+          exit "$STATUS"
+
       - name: Validate repo config files
         run: |
           set -euo pipefail
