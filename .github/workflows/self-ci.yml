@@ -63,7 +63,15 @@ jobs:
 
       - name: Install actionlint
         run: |
-          curl -sLO "https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz"
+          # --retry, because this download failing takes the whole lint job with
+          # it: on 2026-08-21 the step failed while `Run actionlint` never ran,
+          # which reads as a lint finding on the pull request and is not one.
+          # Same class as #169. --fail so an HTTP error is not written to disk
+          # and diagnosed later as a checksum mismatch.
+          # --proto/--proto-redir: -L follows redirects, and without this a redirect
+          # to http would be followed too. SonarCloud flagged exactly that on
+          # this line.
+          curl --retry 3 --retry-delay 2 --retry-all-errors --fail --proto '=https' --proto-redir '=https' -sLO "https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz"
           echo "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a  actionlint_1.7.11_linux_amd64.tar.gz" | sha256sum -c
           tar xzf actionlint_1.7.11_linux_amd64.tar.gz actionlint
 
