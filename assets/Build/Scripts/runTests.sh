@@ -611,7 +611,20 @@ if [[ -z "${CONTAINER_BIN}" ]]; then
 fi
 
 # Container images
-IMAGE_PHP="${TYPO3_IMAGE_PREFIX}core-testing-$(echo "php${PHP_VERSION}" | sed -e 's/\.//'):latest"
+# Overridable, because an extension can need a PHP image the core-testing ones
+# do not provide. t3x-nr-image-optimize is the case that surfaced it: its
+# Processor requires imagick, the upstream images ship GD only, and CI supplies
+# it through setup-php's php-extensions — so the repository carried a 463-line
+# runner fork whose entire job was building `core-testing-phpXY + imagick` for
+# local runs. A conf line or an environment variable is enough for that.
+# A conf can define php_image() when the image name depends on the PHP version
+# — which it does whenever an extension derives its own image per version. The
+# conf is read before -p is parsed, so a plain variable cannot interpolate
+# ${PHP_VERSION}; a function called here can. Same shape as e2e_target().
+if declare -f php_image >/dev/null 2>&1; then
+    IMAGE_PHP="$(php_image "${PHP_VERSION}")"
+fi
+IMAGE_PHP="${IMAGE_PHP:-${TYPO3_IMAGE_PREFIX}core-testing-$(echo "php${PHP_VERSION}" | sed -e 's/\.//'):latest}"
 IMAGE_ALPINE="${IMAGE_PREFIX}alpine:3.20"
 IMAGE_MARIADB="docker.io/mariadb:${DBMS_VERSION}"
 IMAGE_MYSQL="docker.io/mysql:${DBMS_VERSION}"
