@@ -164,7 +164,31 @@ else
     fail "a nested call exited ${status}: ${out:-<silence>}"
 fi
 
-# 5. The PHP image is overridable, by environment and by conf function.
+# 5. The web directory comes from composer.json, not from a constant.
+root="$(make_fixture webdir Build/FunctionalTests.xml multi)"
+python3 - "${root}" <<'PYEOF'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "composer.json"
+d = json.loads(p.read_text())
+d.setdefault("extra", {}).setdefault("typo3/cms", {})["web-dir"] = ".Build/public"
+p.write_text(json.dumps(d, indent=4) + "\n")
+PYEOF
+got="$(derive "${root}" WEB_DIR)"
+if [[ "${got}" == ".Build/public" ]]; then
+    pass "web-dir is read from composer.json (${got})"
+else
+    fail "web-dir ignored: WEB_DIR=${got:-<empty>}, expected .Build/public"
+fi
+
+root="$(make_fixture webdir-default Build/FunctionalTests.xml multi)"
+got="$(derive "${root}" WEB_DIR)"
+if [[ "${got}" == ".Build/Web" ]]; then
+    pass "without the key the default stays .Build/Web"
+else
+    fail "default web-dir lost: ${got:-<empty>}"
+fi
+
+# 6. The PHP image is overridable, by environment and by conf function.
 #
 #    Checked as text, not by executing: IMAGE_PHP is assigned ~90 lines below
 #    `# Option defaults`, past the getopts loop, and sourcing that far under
@@ -190,7 +214,7 @@ else
     fail "default image lost: ${image_line:-<absent>}"
 fi
 
-# 6. Both flags on the sharded command, and neither on the serial one.
+# 7. Both flags on the sharded command, and neither on the serial one.
 # shellcheck disable=SC2016  # these are the runner's own literals, not expansions
 shard_cmd="$(grep -n 'COMMAND="find \${FUNCTIONAL_PARALLEL_PATHS}' "${RUNNER}" | head -n1)"
 # shellcheck disable=SC2016
