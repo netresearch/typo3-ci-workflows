@@ -317,6 +317,17 @@ PROJECT_SLUG="${PROJECT_SLUG##*/}"
 PROJECT_SLUG="${PROJECT_SLUG:-$(basename "${PROJECT_ROOT}")}"
 PROJECT_LABEL="${PROJECT_LABEL:-$(composer_value '.extra["typo3/cms"]["extension-key"]' 'extension-key')}"
 PROJECT_LABEL="${PROJECT_LABEL:-${PROJECT_SLUG//-/_}}"
+# The conf is read BEFORE anything is detected, not after. Sourced afterwards,
+# an extension that pointed PHPUNIT_FUNCTIONAL_CONFIG at another file still got
+# its testsuite names and its sharded-run directories derived from the file the
+# detection had found — a config the run then did not use. Overriding a path
+# has to override what is read out of it.
+RUNTESTS_CONF="${PROJECT_ROOT}/Build/Scripts/runTests.conf"
+if [[ -f "${RUNTESTS_CONF}" ]]; then
+    # shellcheck disable=SC1090  # path is computed; the file is the extension's own
+    source "${RUNTESTS_CONF}"
+fi
+
 # Where composer puts binaries. Hardcoding .Build/bin was wrong for every
 # extension that does not set config.bin-dir — netresearch/contexts installs
 # into vendor/bin, and every phpunit invocation here would have missed it.
@@ -393,7 +404,11 @@ phpunit_testsuite_directories() {
     local file="${PROJECT_ROOT}/${1}" base
     [[ -n "${1}" && -f "${file}" ]] || return 0
     base="$(dirname "${1}")"
-    awk '/<testsuites?[ >]/{inside=1} /<\/testsuites?>/{inside=0} inside' "${file}" \
+    # The closing tag is matched WITHOUT the optional s: `</testsuites?>` also
+    # matches `</testsuite>`, so a testsuite written on one line switched the
+    # block off before its own <directory> was read — zero directories, silent
+    # fallback, and a suite that runs in no job.
+    awk '/<testsuites[ >]/{inside=1} /<\/testsuites>/{inside=0} inside' "${file}" \
         | grep -oE '<directory[^>]*>[^<]+</directory>' \
         | sed 's|.*<directory[^>]*>||; s|</directory>||' \
         | while IFS= read -r dir; do
@@ -457,12 +472,6 @@ if [[ -z "${DEFAULT_PHP_VERSION:-}" ]]; then
     fi
 fi
 COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-0.1.x-dev}"
-
-RUNTESTS_CONF="${PROJECT_ROOT}/Build/Scripts/runTests.conf"
-if [[ -f "${RUNTESTS_CONF}" ]]; then
-    # shellcheck disable=SC1090  # path is computed; the file is the extension's own
-    source "${RUNTESTS_CONF}"
-fi
 
 # Option defaults
 TEST_SUITE="unit"
@@ -778,7 +787,18 @@ case ${TEST_SUITE} in
         # `functional`, `e2e-backend` AND `e2e-tca` suites. Globbing fewer silently
         # dropped all 8 Tests/E2E/Backend classes here — the same rot as #272,
         # where the suite was skipped wholesale and nobody noticed.
-        COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} {}"
+        # Same --exclude-group as the serial run: a test marked not-sqlite has to
+        # be skipped on sqlite whether the suite is sharded or not, or the two
+        # ways of running the same suite disagree about what is in it.
+        #
+        # --do-not-fail-on-empty-test-suite belongs with it and only here. This
+        # path hands phpunit ONE file at a time, so a class whose every test is
+        # excluded leaves phpunit with nothing to run, and "No tests executed!"
+        # exits 1 by default (measured: PHPUnit 13.3.1, and the option exists
+        # back to 10.5). Without it, excluding a test would turn its shard red —
+        # the opposite of skipping it. The serial run keeps the default: a whole
+        # suite that matches nothing is a defect worth failing on.
+        COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --exclude-group not-${DBMS} --do-not-fail-on-empty-test-suite {}"
         CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-parallel-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${CONTAINERPARAMS} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?

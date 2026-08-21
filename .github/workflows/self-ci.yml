@@ -225,6 +225,7 @@ jobs:
           shellcheck -x --severity=error assets/Build/Scripts/runTests.sh
           shellcheck -x assets/Build/Scripts/runTests.stub.sh
           shellcheck -x Build/Scripts/check-runner-variables.sh
+          shellcheck -x Build/Scripts/check-runner-detection.sh
 
       - name: Check the runner defines what it uses
         # v1.7.0 shipped with IMAGE_PLAYWRIGHT referenced and never assigned,
@@ -232,6 +233,12 @@ jobs:
         # shellcheck was clean, and no job here ran a suite. This closes that
         # gap without needing a container.
         run: bash Build/Scripts/check-runner-variables.sh assets/Build/Scripts/runTests.sh
+
+      - name: Check what the runner derives from a project
+        # The companion to the step above: that one asks whether a variable has
+        # a value, this one whether the value is read out of the right file.
+        # Fixture extensions, no container, no PHP.
+        run: bash Build/Scripts/check-runner-detection.sh assets/Build/Scripts/runTests.sh
 
       - name: Validate repo config files
         run: |
