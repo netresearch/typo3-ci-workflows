@@ -65,7 +65,12 @@
 #    printf '%s' "http://my-web-${SUFFIX}:80"
 #}
 
-# Only when the e2e container cannot reach that URL on its own — a target
+# When the e2e container cannot reach that URL on its own, the arguments to
+# add can also come from outside this file — E2E_CONTAINER_ARGS in the
+# environment. That is where local glue belongs: a ddev command knows ddev is
+# running, this file only knows it was written on a machine where it was.
+#
+# Only when the extension itself has to compute them — a target
 # behind another container network, a name that resolves only there. Print the
 # arguments to add to the container; the runner adds nothing by itself and
 # knows no environment by name. Example for a local ddev site, which lives on

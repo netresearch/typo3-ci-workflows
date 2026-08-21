@@ -701,11 +701,14 @@ case ${TEST_SUITE} in
         # extra container arguments defines e2e_container_args() in
         # Build/Scripts/runTests.conf and prints them. Nothing to configure for
         # a target the container can already reach, which is every CI run.
-        E2E_EXTRA_ARGS=""
-        if declare -F e2e_container_args >/dev/null 2>&1; then
+        # Either as a value from the environment — glue that lives outside the
+        # repository, a ddev command for instance, computes it and exports it —
+        # or from a conf function when the extension itself has to compute it.
+        E2E_EXTRA_ARGS="${E2E_CONTAINER_ARGS:-}"
+        if [[ -z "${E2E_EXTRA_ARGS}" ]] && declare -F e2e_container_args >/dev/null 2>&1; then
             E2E_EXTRA_ARGS="$(e2e_container_args)"
-            [[ -n "${E2E_EXTRA_ARGS}" ]] && echo "e2e container arguments from runTests.conf: ${E2E_EXTRA_ARGS}"
         fi
+        [[ -n "${E2E_EXTRA_ARGS}" ]] && echo "e2e container arguments: ${E2E_EXTRA_ARGS}"
 
         COMMAND="npm ci && npx playwright test $*"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} ${E2E_EXTRA_ARGS} --name e2e-${SUFFIX} \
