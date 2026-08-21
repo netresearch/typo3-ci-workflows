@@ -410,6 +410,13 @@ if [[ -z "${FUNCTIONAL_PARALLEL_PATHS+x}" ]]; then
     FUNCTIONAL_PARALLEL_PATHS="${FUNCTIONAL_PARALLEL_PATHS:-Tests/Functional}"
 fi
 
+# Where `-s e2e` points its browser when TYPO3_BASE_URL is not in the
+# environment, and the image that drives it. Both were lost when this block
+# was rewritten in v1.7.0, which left `-s e2e` running `docker run … ""` and
+# failing with "invalid reference format" for every consumer.
+E2E_BASE_URL="${E2E_BASE_URL:-}"
+IMAGE_PLAYWRIGHT="${IMAGE_PLAYWRIGHT:-mcr.microsoft.com/playwright:v1.60.0-noble}"
+
 SUPPORTED_PHP_VERSIONS="${SUPPORTED_PHP_VERSIONS:-8.2 8.3 8.4 8.5}"
 
 php_constraint_bounds() {
