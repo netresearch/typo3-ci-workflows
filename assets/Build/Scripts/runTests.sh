@@ -382,7 +382,10 @@ notice() {
 #     old one, and every suite keeps running from the old file while the
 #     repository looks migrated — in both directions invisible.
 detect_config() {
-    # $1 label, $2 the standard location, rest: candidates in order
+    # $1 label, $2 the standard location(s), rest: candidates in order.
+    # Several standards separated by | where a tool defines more than one name
+    # itself: php-cs-fixer reads .php-cs-fixer.php and .php-cs-fixer.dist.php
+    # alike, so calling either non-standard would be wrong.
     local label="${1}" standard="${2}" found others candidate
     shift 2
     found="$(first_existing "$@")"
@@ -398,8 +401,8 @@ detect_config() {
     if [[ -n "${others}" ]]; then
         notice "${label}: using ${found}; also present and ignored: ${others% }"
     fi
-    if [[ "${found}" != "${standard}" ]]; then
-        notice "${label}: ${found} is not the standard location (${standard})"
+    if [[ "|${standard}|" != *"|${found}|"* ]]; then
+        notice "${label}: ${found} is not the standard location (${standard//|/ or })"
     fi
 }
 
@@ -417,7 +420,7 @@ INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infecti
 # means "use php-cs-fixer's defaults", and `-s cgl` then rewrites files against
 # rules the extension never agreed to while CI stays green (netresearch/contexts:
 # 12 files rewritten, 0 reported by composer ci:test:php:cgl on the same tree).
-CGL_CONFIG="${CGL_CONFIG:-$(detect_config 'cgl config' .php-cs-fixer.dist.php .php-cs-fixer.php .php-cs-fixer.dist.php Build/php-cs-fixer.php Build/.php-cs-fixer.php Build/php-cs-fixer.dist.php)}"
+CGL_CONFIG="${CGL_CONFIG:-$(detect_config 'cgl config' '.php-cs-fixer.php|.php-cs-fixer.dist.php' .php-cs-fixer.php .php-cs-fixer.dist.php Build/php-cs-fixer.php Build/.php-cs-fixer.php Build/php-cs-fixer.dist.php)}"
 
 # Which testsuite to select inside those configs. The fleet writes the same
 # suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read

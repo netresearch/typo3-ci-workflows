@@ -266,6 +266,19 @@ else
     fail "config under Build/ not found: got '${got:-<empty>}'"
 fi
 
+# Both root names are php-cs-fixer's own, so neither may be called non-standard.
+cgl_root_alt="${FIXTURES}/cgl-root-nondist"
+mkdir -p "${cgl_root_alt}"
+printf '{"name":"netresearch/fixture-cgl2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${cgl_root_alt}/composer.json"
+printf '<?php\n' > "${cgl_root_alt}/.php-cs-fixer.php"
+said="$(derive_stderr "${cgl_root_alt}" | grep 'cgl config' || true)"
+if [[ "${said}" == *"not the standard location"* ]]; then
+    fail ".php-cs-fixer.php reported as non-standard: ${said}"
+else
+    pass ".php-cs-fixer.php is accepted as a standard location"
+fi
+
 cgl_none="${FIXTURES}/cgl-absent"
 mkdir -p "${cgl_none}"
 printf '{"name":"netresearch/fixture-nocgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
