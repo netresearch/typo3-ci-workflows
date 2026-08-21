@@ -147,7 +147,24 @@ else
     fail "the reference layout is noisy: ${notices}"
 fi
 
-# 4. Both flags on the sharded command, and neither on the serial one.
+# 4. The runner marks its own container and refuses to nest inside it.
+marks="$(grep -c 'RUNTESTS_IN_CONTAINER=1' "${RUNNER}" || true)"
+if [[ "${marks}" -ge 3 ]]; then
+    pass "the container marker is set on both runtimes and tested for (${marks} mentions)"
+else
+    fail "expected the marker on docker, podman and in the guard; found ${marks} mentions"
+fi
+
+root="$(make_fixture nested Build/FunctionalTests.xml multi)"
+out="$( cd "${root}" && RUNTESTS_IN_CONTAINER=1 bash "${RUNNER}" -s unit 2>&1 )"
+status=$?
+if [[ "${status}" -ne 0 && "${out}" == *"already inside the runner's container"* ]]; then
+    pass "a nested call exits ${status} and says why"
+else
+    fail "a nested call exited ${status}: ${out:-<silence>}"
+fi
+
+# 5. Both flags on the sharded command, and neither on the serial one.
 # shellcheck disable=SC2016  # these are the runner's own literals, not expansions
 shard_cmd="$(grep -n 'COMMAND="find \${FUNCTIONAL_PARALLEL_PATHS}' "${RUNNER}" | head -n1)"
 # shellcheck disable=SC2016
