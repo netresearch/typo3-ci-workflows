@@ -515,6 +515,23 @@ if [[ -z "${DEFAULT_PHP_VERSION:-}" ]]; then
 fi
 COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-0.1.x-dev}"
 
+# Already inside the container this script starts? Then starting another one is
+# wrong, and the reason it used to happen is worth naming: every composer script
+# in the fleet guards itself with `[ -f /.dockerenv ]`, which answers "some
+# container" — a dev shell, an unrelated service, the runner's own image all
+# look identical to it. The runner marks its own container instead (-e
+# RUNTESTS_IN_CONTAINER=1 on every invocation), so this test is exact.
+#
+# The suites are not run in-process here: all 30 container invocations would
+# need a second path, with the database environment and the bootstrap that the
+# image currently provides. That is its own change (#189). Until then this at
+# least fails with the reason instead of nesting containers.
+if [[ -n "${RUNTESTS_IN_CONTAINER:-}" ]]; then
+    echo "runTests.sh: already inside the runner's container — call the tool directly" >&2
+    echo "runTests.sh: e.g. \`\${BIN_DIR}/phpunit -c \${PHPUNIT_CONFIG}\` instead of \`runTests.sh -s unit\`" >&2
+    exit 1
+fi
+
 # Option defaults
 TEST_SUITE="unit"
 DATABASE_DRIVER=""
@@ -610,10 +627,10 @@ if ! ${CONTAINER_BIN} network create ${NETWORK} >/dev/null 2>&1; then
 fi
 
 if [[ ${CONTAINER_BIN} = "${DOCKER_BIN}" ]]; then
-    CONTAINER_COMMON_PARAMS="${CONTAINER_INTERACTIVE} --rm --network ${NETWORK} --add-host "${CONTAINER_HOST}:host-gateway" ${USERSET} -v ${ROOT_DIR}:${ROOT_DIR} -w ${ROOT_DIR}"
+    CONTAINER_COMMON_PARAMS="${CONTAINER_INTERACTIVE} --rm --network ${NETWORK} --add-host "${CONTAINER_HOST}:host-gateway" ${USERSET} -e RUNTESTS_IN_CONTAINER=1 -v ${ROOT_DIR}:${ROOT_DIR} -w ${ROOT_DIR}"
 else
     CONTAINER_HOST="host.containers.internal"
-    CONTAINER_COMMON_PARAMS="${CONTAINER_INTERACTIVE} ${CI_PARAMS} --rm --network ${NETWORK} -v ${ROOT_DIR}:${ROOT_DIR} -w ${ROOT_DIR}"
+    CONTAINER_COMMON_PARAMS="${CONTAINER_INTERACTIVE} ${CI_PARAMS} --rm --network ${NETWORK} -e RUNTESTS_IN_CONTAINER=1 -v ${ROOT_DIR}:${ROOT_DIR} -w ${ROOT_DIR}"
 fi
 
 if [[ ${PHP_XDEBUG_ON} -eq 0 ]]; then
