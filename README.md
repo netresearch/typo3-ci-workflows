@@ -1049,11 +1049,16 @@ An extension keeps two small files of its own:
    provisions the environment it lives in, so a fresh clone has no
    `.Build/bin/` yet; the stub runs `composer install` in that case and hands
    over. Keep it at that — anything it grows is drift.
-2. **`Build/Scripts/runTests.conf`** — optional, copied from
-   `assets/Build/Scripts/runTests.conf.dist`, and only for values that differ
-   from the defaults: PHPUnit/PHPStan/Rector config paths, the directories the
+2. **`Build/Scripts/runTests.conf`** — optional, and for most extensions
+   unnecessary. The runner reads `composer.json` for the vendor and bin
+   directories, the extension key, and the PHP version to default to; it looks
+   for the PHPUnit / PHPStan / Rector / Infection configs where extensions
+   actually keep them; it reads testsuite names out of the PHPUnit config; and
+   it derives the sharded functional run's directories from that config's own
+   testsuites. What remains for the conf: PHPUnit/PHPStan/Rector config paths, the directories the
    sharded functional run walks, the URL `-s e2e` tests against, the default
-   PHP version. The runner starts no TYPO3 for `-s e2e` and knows no local
+   the e2e wiring, and anything an extension places somewhere the runner does
+   not look. The runner starts no TYPO3 for `-s e2e` and knows no local
    environment by name. It takes the target from `TYPO3_BASE_URL` (the shared
    e2e workflow passes it in default mode), else from `e2e_target()` in the
    conf when the run creates its own — `t3x-rte_ckeditor_image` starts an
@@ -1085,6 +1090,11 @@ publishing coverage, installing the lowest supported dependency set — does not
 need a fork: define `suite_<name>()` in `Build/Scripts/runTests.conf` and
 `-s <name>` calls it with the remaining arguments. The runner's own suites
 always win, so a conf can extend the list but not quietly redefine it.
+
+The default PHP is the newest the runner has images for that the extension's
+own `require.php` allows: `^8.2` resolves to 8.5 today, `>=8.2 <8.5` to 8.4. So
+a repository states its PHP support once, in the place that already had to
+state it.
 
 The runner resolves the extension root from the **working directory** (nearest
 ancestor with a `composer.json`), never from its own path — which is what makes

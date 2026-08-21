@@ -5,7 +5,7 @@
 # Docker/podman-based test orchestration following TYPO3 core conventions.
 #
 # This file is the SHARED runner. Do not fork it into an extension: composer
-# links it to .Build/bin/runTests.sh, and Build/Scripts/runTests.sh in an
+# links it to ${BIN_DIR}/runTests.sh, and Build/Scripts/runTests.sh in an
 # extension is a bootstrap stub that execs it (see the repository README).
 #
 # Everything an extension may need to differ on is a variable below, and
@@ -270,7 +270,7 @@ fi
 # a change that this block cannot express, change the shared script.
 # The project root is resolved from the WORKING DIRECTORY, never from this
 # file's location: consumed from the composer package, this script lives in
-# .Build/vendor/… and .Build/bin/, neither of which sits above the extension.
+# .Build/vendor/… and ${BIN_DIR}/, neither of which sits above the extension.
 # RUNTESTS_PROJECT_ROOT overrides it; the bootstrap stub sets neither, it just
 # runs from the root.
 resolve_project_root() {
@@ -317,29 +317,138 @@ PROJECT_SLUG="${PROJECT_SLUG##*/}"
 PROJECT_SLUG="${PROJECT_SLUG:-$(basename "${PROJECT_ROOT}")}"
 PROJECT_LABEL="${PROJECT_LABEL:-$(composer_value '.extra["typo3/cms"]["extension-key"]' 'extension-key')}"
 PROJECT_LABEL="${PROJECT_LABEL:-${PROJECT_SLUG//-/_}}"
-PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-Build/phpunit.xml}"
-PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-Build/FunctionalTests.xml}"
-# A repository with one phpunit.xml selects by testsuite name instead of by
-# config file. Empty means "the config is the selection", which is the
-# separate-file layout.
-UNIT_TESTSUITE="${UNIT_TESTSUITE:-unit}"
-FUNCTIONAL_TESTSUITE="${FUNCTIONAL_TESTSUITE:-}"
-PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-Build/phpstan/phpstan.neon}"
-RECTOR_CONFIG="${RECTOR_CONFIG:-Build/rector/rector.php}"
-INFECTION_CONFIG="${INFECTION_CONFIG:-infection.json.dist}"
-# Paths the sharded functional run walks. It must cover every directory the
-# functional phpunit config lists — a suite that is in the config but not here
-# runs in no job and reads as coverage.
-FUNCTIONAL_PARALLEL_PATHS="${FUNCTIONAL_PARALLEL_PATHS:-Tests/Functional}"
-# Where `-s e2e` points its browser. The runner does not host anything and has
-# no opinion on what serves that URL — ddev, a container stack, a staging
-# system. TYPO3_BASE_URL from the environment wins; this is the fallback for a
-# repository whose target is always the same locally. No default: guessing a
-# URL means running a suite against whatever answers, which is how one
-# extension's tests ended up aimed at another extension's ddev host.
-E2E_BASE_URL="${E2E_BASE_URL:-}"
-IMAGE_PLAYWRIGHT="${IMAGE_PLAYWRIGHT:-mcr.microsoft.com/playwright:v1.60.0-noble}"
-DEFAULT_PHP_VERSION="${DEFAULT_PHP_VERSION:-8.5}"
+# Where composer puts binaries. Hardcoding .Build/bin was wrong for every
+# extension that does not set config.bin-dir — netresearch/contexts installs
+# into vendor/bin, and every phpunit invocation here would have missed it.
+BIN_DIR="${BIN_DIR:-$(composer_value '.config["bin-dir"]' 'bin-dir')}"
+BIN_DIR="${BIN_DIR:-$(composer_value '.config["vendor-dir"]' 'vendor-dir')}"
+[[ "${BIN_DIR}" == */bin ]] || BIN_DIR="${BIN_DIR:+${BIN_DIR}/bin}"
+BIN_DIR="${BIN_DIR:-vendor/bin}"
+VENDOR_DIR="${VENDOR_DIR:-$(composer_value '.config["vendor-dir"]' 'vendor-dir')}"
+VENDOR_DIR="${VENDOR_DIR:-vendor}"
+
+# Config locations differ per extension and are all in a small set of known
+# places, so they are looked for rather than asked for. First hit wins; a conf
+# entry still overrides. `first_existing` prints nothing when none exists,
+# which leaves the variable empty and the suite's own error to explain it.
+first_existing() {
+    local candidate
+    for candidate in "$@"; do
+        if [[ -e "${PROJECT_ROOT}/${candidate}" ]]; then
+            printf '%s' "${candidate}"
+            return 0
+        fi
+    done
+    return 0
+}
+
+PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-$(first_existing Build/phpunit/UnitTests.xml Build/phpunit.xml Build/UnitTests.xml phpunit.xml phpunit.xml.dist)}"
+PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(first_existing Build/phpunit/FunctionalTests.xml Build/FunctionalTests.xml phpunit.functional.xml)}"
+# One config carrying several testsuites is a layout, not a mistake: fall back
+# to the unit config and let the testsuite name do the selecting.
+PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
+PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(first_existing Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
+RECTOR_CONFIG="${RECTOR_CONFIG:-$(first_existing Build/rector/rector.php Build/rector.php rector.php)}"
+INFECTION_CONFIG="${INFECTION_CONFIG:-$(first_existing infection.json.dist infection.json infection.json5)}"
+
+# Which testsuite to select inside those configs. The fleet writes the same
+# suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read
+# out of the config and matched loosely rather than configured. A config with
+# a single suite needs no selection at all — the file already is one.
+phpunit_testsuite() {
+    # $1 config path, $2 an extended regex the wanted suite name starts with
+    local file="${PROJECT_ROOT}/${1}" want="${2}" names count
+    [[ -n "${1}" && -f "${file}" ]] || return 0
+    # One attribute out of an element phpunit writes on a single line. xmllint
+    # is not guaranteed on a machine that only needs a container runtime.
+    names="$(grep -oE '<testsuite[[:space:]]+name="[^"]*"' "${file}" | sed 's/.*name="//; s/"$//')"
+    [[ -n "${names}" ]] || return 0
+    count="$(printf '%s\n' "${names}" | grep -c .)"
+    if [[ "${count}" -le 1 ]]; then
+        # Selecting the only suite is the same run as selecting nothing, and
+        # naming it wrongly is a failure — so say nothing.
+        return 0
+    fi
+    printf '%s\n' "${names}" | grep -iE "^${want}" | head -n1
+}
+
+UNIT_TESTSUITE="${UNIT_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'unit')}"
+FUZZY_TESTSUITE="${FUZZY_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'fuzz')}"
+INTEGRATION_TESTSUITE="${INTEGRATION_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'integration')}"
+if [[ "${PHPUNIT_FUNCTIONAL_CONFIG}" == "${PHPUNIT_CONFIG}" ]]; then
+    FUNCTIONAL_TESTSUITE="${FUNCTIONAL_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_FUNCTIONAL_CONFIG}" 'functional')}"
+else
+    # A separate functional config is the selection; narrowing it to one suite
+    # would drop the others, which is how a suite ends up running nowhere.
+    FUNCTIONAL_TESTSUITE="${FUNCTIONAL_TESTSUITE:-}"
+fi
+
+# Paths the sharded functional run walks. They must cover every directory the
+# functional config's testsuites list — a directory in the config but not here
+# runs in no job and still reads as covered (#272, #658) — so they are read
+# out of that config. Only <directory> inside <testsuite> counts: the same
+# element under <source>/<coverage> names the code being measured, not tests,
+# and paths are relative to the config file, not to the extension root.
+phpunit_testsuite_directories() {
+    local file="${PROJECT_ROOT}/${1}" base
+    [[ -n "${1}" && -f "${file}" ]] || return 0
+    base="$(dirname "${1}")"
+    awk '/<testsuites?[ >]/{inside=1} /<\/testsuites?>/{inside=0} inside' "${file}" \
+        | grep -oE '<directory[^>]*>[^<]+</directory>' \
+        | sed 's|.*<directory[^>]*>||; s|</directory>||' \
+        | while IFS= read -r dir; do
+            [[ -n "${dir}" ]] || continue
+            # Resolve against the config's own directory, then normalise.
+            local resolved="${base}/${dir}"
+            resolved="$(cd "${PROJECT_ROOT}" 2>/dev/null && realpath -m --relative-to=. "${resolved}" 2>/dev/null || printf '%s' "${resolved}")"
+            printf '%s\n' "${resolved%/}"
+        done | sort -u | tr '\n' ' ' | sed 's/ *$//'
+}
+
+if [[ -z "${FUNCTIONAL_PARALLEL_PATHS+x}" ]]; then
+    FUNCTIONAL_PARALLEL_PATHS="$(phpunit_testsuite_directories "${PHPUNIT_FUNCTIONAL_CONFIG}")"
+    FUNCTIONAL_PARALLEL_PATHS="${FUNCTIONAL_PARALLEL_PATHS:-Tests/Functional}"
+fi
+
+SUPPORTED_PHP_VERSIONS="${SUPPORTED_PHP_VERSIONS:-8.2 8.3 8.4 8.5}"
+
+php_constraint_bounds() {
+    # Prints "floor ceiling" for require.php, either possibly empty. Handles
+    # the shapes composer.json actually carries in this fleet — ^X.Y, ~X.Y,
+    # >=X.Y, <X.Y, <=X.Y — and prints nothing it cannot read rather than
+    # guessing, in which case the ceiling stays at the newest supported.
+    local constraint floor="" ceiling=""
+    constraint="$(composer_value '.require.php' 'php')"
+    [[ -n "${constraint}" ]] || return 0
+
+    floor="$(printf '%s' "${constraint}" | sed -n 's/.*[\^~>=]\{1,2\}[[:space:]]*\([0-9]\+\.[0-9]\+\).*/\1/p' | head -n1)"
+
+    if printf '%s' "${constraint}" | grep -qE '<=?[[:space:]]*[0-9]+\.[0-9]+'; then
+        ceiling="$(printf '%s' "${constraint}" | sed -n 's/.*<=\?[[:space:]]*\([0-9]\+\.[0-9]\+\).*/\1/p' | head -n1)"
+        # `<8.5` excludes 8.5 itself; `<=8.5` does not. Only the exclusive form
+        # needs the step down, and the caller compares as a plain string.
+        if printf '%s' "${constraint}" | grep -qE '<[[:space:]]*[0-9]+\.[0-9]+' && \
+           ! printf '%s' "${constraint}" | grep -qE '<=[[:space:]]*[0-9]+\.[0-9]+'; then
+            local minor="${ceiling#*.}"
+            [[ "${minor}" -gt 0 ]] && ceiling="${ceiling%%.*}.$((minor - 1))"
+        fi
+    fi
+    printf '%s %s' "${floor}" "${ceiling}"
+}
+
+if [[ -z "${DEFAULT_PHP_VERSION:-}" ]]; then
+    read -r PHP_FLOOR PHP_CEILING <<< "$(php_constraint_bounds)"
+    DEFAULT_PHP_VERSION=""
+    for candidate in ${SUPPORTED_PHP_VERSIONS}; do
+        [[ -n "${PHP_FLOOR}" ]] && [[ "$(printf '%s\n%s\n' "${PHP_FLOOR}" "${candidate}" | sort -V | head -n1)" != "${PHP_FLOOR}" ]] && continue
+        [[ -n "${PHP_CEILING}" ]] && [[ "$(printf '%s\n%s\n' "${candidate}" "${PHP_CEILING}" | sort -V | head -n1)" != "${candidate}" ]] && continue
+        DEFAULT_PHP_VERSION="${candidate}"
+    done
+    if [[ -z "${DEFAULT_PHP_VERSION}" ]]; then
+        DEFAULT_PHP_VERSION="${SUPPORTED_PHP_VERSIONS##* }"
+        echo "runTests.sh: composer.json requires php ${PHP_FLOOR:-?}..${PHP_CEILING:-?}, which no supported version satisfies — using ${DEFAULT_PHP_VERSION}." >&2
+    fi
+fi
 COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-0.1.x-dev}"
 
 RUNTESTS_CONF="${PROJECT_ROOT}/Build/Scripts/runTests.conf"
@@ -502,15 +611,15 @@ PHP_FUNCTIONAL_OPTS="-d opcache.enable_cli=1"
 case ${TEST_SUITE} in
     architecture)
         # Architecture tests are run via PHPStan with phpat extension
-        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpstan analyse -c ${PHPSTAN_CONFIG}"
+        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpstan analyse -c ${PHPSTAN_CONFIG}"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name architecture-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
     cgl)
         if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/php-cs-fixer fix -v --dry-run --diff"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v --dry-run --diff"
         else
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/php-cs-fixer fix -v"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v"
         fi
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name cgl-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
@@ -543,7 +652,7 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     composerUpdate)
-        rm -rf .Build/bin/ .Build/vendor ./composer.lock
+        rm -rf "${BIN_DIR}" "${VENDOR_DIR}" ./composer.lock
         COMMAND=(composer install --no-ansi --no-interaction --no-progress)
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name composer-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} -e CAPTAINHOOK_DISABLE=true ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
@@ -592,11 +701,14 @@ case ${TEST_SUITE} in
         # extra container arguments defines e2e_container_args() in
         # Build/Scripts/runTests.conf and prints them. Nothing to configure for
         # a target the container can already reach, which is every CI run.
-        E2E_EXTRA_ARGS=""
-        if declare -F e2e_container_args >/dev/null 2>&1; then
+        # Either as a value from the environment — glue that lives outside the
+        # repository, a ddev command for instance, computes it and exports it —
+        # or from a conf function when the extension itself has to compute it.
+        E2E_EXTRA_ARGS="${E2E_CONTAINER_ARGS:-}"
+        if [[ -z "${E2E_EXTRA_ARGS}" ]] && declare -F e2e_container_args >/dev/null 2>&1; then
             E2E_EXTRA_ARGS="$(e2e_container_args)"
-            [[ -n "${E2E_EXTRA_ARGS}" ]] && echo "e2e container arguments from runTests.conf: ${E2E_EXTRA_ARGS}"
         fi
+        [[ -n "${E2E_EXTRA_ARGS}" ]] && echo "e2e container arguments: ${E2E_EXTRA_ARGS}"
 
         COMMAND="npm ci && npx playwright test $*"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} ${E2E_EXTRA_ARGS} --name e2e-${SUFFIX} \
@@ -607,7 +719,7 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     functional)
-        COMMAND=(php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --exclude-group not-${DBMS} "$@")
+        COMMAND=(php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} ${FUNCTIONAL_TESTSUITE:+--testsuite "${FUNCTIONAL_TESTSUITE}"} --exclude-group not-${DBMS} "$@")
 
         case ${DBMS} in
             mariadb)
@@ -659,26 +771,26 @@ case ${TEST_SUITE} in
         # `functional`, `e2e-backend` AND `e2e-tca` suites. Globbing fewer silently
         # dropped all 8 Tests/E2E/Backend classes here — the same rot as #272,
         # where the suite was skipped wholesale and nobody noticed.
-        COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} {}"
+        COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} {}"
         CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-parallel-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${CONTAINERPARAMS} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
     functionalCoverage)
         mkdir -p .Build/coverage
-        COMMAND=(php -d opcache.enable_cli=1 .Build/bin/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --coverage-clover=.Build/coverage/functional.xml --coverage-html=.Build/coverage/html-functional --coverage-text "$@")
+        COMMAND=(php -d opcache.enable_cli=1 ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --coverage-clover=.Build/coverage/functional.xml --coverage-html=.Build/coverage/html-functional --coverage-text "$@")
         mkdir -p "${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/"
         CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-coverage-${SUFFIX} -e XDEBUG_MODE=coverage ${CONTAINERPARAMS} ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     fuzz|fuzzy)
-        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite fuzzy "$@")
+        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${FUZZY_TESTSUITE:+--testsuite "${FUZZY_TESTSUITE}"} "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name fuzzy-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     integration)
-        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite integration "$@")
+        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${INTEGRATION_TESTSUITE:+--testsuite "${INTEGRATION_TESTSUITE}"} "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name integration-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
@@ -688,12 +800,12 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     mutation)
-        COMMAND=(php -d opcache.enable_cli=1 .Build/bin/infection --configuration=${INFECTION_CONFIG} --threads=4 "$@")
+        COMMAND=(php -d opcache.enable_cli=1 ${BIN_DIR}/infection --configuration=${INFECTION_CONFIG} --threads=4 "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name mutation-${SUFFIX} -e XDEBUG_MODE=coverage ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     phpstan)
-        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpstan analyse -c ${PHPSTAN_CONFIG}"
+        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpstan analyse -c ${PHPSTAN_CONFIG}"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name phpstan-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
@@ -701,27 +813,27 @@ case ${TEST_SUITE} in
         # Regenerating the baseline is the one command that must never be
         # chained into a verification run: it rewrites what `-s phpstan`
         # checks against.
-        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpstan analyse -c ${PHPSTAN_CONFIG} --generate-baseline -v"
+        COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpstan analyse -c ${PHPSTAN_CONFIG} --generate-baseline -v"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name phpstan-baseline-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
     rector)
         if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/rector process --config ${RECTOR_CONFIG} --dry-run"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/rector process --config ${RECTOR_CONFIG} --dry-run"
         else
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/rector process --config ${RECTOR_CONFIG}"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/rector process --config ${RECTOR_CONFIG}"
         fi
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name rector-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
     unit)
-        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite "${UNIT_TESTSUITE}" "$@")
+        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${UNIT_TESTSUITE:+--testsuite "${UNIT_TESTSUITE}"} "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
     unitCoverage)
         mkdir -p .Build/coverage
-        COMMAND=(php -d opcache.enable_cli=1 .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite "${UNIT_TESTSUITE}" --coverage-clover=.Build/coverage/unit.xml --coverage-html=.Build/coverage/html-unit --coverage-text "$@")
+        COMMAND=(php -d opcache.enable_cli=1 ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${UNIT_TESTSUITE:+--testsuite "${UNIT_TESTSUITE}"} --coverage-clover=.Build/coverage/unit.xml --coverage-html=.Build/coverage/html-unit --coverage-text "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-coverage-${SUFFIX} -e XDEBUG_MODE=coverage ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
@@ -729,7 +841,7 @@ case ${TEST_SUITE} in
         mkdir -p .Build/coverage
         # Path and branch coverage need xdebug; pcov cannot produce them, and
         # is disabled explicitly because an image carrying both would win.
-        COMMAND=(php -d opcache.enable_cli=1 -d pcov.enabled=0 .Build/bin/phpunit -c ${PHPUNIT_CONFIG} --testsuite "${UNIT_TESTSUITE}" --path-coverage --coverage-clover=.Build/coverage/unit-path.xml --coverage-html=.Build/coverage/html-unit-path --coverage-text "$@")
+        COMMAND=(php -d opcache.enable_cli=1 -d pcov.enabled=0 ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${UNIT_TESTSUITE:+--testsuite "${UNIT_TESTSUITE}"} --path-coverage --coverage-clover=.Build/coverage/unit-path.xml --coverage-html=.Build/coverage/html-unit-path --coverage-text "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-coverage-path-${SUFFIX} -e XDEBUG_MODE=coverage ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
