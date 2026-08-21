@@ -190,10 +190,11 @@ jobs:
       - name: Run tests with coverage
         env:
           PHPUNIT_CONFIG: ${{ inputs.unit-test-config }}
+          UNIT_TESTSUITE: ${{ inputs.unit-testsuite }}
         run: |
           mkdir -p .Build/coverage
           .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
-            --testsuite="${{ inputs.unit-testsuite }}" \
+            --testsuite="${UNIT_TESTSUITE}" \
             --coverage-clover=.Build/coverage/unit-clover.xml
 
       - name: Upload coverage to Codecov
@@ -240,10 +241,11 @@ jobs:
       - name: Run tests with coverage
         env:
           PHPUNIT_CONFIG: ${{ inputs.functional-test-config }}
+          FUNCTIONAL_TESTSUITE: ${{ inputs.functional-testsuite }}
         run: |
           mkdir -p .Build/coverage
           .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
-            --testsuite="${{ inputs.functional-testsuite }}" \
+            --testsuite="${FUNCTIONAL_TESTSUITE}" \
             --coverage-clover=.Build/coverage/functional-clover.xml
 
       - name: Upload coverage to Codecov
@@ -290,10 +292,11 @@ jobs:
       - name: Run tests with coverage
         env:
           PHPUNIT_CONFIG: ${{ inputs.integration-test-config }}
+          INTEGRATION_TESTSUITE: ${{ inputs.integration-testsuite }}
         run: |
           mkdir -p .Build/coverage
           .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
-            --testsuite="${{ inputs.integration-testsuite }}" \
+            --testsuite="${INTEGRATION_TESTSUITE}" \
             --coverage-clover=.Build/coverage/integration-clover.xml
 
       - name: Upload coverage to Codecov
@@ -340,10 +343,11 @@ jobs:
       - name: Run tests with coverage
         env:
           PHPUNIT_CONFIG: ${{ inputs.e2e-test-config }}
+          E2E_TESTSUITE: ${{ inputs.e2e-testsuite }}
         run: |
           mkdir -p .Build/coverage
           .Build/bin/phpunit -c "$PHPUNIT_CONFIG" \
-            --testsuite="${{ inputs.e2e-testsuite }}" \
+            --testsuite="${E2E_TESTSUITE}" \
             --coverage-clover=.Build/coverage/e2e-clover.xml
 
       - name: Upload coverage to Codecov
@@ -391,10 +395,11 @@ jobs:
       - name: Generate coverage for Infection
         env:
           UNIT_CONFIG: ${{ inputs.unit-test-config }}
+          UNIT_TESTSUITE: ${{ inputs.unit-testsuite }}
         run: |
           mkdir -p .Build/logs
           .Build/bin/phpunit -c "$UNIT_CONFIG" \
-            --testsuite="${{ inputs.unit-testsuite }}" \
+            --testsuite="${UNIT_TESTSUITE}" \
             --coverage-xml=.Build/logs/coverage-xml \
             --log-junit=.Build/logs/junit.xml
 
@@ -402,11 +407,12 @@ jobs:
         env:
           INFECTION_DASHBOARD_API_KEY: ${{ secrets.INFECTION_DASHBOARD_API_KEY }}
           INFECTION_CONFIG: ${{ inputs.infection-config }}
+          UNIT_TESTSUITE: ${{ inputs.unit-testsuite }}
         run: |
           .Build/bin/infection --threads=4 --no-progress --logger-github \
             ${INFECTION_CONFIG:+--configuration="${INFECTION_CONFIG}"} \
             --skip-initial-tests --coverage=.Build/logs \
-            --test-framework-options="--testsuite='${{ inputs.unit-testsuite }}'"
+            --test-framework-options="--testsuite='${UNIT_TESTSUITE}'"
 
   js-coverage:
     name: JavaScript Coverage
@@ -479,7 +485,8 @@ jobs:
       - name: Run fuzz tests
         env:
           UNIT_CONFIG: ${{ inputs.unit-test-config }}
+          UNIT_TESTSUITE: ${{ inputs.unit-testsuite }}
         run: |
           .Build/bin/phpunit -c "$UNIT_CONFIG" \
-            --testsuite="${{ inputs.unit-testsuite }}" \
+            --testsuite="${UNIT_TESTSUITE}" \
             --group=fuzz
