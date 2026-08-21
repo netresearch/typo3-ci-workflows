@@ -787,9 +787,16 @@ case ${TEST_SUITE} in
         # `functional`, `e2e-backend` AND `e2e-tca` suites. Globbing fewer silently
         # dropped all 8 Tests/E2E/Backend classes here — the same rot as #272,
         # where the suite was skipped wholesale and nobody noticed.
-        # Same --exclude-group as the serial run: a test marked not-sqlite has to
-        # be skipped on sqlite whether the suite is sharded or not, or the two
-        # ways of running the same suite disagree about what is in it.
+        if [[ "${DBMS}" != "sqlite" ]]; then
+            echo "runTests.sh: -s functionalParallel always runs on sqlite; ignoring -d ${DBMS}." >&2
+        fi
+        # --exclude-group not-sqlite, hardcoded rather than ${DBMS}: this path
+        # pins typo3DatabaseDriver=pdo_sqlite below and mounts a sqlite tmpfs,
+        # so it runs on sqlite whatever -d asked for. Deriving the group from
+        # ${DBMS} would exclude not-mariadb on `-d mariadb` while the tests run
+        # against sqlite — excluding the wrong tests AND running the ones the
+        # marker exists to keep off sqlite. -d is answered with a warning below
+        # instead of silently meaning something else.
         #
         # --do-not-fail-on-empty-test-suite belongs with it and only here. This
         # path hands phpunit ONE file at a time, so a class whose every test is
@@ -798,7 +805,7 @@ case ${TEST_SUITE} in
         # back to 10.5). Without it, excluding a test would turn its shard red —
         # the opposite of skipping it. The serial run keeps the default: a whole
         # suite that matches nothing is a defect worth failing on.
-        COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --exclude-group not-${DBMS} --do-not-fail-on-empty-test-suite {}"
+        COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --exclude-group not-sqlite --do-not-fail-on-empty-test-suite {}"
         CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-parallel-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${CONTAINERPARAMS} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?

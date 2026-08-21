@@ -11,8 +11,10 @@
 #      directories and fell back to Tests/Functional, putting whole suites in
 #      no job while the run still read as covered.
 #   3. The sharded run had no --exclude-group, so a test marked not-sqlite ran
-#      on sqlite. Adding it alone is not the fix: the sharded path runs one
-#      file per phpunit call, and a fully excluded file exits 1.
+#      on sqlite. Adding it alone is not the fix twice over: the sharded path
+#      runs one file per phpunit call, and a fully excluded file exits 1 — and
+#      the group cannot come from ${DBMS}, because this path pins pdo_sqlite
+#      whatever -d said.
 #
 # Usage: check-runner-detection.sh [path/to/runTests.sh]
 
@@ -99,8 +101,7 @@ fi
 shard_cmd="$(grep -n 'COMMAND="find \${FUNCTIONAL_PARALLEL_PATHS}' "${RUNNER}" | head -n1)"
 # shellcheck disable=SC2016
 serial_cmd="$(grep -n 'COMMAND=(php \${PHP_FUNCTIONAL_OPTS}' "${RUNNER}" | head -n1)"
-# shellcheck disable=SC2016  # the runner's own literal ${DBMS} is what is searched for
-SHARD_FLAGS=('--exclude-group not-${DBMS}' '--do-not-fail-on-empty-test-suite')
+SHARD_FLAGS=('--exclude-group not-sqlite' '--do-not-fail-on-empty-test-suite')
 for flag in "${SHARD_FLAGS[@]}"; do
     if [[ "${shard_cmd}" == *"${flag}"* ]]; then
         pass "sharded run passes ${flag}"
@@ -108,6 +109,14 @@ for flag in "${SHARD_FLAGS[@]}"; do
         fail "sharded run is missing ${flag}"
     fi
 done
+# The group is hardcoded on purpose: this path pins pdo_sqlite regardless of -d,
+# so deriving it from ${DBMS} excludes the wrong tests on `-d mariadb`.
+# shellcheck disable=SC2016  # searching for the runner's own literal
+if [[ "${shard_cmd}" == *'not-${DBMS}'* ]]; then
+    fail "sharded run derives the excluded group from \${DBMS} while pinning sqlite"
+else
+    pass "sharded run does not derive the excluded group from \${DBMS}"
+fi
 if [[ "${serial_cmd}" == *'--exclude-group'* ]]; then
     pass "serial run passes --exclude-group"
 else
