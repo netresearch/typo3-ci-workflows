@@ -226,6 +226,7 @@ jobs:
           shellcheck -x assets/Build/Scripts/runTests.stub.sh
           shellcheck -x Build/Scripts/check-runner-variables.sh
           shellcheck -x Build/Scripts/check-runner-detection.sh
+          shellcheck -x Build/Scripts/check-empty-suite-fails.sh
 
       - name: Check the runner defines what it uses
         # v1.7.0 shipped with IMAGE_PLAYWRIGHT referenced and never assigned,
@@ -239,6 +240,13 @@ jobs:
         # a value, this one whether the value is read out of the right file.
         # Fixture extensions, no container, no PHP.
         run: bash Build/Scripts/check-runner-detection.sh assets/Build/Scripts/runTests.sh
+
+      - name: Check that a suite with nothing to run fails
+        # The fallback chain used to end in a notice and a green job, which is
+        # coverage that does not exist (#188). This runs the four steps' own
+        # bash with an empty script list and asserts a non-zero exit, rather
+        # than grepping for `exit 1` — text can sit in a branch nothing reaches.
+        run: bash Build/Scripts/check-empty-suite-fails.sh .github/workflows/ci.yml
 
       - name: Validate repo config files
         run: |

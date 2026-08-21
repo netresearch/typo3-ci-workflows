@@ -1159,7 +1159,8 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'test:unit'; then
             composer test:unit
           else
-            echo "::notice::No unit test script found. Skipping. Add ci:test:php:unit to composer scripts or provide unit-test-command input."
+            echo "::error::No unit test script found. This job would report success without running anything. Add ci:test:php:unit to composer scripts, pass unit-test-command, or set run-unit-tests: false if this extension has none."
+            exit 1
           fi
 
       - name: Upload coverage to Codecov
@@ -1289,7 +1290,8 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:acceptance'; then
             composer ci:test:php:acceptance
           else
-            echo "::notice::No acceptance test script found. Skipping. Add ci:test:php:acceptance to composer scripts or provide acceptance-test-command input."
+            echo "::error::No acceptance test script found. This job would report success without running anything. Add ci:test:php:acceptance to composer scripts, pass acceptance-test-command, or set run-acceptance-tests: false if this extension has none."
+            exit 1
           fi
 
   functional-tests:
@@ -1434,7 +1436,8 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'test:functional'; then
             composer test:functional
           else
-            echo "::notice::No functional test script found. Skipping. Add ci:test:php:functional to composer scripts or provide functional-test-command input."
+            echo "::error::No functional test script found. This job would report success without running anything. Add ci:test:php:functional to composer scripts, pass functional-test-command, or set run-functional-tests: false if this extension has none."
+            exit 1
           fi
 
       - name: Upload coverage to Codecov
@@ -1573,7 +1576,8 @@ jobs:
           elif echo "$SCRIPTS" | grep -q 'test:functional'; then
             composer test:functional
           else
-            echo "::notice::No functional test script found. Skipping. Add ci:test:php:functional to composer scripts or provide functional-test-command input."
+            echo "::error::No functional test script found. This job would report success without running anything. Add ci:test:php:functional to composer scripts, pass functional-test-command, or set run-functional-tests: false if this extension has none."
+            exit 1
           fi
 
       - name: Upload coverage to Codecov
