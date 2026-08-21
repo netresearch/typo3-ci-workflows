@@ -114,6 +114,7 @@ jobs:
     outputs:
       run: ${{ steps.gate.outputs.run }}
       has-fuzz: ${{ steps.detect.outputs.has-fuzz }}
+      fuzz-suite: ${{ steps.detect.outputs.fuzz-suite }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
@@ -201,10 +202,23 @@ jobs:
             exit 0
           fi
           # The configured name first, then any suite whose name starts with
-          # "fuzz" — the fleet spells it Fuzz, fuzz and fuzzy.
-          if grep -qiE "<testsuite name=\"(${FUZZ_SUITE}|fuzz[a-z]*)\"" "$PHPUNIT_CONFIG"; then
+          # "fuzz" — the fleet spells it Fuzz, fuzz and fuzzy. The NAME is what
+          # gets reported, not just yes/no: detecting case-insensitively while
+          # selecting with the configured spelling ran phpunit against a suite
+          # that does not exist, which exits 1 on "No tests executed". Three of
+          # the four repositories with fuzz tests spell it differently from the
+          # default.
+          found=""
+          if grep -qE "<testsuite name=\"${FUZZ_SUITE}\"" "$PHPUNIT_CONFIG"; then
+            found="${FUZZ_SUITE}"
+          else
+            found="$(grep -oiE '<testsuite name="fuzz[a-z]*"' "$PHPUNIT_CONFIG" \
+              | head -n1 | sed -E 's/.*name="([^"]+)".*/\1/')"
+          fi
+          if [ -n "$found" ]; then
             echo "has-fuzz=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::preflight: fuzz testsuite found in $PHPUNIT_CONFIG — running it."
+            echo "fuzz-suite=$found" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: fuzz testsuite \"$found\" found in $PHPUNIT_CONFIG — running it."
           else
             echo "has-fuzz=false" >> "$GITHUB_OUTPUT"
           fi
@@ -254,7 +268,7 @@ jobs:
       - name: Run Fuzz Tests
         env:
           PHPUNIT_CONFIG: ${{ inputs.phpunit-config }}
-          FUZZ_SUITE: ${{ inputs.fuzz-testsuite }}
+          FUZZ_SUITE: ${{ needs.preflight.outputs.fuzz-suite || inputs.fuzz-testsuite }}
         run: .Build/bin/phpunit -c "$PHPUNIT_CONFIG" --testsuite "$FUZZ_SUITE" --no-coverage --colors=never
 
   mutation-testing:
