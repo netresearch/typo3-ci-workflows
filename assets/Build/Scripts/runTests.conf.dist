@@ -17,26 +17,37 @@
 #PROJECT_SLUG="nr-llm"
 #PROJECT_LABEL="nr_llm"
 
-# PHPUnit configurations.
+# Almost nothing needs to be here. The runner reads composer.json for the
+# vendor and bin directories and for the PHP version to default to, looks for
+# the PHPUnit / PHPStan / Rector / Infection configs in the places extensions
+# actually keep them, reads the testsuite names out of the PHPUnit config, and
+# derives the sharded functional run's directories from that config's own
+# testsuites. Set something below only where an extension differs from what
+# can be found — and prefer moving the file to where it is looked for.
+#
 #PHPUNIT_CONFIG="Build/phpunit.xml"
 #PHPUNIT_FUNCTIONAL_CONFIG="Build/FunctionalTests.xml"
-
-# Which testsuite inside those configs to run. The defaults suit the layout
-# with a separate functional config: unit tests are the "unit" suite, and the
-# functional config needs no selection because it is the selection. An
-# extension keeping everything in one phpunit.xml names both.
-#UNIT_TESTSUITE="unit"
-#FUNCTIONAL_TESTSUITE="functional"
-
-# Static analysis and refactoring configurations.
 #PHPSTAN_CONFIG="Build/phpstan/phpstan.neon"
 #RECTOR_CONFIG="Build/rector/rector.php"
 #INFECTION_CONFIG="infection.json.dist"
-
-# Directories the sharded functional run (`-s functionalParallel`) walks.
-# This MUST cover every directory the functional PHPUnit config lists: a suite
-# that is in the config but not here runs in no job and still reads as covered.
+#
+# Testsuite names are matched loosely against the config ("unit" finds "Unit
+# Tests"), and a config with a single suite is run whole. Set one to override
+# that, or to "" to force running the whole config.
+#UNIT_TESTSUITE="unit"
+#FUNCTIONAL_TESTSUITE="functional"
+#FUZZY_TESTSUITE="fuzz"
+#INTEGRATION_TESTSUITE="integration"
+#
+# The shard list must cover every directory the functional config's testsuites
+# name — a directory in the config but not here runs in no job and still reads
+# as covered (#272, #658). It is derived from that config; set it only if the
+# derivation is wrong, and say why.
 #FUNCTIONAL_PARALLEL_PATHS="Tests/Functional Tests/E2E/Backend"
+#
+# The default PHP is the newest this runner has images for that the
+# extension's own require.php allows. Set this to pin something else.
+#DEFAULT_PHP_VERSION="8.5"
 
 # Where `-s e2e` points its browser, when TYPO3_BASE_URL is not in the
 # environment. The runner starts no TYPO3 and does not care what serves this —
@@ -68,8 +79,7 @@
 #    printf '%s' "--network ddev_default --add-host your-typo3.ddev.site:${ip}"
 #}
 
-# Default PHP for a run without `-p`, and the Playwright image for `-s e2e`.
-#DEFAULT_PHP_VERSION="8.5"
+# The Playwright image for `-s e2e`.
 #IMAGE_PLAYWRIGHT="mcr.microsoft.com/playwright:v1.60.0-noble"
 
 # Composer needs a root version for a package that has no tag in its own
