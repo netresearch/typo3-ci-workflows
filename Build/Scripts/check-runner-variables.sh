@@ -25,7 +25,7 @@ STATUS=0
 
 # ── 1. every expanded variable is assigned somewhere ────────────────────────
 # Provided by the shell, the environment, or the caller's command line.
-EXTERNAL='^(PWD|HOME|RANDOM|BASH_SOURCE|OPTARG|OPTIND|OPT|CI|PATH|UID|EUID|HOSTNAME|TMPDIR|USER|SHLVL|PIPESTATUS|FUNCNAME|LINENO|IFS|RUNTESTS_PROJECT_ROOT|RUNTESTS_MODE|DBMS_VERSION_EXACT|XDG_[A-Z_]+|DOCKER_BIN|COMPOSER_[A-Z_]+|TYPO3_BASE_URL|E2E_CONTAINER_ARGS|npm_config_cache)$'
+EXTERNAL='^(PWD|HOME|RANDOM|BASH_SOURCE|OPTARG|OPTIND|OPT|CI|GITHUB_ACTIONS|PATH|UID|EUID|HOSTNAME|TMPDIR|USER|SHLVL|PIPESTATUS|FUNCNAME|LINENO|IFS|RUNTESTS_PROJECT_ROOT|RUNTESTS_MODE|DBMS_VERSION_EXACT|XDG_[A-Z_]+|DOCKER_BIN|COMPOSER_[A-Z_]+|TYPO3_BASE_URL|E2E_CONTAINER_ARGS|npm_config_cache)$'
 
 USED="$(grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*' "${RUNNER}" | sed 's/\${//' | sort -u)"
 # An assignment counts wherever it stands: inside a case arm, after `local`,

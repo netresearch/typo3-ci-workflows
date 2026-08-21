@@ -353,14 +353,56 @@ first_existing() {
     return 0
 }
 
-PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-$(first_existing Build/phpunit/UnitTests.xml Build/phpunit.xml Build/UnitTests.xml phpunit.xml phpunit.xml.dist)}"
-PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(first_existing Build/phpunit/FunctionalTests.xml Build/FunctionalTests.xml phpunit.functional.xml)}"
+# Notices go to stderr, never stdout: these functions are read through command
+# substitution and anything on stdout becomes the value.
+notice() {
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        printf '::notice::runTests.sh: %s\n' "${1}" >&2
+    else
+        printf 'runTests.sh: %s\n' "${1}" >&2
+    fi
+}
+
+# Same as first_existing, and it says what it did when that is worth knowing.
+# Two cases, and they are different problems:
+#
+#   - The file found is not the standard location. Silence there means an
+#     extension can stay non-standard forever without anyone noticing, which is
+#     how the fleet ended up with three layouts.
+#   - Several candidates exist and only the first is read. That one is a trap
+#     during a migration: create the config at the standard location, leave the
+#     old one, and every suite keeps running from the old file while the
+#     repository looks migrated — in both directions invisible.
+detect_config() {
+    # $1 label, $2 the standard location, rest: candidates in order
+    local label="${1}" standard="${2}" found others candidate
+    shift 2
+    found="$(first_existing "$@")"
+    [[ -n "${found}" ]] || return 0
+    printf '%s' "${found}"
+
+    others=""
+    for candidate in "$@"; do
+        [[ "${candidate}" == "${found}" ]] && continue
+        [[ -e "${PROJECT_ROOT}/${candidate}" ]] && others+="${candidate} "
+    done
+
+    if [[ -n "${others}" ]]; then
+        notice "${label}: using ${found}; also present and ignored: ${others% }"
+    fi
+    if [[ "${found}" != "${standard}" ]]; then
+        notice "${label}: ${found} is not the standard location (${standard})"
+    fi
+}
+
+PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-$(detect_config 'unit config' Build/phpunit.xml Build/phpunit/UnitTests.xml Build/phpunit.xml Build/UnitTests.xml phpunit.xml phpunit.xml.dist)}"
+PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(detect_config 'functional config' Build/FunctionalTests.xml Build/phpunit/FunctionalTests.xml Build/FunctionalTests.xml phpunit.functional.xml)}"
 # One config carrying several testsuites is a layout, not a mistake: fall back
 # to the unit config and let the testsuite name do the selecting.
 PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
-PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(first_existing Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
-RECTOR_CONFIG="${RECTOR_CONFIG:-$(first_existing Build/rector/rector.php Build/rector.php rector.php)}"
-INFECTION_CONFIG="${INFECTION_CONFIG:-$(first_existing infection.json.dist infection.json infection.json5)}"
+PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(detect_config 'phpstan config' Build/phpstan/phpstan.neon Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
+RECTOR_CONFIG="${RECTOR_CONFIG:-$(detect_config 'rector config' Build/rector/rector.php Build/rector/rector.php Build/rector.php rector.php)}"
+INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infection.json.dist infection.json.dist infection.json infection.json5)}"
 
 # Which testsuite to select inside those configs. The fleet writes the same
 # suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read

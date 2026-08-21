@@ -75,6 +75,19 @@ derive() {
     )
 }
 
+# Same as derive, but returns what the block said rather than what it resolved.
+derive_stderr() {
+    local root="${1}" line head
+    line="$(grep -n '^# Option defaults' "${RUNNER}" | head -n1 | cut -d: -f1)"
+    head="${FIXTURES}/head.sh"
+    head -n "$((line - 1))" "${RUNNER}" > "${head}"
+    (
+        cd "${root}" || exit 1
+        # shellcheck disable=SC1090  # generated above from the runner under test
+        source "${head}" 2>&1 >/dev/null | grep 'runTests.sh:' || true
+    )
+}
+
 printf 'Detection fixtures (%s)\n' "${RUNNER#"$(pwd)/"}"
 
 # 1. The conf decides which file is read out of, not just which file is named.
@@ -96,7 +109,45 @@ else
     fail "single-line <testsuite> lost: shards=${got:-<empty>}, expected 'Tests/E2E/TCA Tests/Functional'"
 fi
 
-# 3. Both flags on the sharded command, and neither on the serial one.
+# 3. The notices: a shadowed config, a non-standard location, and silence at
+#    the reference. They go to stderr, because these functions are read through
+#    command substitution and stdout is the value.
+root="$(make_fixture shadowed Build/phpunit/FunctionalTests.xml multi)"
+cp "${root}/Build/phpunit/FunctionalTests.xml" "${root}/Build/FunctionalTests.xml"
+notices="$(derive_stderr "${root}")"
+if [[ "${notices}" == *"also present and ignored: Build/FunctionalTests.xml"* ]]; then
+    pass "a second config is named as ignored"
+else
+    fail "a shadowed config produced no notice: ${notices:-<silence>}"
+fi
+if [[ "${notices}" == *"is not the standard location"* ]]; then
+    pass "a non-standard location is named"
+else
+    fail "no notice for the non-standard location"
+fi
+value="$(derive "${root}" PHPUNIT_FUNCTIONAL_CONFIG)"
+if [[ "${value}" == "Build/phpunit/FunctionalTests.xml" ]]; then
+    pass "the notices stayed off stdout (value is ${value})"
+else
+    fail "stdout carries more than the value: ${value}"
+fi
+
+# The reference layout says nothing. A checker that only proves noise exists
+# would pass on a runner that warns about everything.
+root="$(make_fixture reference Build/FunctionalTests.xml multi)"
+printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</directory></testsuite></testsuites></phpunit>\n' \
+    > "${root}/Build/phpunit.xml"
+mkdir -p "${root}/Build/phpstan" "${root}/Build/rector"
+printf 'parameters:\n' > "${root}/Build/phpstan/phpstan.neon"
+printf '<?php\n' > "${root}/Build/rector/rector.php"
+notices="$(derive_stderr "${root}")"
+if [[ -z "${notices}" ]]; then
+    pass "the reference layout produces no notice"
+else
+    fail "the reference layout is noisy: ${notices}"
+fi
+
+# 4. Both flags on the sharded command, and neither on the serial one.
 # shellcheck disable=SC2016  # these are the runner's own literals, not expansions
 shard_cmd="$(grep -n 'COMMAND="find \${FUNCTIONAL_PARALLEL_PATHS}' "${RUNNER}" | head -n1)"
 # shellcheck disable=SC2016
