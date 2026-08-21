@@ -113,6 +113,7 @@ jobs:
     timeout-minutes: 1
     outputs:
       run: ${{ steps.gate.outputs.run }}
+      has-fuzz: ${{ steps.detect.outputs.has-fuzz }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
@@ -178,12 +179,42 @@ jobs:
             echo "::notice::preflight: running — no qualifying merge_group run for workflow $WORKFLOW_FILE on SHA $SHA."
           fi
 
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect a fuzz testsuite
+        id: detect
+        # A repository that HAS fuzz tests but never passed run-fuzz-tests sees
+        # `fuzz / Fuzz Tests: skipped`, which reads as "nothing to run" and is
+        # not. Four of the five extensions with a Tests/Fuzz directory were in
+        # exactly that state (#197). So the suite decides, not the caller.
+        env:
+          PHPUNIT_CONFIG: ${{ inputs.phpunit-config }}
+          FUZZ_SUITE: ${{ inputs.fuzz-testsuite }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$PHPUNIT_CONFIG" ]; then
+            echo "has-fuzz=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: $PHPUNIT_CONFIG not found — no fuzz suite detected."
+            exit 0
+          fi
+          # The configured name first, then any suite whose name starts with
+          # "fuzz" — the fleet spells it Fuzz, fuzz and fuzzy.
+          if grep -qiE "<testsuite name=\"(${FUZZ_SUITE}|fuzz[a-z]*)\"" "$PHPUNIT_CONFIG"; then
+            echo "has-fuzz=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: fuzz testsuite found in $PHPUNIT_CONFIG — running it."
+          else
+            echo "has-fuzz=false" >> "$GITHUB_OUTPUT"
+          fi
+
   fuzz-tests:
     needs: preflight
     name: Fuzz Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: inputs.run-fuzz-tests && needs.preflight.outputs.run == 'true'
+    if: (inputs.run-fuzz-tests || needs.preflight.outputs.has-fuzz == 'true') && needs.preflight.outputs.run == 'true'
     permissions:
       contents: read
     steps:
