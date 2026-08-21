@@ -275,6 +275,23 @@ jobs:
           [ "$STATUS" -eq 0 ] && echo "no hardcoded testsuite names"
           exit "$STATUS"
 
+      - name: Check that the fuzz job selects the suite it detected
+        # Detecting case-insensitively while selecting with the configured
+        # spelling ran phpunit against a suite that does not exist — "No tests
+        # executed", exit 1. Three of the four repositories with fuzz tests
+        # spell the suite differently from the default, so this was not an edge
+        # case.
+        run: |
+          set -euo pipefail
+          run_env=$(yq -o json '.jobs["fuzz-tests"].steps[] | select(.name == "Run Fuzz Tests") | .env.FUZZ_SUITE' .github/workflows/fuzz.yml)
+          case "$run_env" in
+            *preflight.outputs.fuzz-suite*)
+              echo "fuzz job uses the detected suite name" ;;
+            *)
+              echo "::error::the fuzz job selects ${run_env} instead of the name preflight detected"
+              exit 1 ;;
+          esac
+
       - name: Validate repo config files
         run: |
           set -euo pipefail
