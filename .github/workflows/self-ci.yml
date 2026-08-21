@@ -275,6 +275,46 @@ jobs:
           [ "$STATUS" -eq 0 ] && echo "no hardcoded testsuite names"
           exit "$STATUS"
 
+      - name: Check that the fuzz preflight survives a config without a fuzz suite
+        # This is the case that broke: grep finds nothing, `set -o pipefail`
+        # carries its exit 1 out of the command substitution, `set -e` kills the
+        # step, and `All security checks` needs that job. Every consumer with a
+        # phpunit config and no fuzz suite was affected.
+        #
+        # The check RUNS the block and asserts the exit code. The guard that
+        # missed this ran it too — and only looked at the output file, which is
+        # empty both when the answer is "no suite" and when the step died.
+        run: |
+          set -euo pipefail
+          block=$(yq -r '.jobs.preflight.steps[] | select(.id == "detect") | .run' .github/workflows/fuzz.yml)
+          work=$(mktemp -d)
+          printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</directory></testsuite></testsuites></phpunit>\n' > "$work/phpunit.xml"
+          printf '<phpunit><testsuites><testsuite name="fuzzy"><directory>../Tests/Fuzz</directory></testsuite></testsuites></phpunit>\n' > "$work/withfuzz.xml"
+          STATUS=0
+
+          out=$(mktemp)
+          if ( cd "$work" && PHPUNIT_CONFIG=phpunit.xml FUZZ_SUITE=Fuzz GITHUB_OUTPUT="$out" bash -c "$block" ); then
+            if grep -qx 'has-fuzz=false' "$out"; then
+              echo "no fuzz suite: exit 0 and has-fuzz=false"
+            else
+              echo "::error::no fuzz suite: exit 0 but output was '$(cat "$out")'"; STATUS=1
+            fi
+          else
+            echo "::error::no fuzz suite: the block exited non-zero — this fails the required gate"; STATUS=1
+          fi
+
+          out=$(mktemp)
+          if ( cd "$work" && PHPUNIT_CONFIG=withfuzz.xml FUZZ_SUITE=Fuzz GITHUB_OUTPUT="$out" bash -c "$block" ); then
+            if grep -qx 'fuzz-suite=fuzzy' "$out"; then
+              echo "fuzzy suite: detected under its own name"
+            else
+              echo "::error::fuzzy suite: expected fuzz-suite=fuzzy, got '$(cat "$out")'"; STATUS=1
+            fi
+          else
+            echo "::error::fuzzy suite: the block exited non-zero"; STATUS=1
+          fi
+          exit "$STATUS"
+
       - name: Check that the fuzz job selects the suite it detected
         # Detecting case-insensitively while selecting with the configured
         # spelling ran phpunit against a suite that does not exist — "No tests
