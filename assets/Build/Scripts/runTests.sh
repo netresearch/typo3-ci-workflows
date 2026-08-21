@@ -337,6 +337,14 @@ BIN_DIR="${BIN_DIR:-$(composer_value '.config["vendor-dir"]' 'vendor-dir')}"
 BIN_DIR="${BIN_DIR:-vendor/bin}"
 VENDOR_DIR="${VENDOR_DIR:-$(composer_value '.config["vendor-dir"]' 'vendor-dir')}"
 VENDOR_DIR="${VENDOR_DIR:-vendor}"
+# Where TYPO3 is installed. Hardcoding .Build/Web was wrong for 21 of the 28
+# extensions here: ten use .Build/public, two .Build/web, one .build/public and
+# eight leave it at the composer-installers default. The functional suites
+# mount a tmpfs over this path for the sqlite databases — "to avoid permission
+# issues", as the forks that got it right put it — and a tmpfs on a directory
+# nobody writes to is a mount that does nothing.
+WEB_DIR="${WEB_DIR:-$(composer_value '.extra["typo3/cms"]["web-dir"]' 'web-dir')}"
+WEB_DIR="${WEB_DIR:-.Build/Web}"
 
 # Config locations differ per extension and are all in a small set of known
 # places, so they are looked for rather than asked for. First hit wins; a conf
@@ -588,7 +596,7 @@ ROOT_DIR="${PROJECT_ROOT}"
 
 # Create cache directories
 mkdir -p .Build/.cache
-mkdir -p .Build/Web/typo3temp/var/tests
+mkdir -p ${WEB_DIR}/typo3temp/var/tests
 
 IMAGE_PREFIX="docker.io/"
 TYPO3_IMAGE_PREFIX="ghcr.io/typo3/"
@@ -834,8 +842,8 @@ case ${TEST_SUITE} in
                 SUITE_EXIT_CODE=$?
                 ;;
             sqlite)
-                mkdir -p "${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/"
-                CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
+                mkdir -p "${ROOT_DIR}/${WEB_DIR}/typo3temp/var/tests/functional-sqlite-dbs/"
+                CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/${WEB_DIR}/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
                 ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${CONTAINERPARAMS} ${IMAGE_PHP} "${COMMAND[@]}"
                 SUITE_EXIT_CODE=$?
                 ;;
@@ -846,7 +854,7 @@ case ${TEST_SUITE} in
         esac
         ;;
     functionalParallel)
-        mkdir -p "${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/"
+        mkdir -p "${ROOT_DIR}/${WEB_DIR}/typo3temp/var/tests/functional-sqlite-dbs/"
 
         if [[ "${CI}" == "true" ]]; then
             PARALLEL_JOBS=4
@@ -878,15 +886,15 @@ case ${TEST_SUITE} in
         # the opposite of skipping it. The serial run keeps the default: a whole
         # suite that matches nothing is a defect worth failing on.
         COMMAND="find ${FUNCTIONAL_PARALLEL_PATHS} -name '*Test.php' | xargs -P${PARALLEL_JOBS} -I{} php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --exclude-group not-sqlite --do-not-fail-on-empty-test-suite {}"
-        CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
+        CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/${WEB_DIR}/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-parallel-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${CONTAINERPARAMS} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
     functionalCoverage)
         mkdir -p .Build/coverage
         COMMAND=(php -d opcache.enable_cli=1 ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} --coverage-clover=.Build/coverage/functional.xml --coverage-html=.Build/coverage/html-functional --coverage-text "$@")
-        mkdir -p "${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/"
-        CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/.Build/Web/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
+        mkdir -p "${ROOT_DIR}/${WEB_DIR}/typo3temp/var/tests/functional-sqlite-dbs/"
+        CONTAINERPARAMS="-e typo3DatabaseDriver=pdo_sqlite --tmpfs ${ROOT_DIR}/${WEB_DIR}/typo3temp/var/tests/functional-sqlite-dbs/:rw,noexec,nosuid,mode=1777"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name functional-coverage-${SUFFIX} -e XDEBUG_MODE=coverage ${CONTAINERPARAMS} ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
