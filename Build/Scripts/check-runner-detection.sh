@@ -95,13 +95,17 @@ else
 fi
 
 # 3. Both flags on the sharded command, and neither on the serial one.
+# shellcheck disable=SC2016  # these are the runner's own literals, not expansions
 shard_cmd="$(grep -n 'COMMAND="find \${FUNCTIONAL_PARALLEL_PATHS}' "${RUNNER}" | head -n1)"
+# shellcheck disable=SC2016
 serial_cmd="$(grep -n 'COMMAND=(php \${PHP_FUNCTIONAL_OPTS}' "${RUNNER}" | head -n1)"
-for flag in '--exclude-group not-\${DBMS}' '--do-not-fail-on-empty-test-suite'; do
-    if [[ "${shard_cmd}" == *"${flag//\\/}"* ]]; then
-        pass "sharded run passes ${flag//\\/}"
+# shellcheck disable=SC2016  # the runner's own literal ${DBMS} is what is searched for
+SHARD_FLAGS=('--exclude-group not-${DBMS}' '--do-not-fail-on-empty-test-suite')
+for flag in "${SHARD_FLAGS[@]}"; do
+    if [[ "${shard_cmd}" == *"${flag}"* ]]; then
+        pass "sharded run passes ${flag}"
     else
-        fail "sharded run is missing ${flag//\\/}"
+        fail "sharded run is missing ${flag}"
     fi
 done
 if [[ "${serial_cmd}" == *'--exclude-group'* ]]; then
