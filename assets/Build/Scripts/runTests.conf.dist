@@ -20,7 +20,9 @@
 # Almost nothing needs to be here. The runner reads composer.json for the
 # vendor and bin directories and for the PHP version to default to, looks for
 # the PHPUnit / PHPStan / Rector / Infection configs in the places extensions
-# actually keep them, reads the testsuite names out of the PHPUnit config, and
+# actually keep them — including the php-cs-fixer config, which php-cs-fixer
+# itself only finds in the project root — reads the testsuite names out of the
+# PHPUnit config, and
 # derives the sharded functional run's directories from that config's own
 # testsuites. Set something below only where an extension differs from what
 # can be found — and prefer moving the file to where it is looked for.
@@ -28,6 +30,7 @@
 #PHPUNIT_CONFIG="Build/phpunit.xml"
 #PHPUNIT_FUNCTIONAL_CONFIG="Build/FunctionalTests.xml"
 #PHPSTAN_CONFIG="Build/phpstan/phpstan.neon"
+#CGL_CONFIG="Build/php-cs-fixer.php"
 #RECTOR_CONFIG="Build/rector/rector.php"
 #INFECTION_CONFIG="infection.json.dist"
 #

@@ -246,4 +246,45 @@ else
     pass "serial run keeps failing on an empty suite"
 fi
 
+# 8. The cgl suite passes the extension's own php-cs-fixer config. php-cs-fixer
+#    discovers only .php-cs-fixer.php / .php-cs-fixer.dist.php beside the working
+#    directory, so an extension keeping it under Build/ silently gets
+#    php-cs-fixer's defaults — and `-s cgl` then REWRITES files against rules the
+#    extension never agreed to, while CI, which passes --config, stays green.
+#    Measured on netresearch/contexts: 12 files rewritten by the runner, 0
+#    reported by composer ci:test:php:cgl on the same tree.
+printf 'cgl config\n'
+cgl_root="${FIXTURES}/cgl-build-only"
+mkdir -p "${cgl_root}/Build"
+printf '{"name":"netresearch/fixture-cgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${cgl_root}/composer.json"
+printf '<?php\n' > "${cgl_root}/Build/php-cs-fixer.php"
+got="$(derive "${cgl_root}" CGL_CONFIG)"
+if [[ "${got}" == "Build/php-cs-fixer.php" ]]; then
+    pass "config under Build/ is found (${got})"
+else
+    fail "config under Build/ not found: got '${got:-<empty>}'"
+fi
+
+cgl_none="${FIXTURES}/cgl-absent"
+mkdir -p "${cgl_none}"
+printf '{"name":"netresearch/fixture-nocgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${cgl_none}/composer.json"
+got="$(derive "${cgl_none}" CGL_CONFIG)"
+if [[ -z "${got}" ]]; then
+    pass "no config present leaves CGL_CONFIG empty"
+else
+    fail "CGL_CONFIG invented a path with no config present: ${got}"
+fi
+
+# Both branches must carry the flag, and it must be the conditional form: an
+# unconditional --config= with an empty value makes php-cs-fixer read the
+# directory it is pointed at and fail with an unrelated message.
+cgl_lines="$(grep -c 'php-cs-fixer fix -v \${CGL_CONFIG:+--config=\${CGL_CONFIG}}' "${RUNNER}")"
+if [[ "${cgl_lines}" -eq 2 ]]; then
+    pass "both cgl branches pass --config conditionally"
+else
+    fail "expected 2 conditional --config invocations, found ${cgl_lines}"
+fi
+
 exit "${FAILED}"

@@ -411,6 +411,13 @@ PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
 PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(detect_config 'phpstan config' Build/phpstan/phpstan.neon Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
 RECTOR_CONFIG="${RECTOR_CONFIG:-$(detect_config 'rector config' Build/rector/rector.php Build/rector/rector.php Build/rector.php rector.php)}"
 INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infection.json.dist infection.json.dist infection.json infection.json5)}"
+# php-cs-fixer discovers only .php-cs-fixer.php / .php-cs-fixer.dist.php next to
+# the working directory. Three extensions keep theirs under Build/ and one keeps
+# two, so leaving the flag off does not mean "use the extension's rules" — it
+# means "use php-cs-fixer's defaults", and `-s cgl` then rewrites files against
+# rules the extension never agreed to while CI stays green (netresearch/contexts:
+# 12 files rewritten, 0 reported by composer ci:test:php:cgl on the same tree).
+CGL_CONFIG="${CGL_CONFIG:-$(detect_config 'cgl config' .php-cs-fixer.dist.php .php-cs-fixer.php .php-cs-fixer.dist.php Build/php-cs-fixer.php Build/.php-cs-fixer.php Build/php-cs-fixer.dist.php)}"
 
 # Which testsuite to select inside those configs. The fleet writes the same
 # suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read
@@ -713,9 +720,9 @@ case ${TEST_SUITE} in
         ;;
     cgl)
         if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v --dry-run --diff"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v ${CGL_CONFIG:+--config=${CGL_CONFIG}} --dry-run --diff"
         else
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v ${CGL_CONFIG:+--config=${CGL_CONFIG}}"
         fi
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name cgl-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
