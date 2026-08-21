@@ -280,6 +280,7 @@ fi
 # Both branches must carry the flag, and it must be the conditional form: an
 # unconditional --config= with an empty value makes php-cs-fixer read the
 # directory it is pointed at and fail with an unrelated message.
+# shellcheck disable=SC2016  # searching for the runner's own literal, not an expansion
 cgl_lines="$(grep -c 'php-cs-fixer fix -v \${CGL_CONFIG:+--config=\${CGL_CONFIG}}' "${RUNNER}")"
 if [[ "${cgl_lines}" -eq 2 ]]; then
     pass "both cgl branches pass --config conditionally"
