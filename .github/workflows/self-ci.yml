@@ -224,6 +224,14 @@ jobs:
           # stub is our own and is clean at the default severity.
           shellcheck -x --severity=error assets/Build/Scripts/runTests.sh
           shellcheck -x assets/Build/Scripts/runTests.stub.sh
+          shellcheck -x Build/Scripts/check-runner-variables.sh
+
+      - name: Check the runner defines what it uses
+        # v1.7.0 shipped with IMAGE_PLAYWRIGHT referenced and never assigned,
+        # so `-s e2e` ran `docker run … ""` in every consumer. The file parsed,
+        # shellcheck was clean, and no job here ran a suite. This closes that
+        # gap without needing a container.
+        run: bash Build/Scripts/check-runner-variables.sh assets/Build/Scripts/runTests.sh
 
       - name: Validate repo config files
         run: |
