@@ -212,8 +212,14 @@ jobs:
           if grep -qE "<testsuite name=\"${FUZZ_SUITE}\"" "$PHPUNIT_CONFIG"; then
             found="${FUZZ_SUITE}"
           else
+            # `|| true`: a config that declares no fuzz suite at all is the
+            # answer this branch exists to produce. Without it grep exits 1,
+            # `set -o pipefail` carries that out of the command substitution
+            # and `set -e` kills the step — so every consumer with a phpunit
+            # config and no fuzz suite fails the job instead of skipping it,
+            # and `All security checks` needs this job.
             found="$(grep -oiE '<testsuite name="fuzz[a-z]*"' "$PHPUNIT_CONFIG" \
-              | head -n1 | sed -E 's/.*name="([^"]+)".*/\1/')"
+              | head -n1 | sed -E 's/.*name="([^"]+)".*/\1/' || true)"
           fi
           if [ -n "$found" ]; then
             echo "has-fuzz=true" >> "$GITHUB_OUTPUT"
@@ -221,6 +227,7 @@ jobs:
             echo "::notice::preflight: fuzz testsuite \"$found\" found in $PHPUNIT_CONFIG — running it."
           else
             echo "has-fuzz=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::preflight: no fuzz testsuite in $PHPUNIT_CONFIG — skipping."
           fi
 
   fuzz-tests:
