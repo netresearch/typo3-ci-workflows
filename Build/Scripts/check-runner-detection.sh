@@ -164,7 +164,33 @@ else
     fail "a nested call exited ${status}: ${out:-<silence>}"
 fi
 
-# 5. Both flags on the sharded command, and neither on the serial one.
+# 5. The PHP image is overridable, by environment and by conf function.
+#
+#    Checked as text, not by executing: IMAGE_PHP is assigned ~90 lines below
+#    `# Option defaults`, past the getopts loop, and sourcing that far under
+#    `set -e` inside a subshell aborts before anything can be read back. The
+#    effect is proven in the pull request instead, with real numbers from
+#    t3x-nr-image-optimize: default image 241 assertions with 1 skipped,
+#    IMAGE_PHP set to its imagick image 245 assertions with none.
+image_line="$(grep -n '^IMAGE_PHP=' "${RUNNER}" | head -n1 | cut -d: -f2-)"
+# shellcheck disable=SC2016  # the runner's own literal, not an expansion
+if [[ "${image_line}" == *'${IMAGE_PHP:-'* ]]; then
+    pass "IMAGE_PHP keeps an environment override"
+else
+    fail "IMAGE_PHP is assigned unconditionally: ${image_line:-<absent>}"
+fi
+if grep -q 'declare -f php_image' "${RUNNER}"; then
+    pass "a conf php_image() is consulted"
+else
+    fail "no php_image() hook — a conf cannot name an image per PHP version"
+fi
+if [[ "${image_line}" == *core-testing-* ]]; then
+    pass "the default is still a core-testing image"
+else
+    fail "default image lost: ${image_line:-<absent>}"
+fi
+
+# 6. Both flags on the sharded command, and neither on the serial one.
 # shellcheck disable=SC2016  # these are the runner's own literals, not expansions
 shard_cmd="$(grep -n 'COMMAND="find \${FUNCTIONAL_PARALLEL_PATHS}' "${RUNNER}" | head -n1)"
 # shellcheck disable=SC2016
