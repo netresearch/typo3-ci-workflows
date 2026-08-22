@@ -407,7 +407,12 @@ detect_config() {
 }
 
 PHPUNIT_CONFIG="${PHPUNIT_CONFIG:-$(detect_config 'unit config' Build/phpunit.xml Build/phpunit/UnitTests.xml Build/phpunit.xml Build/UnitTests.xml phpunit.xml phpunit.xml.dist)}"
-PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(detect_config 'functional config' Build/FunctionalTests.xml Build/phpunit/FunctionalTests.xml Build/FunctionalTests.xml phpunit.functional.xml)}"
+# Build/phpunit.functional.xml is the layout the passkeys extensions use. It
+# matters more than the count suggests: t3x-nr-passkeys-be also has a
+# Build/phpunit.xml, so without this candidate detection falls back to it —
+# and that file carries only the unit and fuzz suites, so the functional run
+# asks for a testsuite the file it was handed does not contain.
+PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(detect_config 'functional config' Build/FunctionalTests.xml Build/phpunit/FunctionalTests.xml Build/FunctionalTests.xml Build/phpunit.functional.xml phpunit.functional.xml)}"
 # One config carrying several testsuites is a layout, not a mistake: fall back
 # to the unit config and let the testsuite name do the selecting.
 PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
