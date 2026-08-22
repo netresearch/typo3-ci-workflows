@@ -382,7 +382,10 @@ notice() {
 #     old one, and every suite keeps running from the old file while the
 #     repository looks migrated — in both directions invisible.
 detect_config() {
-    # $1 label, $2 the standard location, rest: candidates in order
+    # $1 label, $2 the standard location(s), rest: candidates in order.
+    # Several standards separated by | where a tool defines more than one name
+    # itself: php-cs-fixer reads .php-cs-fixer.php and .php-cs-fixer.dist.php
+    # alike, so calling either non-standard would be wrong.
     local label="${1}" standard="${2}" found others candidate
     shift 2
     found="$(first_existing "$@")"
@@ -398,8 +401,8 @@ detect_config() {
     if [[ -n "${others}" ]]; then
         notice "${label}: using ${found}; also present and ignored: ${others% }"
     fi
-    if [[ "${found}" != "${standard}" ]]; then
-        notice "${label}: ${found} is not the standard location (${standard})"
+    if [[ "|${standard}|" != *"|${found}|"* ]]; then
+        notice "${label}: ${found} is not the standard location (${standard//|/ or })"
     fi
 }
 
@@ -411,6 +414,13 @@ PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
 PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(detect_config 'phpstan config' Build/phpstan/phpstan.neon Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
 RECTOR_CONFIG="${RECTOR_CONFIG:-$(detect_config 'rector config' Build/rector/rector.php Build/rector/rector.php Build/rector.php rector.php)}"
 INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infection.json.dist infection.json.dist infection.json infection.json5)}"
+# php-cs-fixer discovers only .php-cs-fixer.php / .php-cs-fixer.dist.php next to
+# the working directory. Thirteen extensions keep theirs under Build/ and two
+# keep two, so leaving the flag off does not mean "use the extension's rules" — it
+# means "use php-cs-fixer's defaults", and `-s cgl` then rewrites files against
+# rules the extension never agreed to while CI stays green (netresearch/contexts:
+# 12 files rewritten, 0 reported by composer ci:test:php:cgl on the same tree).
+CGL_CONFIG="${CGL_CONFIG:-$(detect_config 'cgl config' '.php-cs-fixer.php|.php-cs-fixer.dist.php' .php-cs-fixer.php .php-cs-fixer.dist.php Build/.php-cs-fixer.dist.php Build/.php-cs-fixer.php Build/php-cs-fixer.php Build/php-cs-fixer/.php-cs-fixer.php)}"
 
 # Which testsuite to select inside those configs. The fleet writes the same
 # suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read
@@ -713,9 +723,9 @@ case ${TEST_SUITE} in
         ;;
     cgl)
         if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v --dry-run --diff"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v ${CGL_CONFIG:+--config=${CGL_CONFIG}} --dry-run --diff"
         else
-            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v"
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/php-cs-fixer fix -v ${CGL_CONFIG:+--config=${CGL_CONFIG}}"
         fi
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name cgl-${SUFFIX} -e COMPOSER_CACHE_DIR=.Build/.cache/composer -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?

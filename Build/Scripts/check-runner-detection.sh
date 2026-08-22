@@ -246,4 +246,70 @@ else
     pass "serial run keeps failing on an empty suite"
 fi
 
+# 8. The cgl suite passes the extension's own php-cs-fixer config. php-cs-fixer
+#    discovers only .php-cs-fixer.php / .php-cs-fixer.dist.php beside the working
+#    directory, so an extension keeping it under Build/ silently gets
+#    php-cs-fixer's defaults — and `-s cgl` then REWRITES files against rules the
+#    extension never agreed to, while CI, which passes --config, stays green.
+#    Measured on netresearch/contexts: 12 files rewritten by the runner, 0
+#    reported by composer ci:test:php:cgl on the same tree.
+printf 'cgl config\n'
+# One fixture per layout the fleet actually uses, read off the git trees rather
+# than guessed: guessing is what left Build/.php-cs-fixer.dist.php — ten of the
+# twenty-five extensions — out of the first version of this list.
+declare -a CGL_LAYOUTS=(
+    "Build/.php-cs-fixer.dist.php"
+    "Build/.php-cs-fixer.php"
+    "Build/php-cs-fixer.php"
+    "Build/php-cs-fixer/.php-cs-fixer.php"
+)
+for layout in "${CGL_LAYOUTS[@]}"; do
+    root="${FIXTURES}/cgl-$(printf '%s' "${layout}" | tr '/.' '--')"
+    mkdir -p "${root}/$(dirname "${layout}")"
+    printf '{"name":"netresearch/fixture-cgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+        > "${root}/composer.json"
+    printf '<?php\n' > "${root}/${layout}"
+    got="$(derive "${root}" CGL_CONFIG)"
+    if [[ "${got}" == "${layout}" ]]; then
+        pass "${layout} is found"
+    else
+        fail "${layout} not found: got '${got:-<empty>}'"
+    fi
+done
+
+# Both root names are php-cs-fixer's own, so neither may be called non-standard.
+cgl_root_alt="${FIXTURES}/cgl-root-nondist"
+mkdir -p "${cgl_root_alt}"
+printf '{"name":"netresearch/fixture-cgl2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${cgl_root_alt}/composer.json"
+printf '<?php\n' > "${cgl_root_alt}/.php-cs-fixer.php"
+said="$(derive_stderr "${cgl_root_alt}" | grep 'cgl config' || true)"
+if [[ "${said}" == *"not the standard location"* ]]; then
+    fail ".php-cs-fixer.php reported as non-standard: ${said}"
+else
+    pass ".php-cs-fixer.php is accepted as a standard location"
+fi
+
+cgl_none="${FIXTURES}/cgl-absent"
+mkdir -p "${cgl_none}"
+printf '{"name":"netresearch/fixture-nocgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${cgl_none}/composer.json"
+got="$(derive "${cgl_none}" CGL_CONFIG)"
+if [[ -z "${got}" ]]; then
+    pass "no config present leaves CGL_CONFIG empty"
+else
+    fail "CGL_CONFIG invented a path with no config present: ${got}"
+fi
+
+# Both branches must carry the flag, and it must be the conditional form: an
+# unconditional --config= with an empty value makes php-cs-fixer read the
+# directory it is pointed at and fail with an unrelated message.
+# shellcheck disable=SC2016  # searching for the runner's own literal, not an expansion
+cgl_lines="$(grep -c 'php-cs-fixer fix -v \${CGL_CONFIG:+--config=\${CGL_CONFIG}}' "${RUNNER}")"
+if [[ "${cgl_lines}" -eq 2 ]]; then
+    pass "both cgl branches pass --config conditionally"
+else
+    fail "expected 2 conditional --config invocations, found ${cgl_lines}"
+fi
+
 exit "${FAILED}"
