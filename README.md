@@ -1189,3 +1189,44 @@ workflow chain is compromised (cf. [netresearch/ofelia#535](https://github.com/n
 the attacker gains access to every secret the calling workflow can access. Passing
 secrets explicitly limits the blast radius to only what the workflow actually needs.
 See the [GitHub documentation on passing secrets](https://docs.github.com/en/actions/using-workflows/reusing-workflows#passing-secrets-to-a-reusable-workflow).
+
+## Releasing This Repository
+
+This repository releases itself the same way it makes its consumers release:
+a signed annotated tag, and nothing else.
+
+```bash
+git -C .bare fetch origin
+# The tag message IS the release notes — write it in a file, not with -m.
+git tag -s -F notes.txt v1.8.3 <sha-on-main>
+git push origin v1.8.3
+```
+
+`.github/workflows/self-release.yml` takes it from there: it refuses a
+lightweight or unsigned tag, refuses a tag whose message has no body, builds
+the Composer payload with `git archive` (so `.gitattributes` export-ignore
+applies and the archive matches what a consumer installs), signs
+`SHA256SUMS.txt` with Cosign, attaches SLSA build provenance, and publishes
+the Release with all assets at once.
+
+There is no version file to bump. `composer.json` carries no `version` field
+by design — Packagist reads the tag — so the tag is the only surface, and
+version parity cannot drift.
+
+Verify a downloaded archive:
+
+```bash
+gh attestation verify typo3-ci-workflows-v1.8.3.tar.gz \
+  --repo netresearch/typo3-ci-workflows
+
+cosign verify-blob \
+  --bundle SHA256SUMS.txt.sigstore.json \
+  --certificate-identity-regexp "^https://github\.com/netresearch/typo3-ci-workflows/\.github/workflows/self-release\.yml@" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  SHA256SUMS.txt
+
+sha256sum --check SHA256SUMS.txt
+```
+
+Consumers referencing the workflows with `@main` are unaffected by any of
+this. A release changes what a tag produces, not what a workflow does.

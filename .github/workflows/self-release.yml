@@ -1,0 +1,229 @@
+name: Self-Release
+
+# This repository publishes the release chain that every consuming extension
+# uses, and until #210 it did not walk that chain itself: ten tags between
+# v1.4.0 and v1.8.2 carry no Release object, because nothing was ever wired to
+# create one. `release.yml` and `release-typo3-extension.yml` are reusables this
+# repo OFFERS; they are not paths it TAKES.
+#
+# Trigger model: signed-tag push, same as every repo this one serves.
+#
+#   git tag -s -F <notes> vX.Y.Z <sha>
+#   git push origin vX.Y.Z
+#
+# The annotated tag message IS the release notes. That is not a shortcut: since
+# v1.4.0 the tag message has been the only place the change description lived,
+# and those messages are written for readers (see `git tag -l --format=
+# '%(contents)' v1.8.1`). Auto-generated notes would replace curated prose with
+# a commit list, so this workflow publishes the message verbatim and fails when
+# the tag has none.
+#
+# What ships is the COMPOSER PAYLOAD, not the whole repository: `git archive`
+# applies `.gitattributes`, whose export-ignore strips `.github/`, `docs/`,
+# `scripts/` and `README.md`. So the archive holds `assets/`, `config/`, `Build/`
+# and the manifests — byte-for-byte what lands in a consumer's
+# `.Build/vendor/netresearch/typo3-ci-workflows/`.
+#
+# That is deliberate, and it is the half worth attesting. The reusable workflows
+# are never downloaded as an artefact: `uses: …@main` is resolved by GitHub from
+# the git ref, so a signed archive of them would attest something nobody
+# installs. The runner IS installed, and a consumer can now check the copy in
+# their vendor directory against a signed checksum.
+#
+# Plus `SHA256SUMS.txt`, its Cosign signature, and SLSA build provenance — all
+# created in this one job BEFORE the release is published, so there is no window
+# in which unattested assets are downloadable.
+#
+# Verify a downloaded archive:
+#   gh attestation verify typo3-ci-workflows-vX.Y.Z.tar.gz --repo netresearch/typo3-ci-workflows
+#   cosign verify-blob \
+#     --bundle SHA256SUMS.txt.sigstore.json \
+#     --certificate-identity-regexp "^https://github\.com/netresearch/typo3-ci-workflows/\.github/workflows/self-release\.yml@" \
+#     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+#     SHA256SUMS.txt
+#   sha256sum --check SHA256SUMS.txt
+#
+# Consumers referencing the workflows with `@main` are unaffected by this file;
+# it changes what a tag produces, not what a workflow does.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions: {}
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write          # release upload
+      id-token: write          # OIDC for sigstore (cosign + attest)
+      attestations: write      # GitHub native attestation API
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Verify the tag is annotated and signed
+        env:
+          TAG_REF: ${{ github.ref }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG_NAME="${TAG_REF#refs/tags/}"
+
+          REF_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG_NAME}")
+          TAG_TYPE=$(echo "$REF_INFO" | jq -r '.object.type')
+          if [[ "$TAG_TYPE" != "tag" ]]; then
+            echo "::error::Tag ${TAG_NAME} is lightweight (object.type=${TAG_TYPE}). Releases require annotated, signed tags."
+            echo "::error::Recreate locally:  git tag -s -F <notes-file> ${TAG_NAME} <sha> && git push origin ${TAG_NAME}"
+            exit 1
+          fi
+
+          TAG_OBJ_SHA=$(echo "$REF_INFO" | jq -r '.object.sha')
+          VERIFY=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${TAG_OBJ_SHA}" --jq '.verification')
+          VERIFIED=$(echo "$VERIFY" | jq -r '.verified')
+          REASON=$(echo "$VERIFY" | jq -r '.reason')
+          if [[ "$VERIFIED" != "true" ]]; then
+            echo "::error::Tag ${TAG_NAME} is not signed (reason: ${REASON}). Releases require locally-signed tags."
+            echo "::error::Recreate locally:  git tag -s -F <notes-file> ${TAG_NAME} <sha> && git push origin ${TAG_NAME}"
+            exit 1
+          fi
+          echo "Tag ${TAG_NAME} verified as signed (reason: ${REASON})."
+
+      - name: Checkout at tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          # The next step reads the tag's MESSAGE, so the annotated tag object
+          # has to be in the checkout — a checkout that resolved the tag to its
+          # commit would leave a lightweight ref and no message at all. Asking
+          # for tags is necessary; the next step still asserts it rather than
+          # trusting this input, because "no message" and "message not fetched"
+          # would otherwise look the same.
+          fetch-tags: true
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read the release notes from the tag message
+        id: notes
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Assert the annotation is here before reading it. If the checkout
+          # left a lightweight ref, every atom below returns empty and the run
+          # would fail on "no message body" — a misleading error about the tag
+          # the maintainer wrote, for a problem in the fetch. Recover, then
+          # insist: the repository is public, so this needs no credentials
+          # (checkout ran with persist-credentials: false).
+          if [[ "$(git cat-file -t "refs/tags/${TAG_NAME}" 2>/dev/null || true)" != "tag" ]]; then
+            echo "Tag object not in the checkout — fetching refs/tags/${TAG_NAME}."
+            git fetch --force --no-recurse-submodules origin "refs/tags/${TAG_NAME}:refs/tags/${TAG_NAME}"
+          fi
+          if [[ "$(git cat-file -t "refs/tags/${TAG_NAME}" 2>/dev/null || true)" != "tag" ]]; then
+            echo "::error::refs/tags/${TAG_NAME} is not an annotated tag object in this checkout; cannot read release notes from it."
+            exit 1
+          fi
+
+          # NOT %(contents): on a signed tag that atom includes the
+          # `-----BEGIN SSH SIGNATURE-----` block, and every tag here is signed,
+          # so the signature would be pasted into the release body. %(contents:body)
+          # is the message without subject and without signature.
+          #
+          # The subject is the first line. This repo's convention makes it the
+          # tag name ("v1.8.2\n\nTwo runner-detection fixes. ..."), which belongs
+          # nowhere in the body — the release is already titled by its tag. Keep
+          # it only when it is something else, so a tag written to a different
+          # convention does not silently lose its first line.
+          SUBJECT="$(git tag -l --format='%(contents:subject)' "$TAG_NAME")"
+          git tag -l --format='%(contents:body)' "$TAG_NAME" > notes.md
+          if [[ "$SUBJECT" != "$TAG_NAME" ]]; then
+            { printf '%s\n\n' "$SUBJECT"; cat notes.md; } > notes.next
+            mv notes.next notes.md
+          fi
+          # An annotated tag can carry a subject and no body, and an empty
+          # release page is indistinguishable from one nobody wrote. Refuse
+          # rather than publish it: GitHub Immutable Releases lock the tag
+          # string once a release on it exists, so this is not correctable.
+          # Whitespace-only counts as empty; a lone newline is size 1.
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::Tag ${TAG_NAME} has no message body. The tag message is the release notes; recreate the tag with: git tag -s -F <file> ${TAG_NAME}"
+            exit 1
+          fi
+          echo "--- release notes ---"
+          cat notes.md
+
+      - name: Build the archives
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/releases
+          PREFIX="typo3-ci-workflows-${TAG_NAME}"
+          # git archive applies .gitattributes export-ignore, so the archive
+          # matches what Composer installs from this tag rather than the
+          # working tree.
+          git archive --format=tar.gz --prefix="${PREFIX}/" -o "dist/releases/${PREFIX}.tar.gz" "$TAG_NAME"
+          git archive --format=zip    --prefix="${PREFIX}/" -o "dist/releases/${PREFIX}.zip"    "$TAG_NAME"
+          (cd dist/releases && sha256sum ./*.tar.gz ./*.zip > SHA256SUMS.txt)
+          echo "=== Release packages ==="
+          ls -lh dist/releases/
+          cat dist/releases/SHA256SUMS.txt
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign SHA256SUMS with Cosign (keyless)
+        working-directory: dist/releases
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle SHA256SUMS.txt.sigstore.json \
+            SHA256SUMS.txt
+
+      - name: Verify the Cosign signature
+        working-directory: dist/releases
+        run: |
+          set -euo pipefail
+          # The keyless certificate's SAN is the workflow that signed — this
+          # file, in this repository. Anchored, and pinned to the exact workflow
+          # path: an org-wide regex would accept a signature minted by any
+          # workflow in netresearch.
+          cosign verify-blob \
+            --bundle SHA256SUMS.txt.sigstore.json \
+            --certificate-identity-regexp "^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/self-release\.yml@" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            SHA256SUMS.txt
+
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/releases/*.tar.gz
+            dist/releases/*.zip
+            dist/releases/SHA256SUMS.txt
+
+      - name: Create the GitHub Release
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `gh release create` rather than a third-party action: gh is on the
+          # runner, this workflow already uses it to verify the tag, and a
+          # release path in a supply-chain repository is the last place to add
+          # a dependency it does not need. It uploads the assets as part of
+          # creation, which is the property this job depends on — the release
+          # becomes visible with its signature and provenance already attached,
+          # never before.
+          gh release create "$TAG_NAME" \
+            --title "$TAG_NAME" \
+            --notes-file notes.md \
+            --verify-tag \
+            dist/releases/*
