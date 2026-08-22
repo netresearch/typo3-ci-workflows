@@ -81,7 +81,7 @@ jobs:
           TAG_TYPE=$(echo "$REF_INFO" | jq -r '.object.type')
           if [[ "$TAG_TYPE" != "tag" ]]; then
             echo "::error::Tag ${TAG_NAME} is lightweight (object.type=${TAG_TYPE}). Releases require annotated, signed tags."
-            echo "::error::Recreate locally:  git tag -s -m \"${TAG_NAME}\" ${TAG_NAME} && git push origin ${TAG_NAME}"
+            echo "::error::Recreate locally:  git tag -s -F <notes-file> ${TAG_NAME} <sha> && git push origin ${TAG_NAME}"
             exit 1
           fi
 
@@ -91,7 +91,7 @@ jobs:
           REASON=$(echo "$VERIFY" | jq -r '.reason')
           if [[ "$VERIFIED" != "true" ]]; then
             echo "::error::Tag ${TAG_NAME} is not signed (reason: ${REASON}). Releases require locally-signed tags."
-            echo "::error::Recreate locally:  git tag -s -m \"${TAG_NAME}\" ${TAG_NAME} && git push origin ${TAG_NAME}"
+            echo "::error::Recreate locally:  git tag -s -F <notes-file> ${TAG_NAME} <sha> && git push origin ${TAG_NAME}"
             exit 1
           fi
           echo "Tag ${TAG_NAME} verified as signed (reason: ${REASON})."
