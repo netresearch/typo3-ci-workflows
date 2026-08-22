@@ -254,17 +254,28 @@ fi
 #    Measured on netresearch/contexts: 12 files rewritten by the runner, 0
 #    reported by composer ci:test:php:cgl on the same tree.
 printf 'cgl config\n'
-cgl_root="${FIXTURES}/cgl-build-only"
-mkdir -p "${cgl_root}/Build"
-printf '{"name":"netresearch/fixture-cgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
-    > "${cgl_root}/composer.json"
-printf '<?php\n' > "${cgl_root}/Build/php-cs-fixer.php"
-got="$(derive "${cgl_root}" CGL_CONFIG)"
-if [[ "${got}" == "Build/php-cs-fixer.php" ]]; then
-    pass "config under Build/ is found (${got})"
-else
-    fail "config under Build/ not found: got '${got:-<empty>}'"
-fi
+# One fixture per layout the fleet actually uses, read off the git trees rather
+# than guessed: guessing is what left Build/.php-cs-fixer.dist.php — ten of the
+# twenty-five extensions — out of the first version of this list.
+declare -a CGL_LAYOUTS=(
+    "Build/.php-cs-fixer.dist.php"
+    "Build/.php-cs-fixer.php"
+    "Build/php-cs-fixer.php"
+    "Build/php-cs-fixer/.php-cs-fixer.php"
+)
+for layout in "${CGL_LAYOUTS[@]}"; do
+    root="${FIXTURES}/cgl-$(printf '%s' "${layout}" | tr '/.' '--')"
+    mkdir -p "${root}/$(dirname "${layout}")"
+    printf '{"name":"netresearch/fixture-cgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+        > "${root}/composer.json"
+    printf '<?php\n' > "${root}/${layout}"
+    got="$(derive "${root}" CGL_CONFIG)"
+    if [[ "${got}" == "${layout}" ]]; then
+        pass "${layout} is found"
+    else
+        fail "${layout} not found: got '${got:-<empty>}'"
+    fi
+done
 
 # Both root names are php-cs-fixer's own, so neither may be called non-standard.
 cgl_root_alt="${FIXTURES}/cgl-root-nondist"
