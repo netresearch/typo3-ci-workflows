@@ -495,6 +495,29 @@ fi
 # was rewritten in v1.7.0, which left `-s e2e` running `docker run … ""` and
 # failing with "invalid reference format" for every consumer.
 E2E_BASE_URL="${E2E_BASE_URL:-}"
+
+# The image tag follows the CONSUMER's Playwright, not a version pinned here.
+# The container runs `npm ci`, so it installs whatever package-lock.json
+# resolves — and the image ships browsers for exactly one release. A fixed
+# default drifts the moment a consumer's lockfile moves and then fails with
+#
+#   Error: browserType.launch: Executable doesn't exist at
+#   /ms-playwright/chromium_headless_shell-####/chrome-headless-shell-linux64/…
+#
+# which reads as a broken image rather than as a version skew. package.json is
+# not enough: a caret range says ^1.61.1 while the lockfile resolves 1.62.1,
+# and it is the resolved one npm installs.
+#
+# jq rather than node: the host running this has no node (that is what the
+# container is for), and jq is already a dependency of this script.
+# PROJECT_ROOT rather than ROOT_DIR: ROOT_DIR is assigned further down, so
+# reading it here silently resolves /package-lock.json and finds nothing.
+if [[ -z "${IMAGE_PLAYWRIGHT:-}" ]] && [[ -f "${PROJECT_ROOT}/package-lock.json" ]] && type jq >/dev/null 2>&1; then
+    PLAYWRIGHT_VERSION="$(jq -r '.packages["node_modules/@playwright/test"].version // empty' "${PROJECT_ROOT}/package-lock.json" 2>/dev/null)"
+    [[ -n "${PLAYWRIGHT_VERSION}" ]] && IMAGE_PLAYWRIGHT="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
+fi
+
+# Fallback for a consumer with no lockfile, and the explicit-override path.
 IMAGE_PLAYWRIGHT="${IMAGE_PLAYWRIGHT:-mcr.microsoft.com/playwright:v1.60.0-noble}"
 
 SUPPORTED_PHP_VERSIONS="${SUPPORTED_PHP_VERSIONS:-8.2 8.3 8.4 8.5}"
