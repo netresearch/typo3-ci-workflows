@@ -312,4 +312,32 @@ else
     fail "expected 2 conditional --config invocations, found ${cgl_lines}"
 fi
 
+# 9. The functional config is found where the extension keeps it.
+#    The passkeys layout: a functional config at Build/phpunit.functional.xml next
+# to a Build/phpunit.xml that carries only unit and fuzz. Falling back to the
+# latter does not fail loudly — it runs phpunit against a file whose testsuite
+# list has no functional entry, which reads as a configuration error in the
+# extension rather than a detection miss here.
+printf 'phpunit config layouts\n'
+pk="${FIXTURES}/phpunit-dot-functional"
+mkdir -p "${pk}/Build"
+printf '{"name":"netresearch/fixture-pk","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${pk}/composer.json"
+printf '<phpunit>\n  <testsuites>\n    <testsuite name="unit"><directory>../Tests/Unit</directory></testsuite>\n  </testsuites>\n</phpunit>\n' \
+    > "${pk}/Build/phpunit.xml"
+printf '<phpunit>\n  <testsuites>\n    <testsuite name="functional"><directory>../Tests/Functional</directory></testsuite>\n  </testsuites>\n</phpunit>\n' \
+    > "${pk}/Build/phpunit.functional.xml"
+got="$(derive "${pk}" PHPUNIT_FUNCTIONAL_CONFIG)"
+if [[ "${got}" == "Build/phpunit.functional.xml" ]]; then
+    pass "Build/phpunit.functional.xml wins over the unit config"
+else
+    fail "functional config: got '${got:-<empty>}', expected Build/phpunit.functional.xml"
+fi
+got="$(derive "${pk}" PHPUNIT_CONFIG)"
+if [[ "${got}" == "Build/phpunit.xml" ]]; then
+    pass "the unit config is still Build/phpunit.xml"
+else
+    fail "unit config: got '${got:-<empty>}'"
+fi
+
 exit "${FAILED}"
