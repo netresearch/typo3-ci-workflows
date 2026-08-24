@@ -427,6 +427,24 @@ INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infecti
 # 12 files rewritten, 0 reported by composer ci:test:php:cgl on the same tree).
 CGL_CONFIG="${CGL_CONFIG:-$(detect_config 'cgl config' '.php-cs-fixer.php|.php-cs-fixer.dist.php' .php-cs-fixer.php .php-cs-fixer.dist.php Build/.php-cs-fixer.dist.php Build/.php-cs-fixer.php Build/php-cs-fixer.php Build/php-cs-fixer/.php-cs-fixer.php)}"
 
+# A PHPUnit config carrying <coverage><report> makes coverage mandatory: PHPUnit
+# refuses to run at all without a driver. The suites otherwise pass
+# -dxdebug.mode=off, which is the right default — coverage is slow — so a run
+# against such a config used to end at "No tests executed!" with the driver
+# switched off underneath it. Read the demand from the config instead of asking
+# the caller to know about it.
+xdebug_arg_for() {
+    local config="${1:-}"
+    if [[ -n "${config}" ]] && [[ -f "${PROJECT_ROOT}/${config}" ]] \
+       && grep -qE '<report[ >]' "${PROJECT_ROOT}/${config}"; then
+        printf -- '-dxdebug.mode=coverage'
+    else
+        printf -- '-dxdebug.mode=off'
+    fi
+}
+PHPUNIT_XDEBUG_ARG="$(xdebug_arg_for "${PHPUNIT_CONFIG}")"
+PHPUNIT_FUNCTIONAL_XDEBUG_ARG="$(xdebug_arg_for "${PHPUNIT_FUNCTIONAL_CONFIG}")"
+
 # Which testsuite to select inside those configs. The fleet writes the same
 # suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read
 # out of the config and matched loosely rather than configured. A config with
@@ -700,6 +718,16 @@ else
     XDEBUG_CONFIG="client_port=${PHP_XDEBUG_PORT} client_host=${CONTAINER_HOST}"
 fi
 
+# Xdebug 3 lets the XDEBUG_MODE environment variable win over the ini setting,
+# so -dxdebug.mode=coverage alone is not enough — the container is handed
+# XDEBUG_MODE=off right next to it and that is what takes effect. Both have to
+# agree, which is why this sits after the block above rather than with the
+# detection.
+if [[ "${PHPUNIT_XDEBUG_ARG}" == *coverage ]] || [[ "${PHPUNIT_FUNCTIONAL_XDEBUG_ARG}" == *coverage ]]; then
+    XDEBUG_MODE="-e XDEBUG_MODE=coverage"
+    notice "coverage: the PHPUnit config asks for a report, so the driver stays on (slower)"
+fi
+
 # If -t <major> was given, require that TYPO3 core version before running
 # the suite. Runs inside the same PHP image / user mapping / COMPOSER cache
 # as the rest of the script so the resolved composer.lock and .Build/vendor
@@ -863,7 +891,7 @@ case ${TEST_SUITE} in
         fi
         ;;
     functional)
-        COMMAND=(php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} ${FUNCTIONAL_TESTSUITE:+--testsuite "${FUNCTIONAL_TESTSUITE}"} --exclude-group not-${DBMS} "$@")
+        COMMAND=(php ${PHP_FUNCTIONAL_OPTS} ${PHPUNIT_FUNCTIONAL_XDEBUG_ARG} ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} ${FUNCTIONAL_TESTSUITE:+--testsuite "${FUNCTIONAL_TESTSUITE}"} --exclude-group not-${DBMS} "$@")
 
         case ${DBMS} in
             mariadb)
@@ -989,7 +1017,7 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     unit)
-        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${UNIT_TESTSUITE:+--testsuite "${UNIT_TESTSUITE}"} "$@")
+        COMMAND=(php ${PHP_OPCACHE_OPTS} ${PHPUNIT_XDEBUG_ARG} ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${UNIT_TESTSUITE:+--testsuite "${UNIT_TESTSUITE}"} "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name unit-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;

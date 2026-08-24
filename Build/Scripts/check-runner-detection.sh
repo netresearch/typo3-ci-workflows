@@ -369,4 +369,48 @@ if [[ -n "${e2e_line}" ]]; then
     fi
 fi
 
+# 11. A PHPUnit config with <coverage><report> makes coverage mandatory, so the
+#     driver has to stay on for that run. Both places must agree: Xdebug 3 lets
+#     the XDEBUG_MODE environment variable win over -dxdebug.mode, so setting
+#     only the ini flag leaves XDEBUG_MODE=off in force and the run ends at
+#     "No tests executed!" — which is how t3x-contexts_wurfl and two others were
+#     blocked from migrating (#209).
+printf 'coverage-demanding config\n'
+cov_root="${FIXTURES}/coverage-report"
+mkdir -p "${cov_root}/Build"
+printf '{"name":"netresearch/fixture-cov","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${cov_root}/composer.json"
+printf '<phpunit>\n  <coverage>\n    <report><clover outputFile="c.xml"/></report>\n  </coverage>\n  <testsuites>\n    <testsuite name="unit"><directory>../Tests/Unit</directory></testsuite>\n  </testsuites>\n</phpunit>\n' \
+    > "${cov_root}/Build/phpunit.xml"
+got="$(derive "${cov_root}" PHPUNIT_XDEBUG_ARG)"
+if [[ "${got}" == "-dxdebug.mode=coverage" ]]; then
+    pass "a <report> block turns the driver on (${got})"
+else
+    fail "config demanding coverage got '${got:-<empty>}'"
+fi
+# XDEBUG_MODE is assigned below the block `derive` sources, so this one is read
+# from the source: the override has to exist AND sit after the default is set,
+# or it would be overwritten right back to off.
+mode_line="$(grep -n 'XDEBUG_MODE="-e XDEBUG_MODE=coverage"' "${RUNNER}" | head -n1 | cut -d: -f1)"
+off_line="$(grep -n 'XDEBUG_MODE="-e XDEBUG_MODE=off"' "${RUNNER}" | head -n1 | cut -d: -f1)"
+if [[ -n "${mode_line}" ]] && [[ -n "${off_line}" ]] && [[ "${mode_line}" -gt "${off_line}" ]]; then
+    pass "the environment variable is switched too, after the default (${off_line} -> ${mode_line})"
+else
+    fail "XDEBUG_MODE would override the ini flag (coverage at ${mode_line:-none}, off at ${off_line:-none})"
+fi
+
+# …and a config without one keeps the fast default.
+plain="${FIXTURES}/coverage-none"
+mkdir -p "${plain}/Build"
+printf '{"name":"netresearch/fixture-plain","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${plain}/composer.json"
+printf '<phpunit>\n  <testsuites>\n    <testsuite name="unit"><directory>../Tests/Unit</directory></testsuite>\n  </testsuites>\n</phpunit>\n' \
+    > "${plain}/Build/phpunit.xml"
+got="$(derive "${plain}" PHPUNIT_XDEBUG_ARG)"
+if [[ "${got}" == "-dxdebug.mode=off" ]]; then
+    pass "without a report block the driver stays off"
+else
+    fail "plain config got '${got:-<empty>}' — coverage is slow and must not be the default"
+fi
+
 exit "${FAILED}"
