@@ -21,10 +21,14 @@ trap 'clean_up;exit 2' SIGINT
 wait_for() {
     local host=${1}
     local port=${2}
+    # Third argument: seconds to wait, default 10 as before. A database
+    # container initialising its data directory on a cold cache needs more than
+    # that, and the caller knows which service it is waiting for.
+    local attempts=${3:-10}
     local test_command="
         COUNT=0;
         while ! nc -z ${host} ${port}; do
-            if [ \"\${COUNT}\" -gt 10 ]; then
+            if [ \"\${COUNT}\" -gt ${attempts} ]; then
               echo \"Can not connect to ${host} port ${port}. Aborting.\";
               exit 1;
             fi;
@@ -513,6 +517,27 @@ fi
 # was rewritten in v1.7.0, which left `-s e2e` running `docker run … ""` and
 # failing with "invalid reference format" for every consumer.
 E2E_BASE_URL="${E2E_BASE_URL:-}"
+# Set to 1 in runTests.conf to have -s e2e build a TYPO3 instance even when
+# the extension defines none of the e2e_provision_* hooks — a bare instance
+# with no site and no content, which is useful for a suite that creates its
+# own fixtures through the backend.
+E2E_PROVISION="${E2E_PROVISION:-}"
+
+# Directory holding the e2e suite's package.json, lockfile and Playwright
+# config, relative to the repository root. Empty means the root, which is where
+# most consumers keep it; t3x-rte_ckeditor_image keeps it in Tests/E2E. Both the
+# lockfile probe below and the container working directory follow this, so a
+# suite in a subdirectory resolves its own Playwright version instead of
+# falling back to this script's pin.
+E2E_TEST_DIR="${E2E_TEST_DIR:-}"
+
+# Both are filled in by e2e-provision.sh when it builds an instance, and are
+# declared here because this script expands them: the backend password it
+# generated, and the TYPO3 major it settled on. Empty when nothing was
+# provisioned, in which case the environment supplies them or the suite does
+# without.
+E2E_ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-}"
+E2E_TYPO3_VERSION="${E2E_TYPO3_VERSION:-}"
 
 # The image tag follows the CONSUMER's Playwright, not a version pinned here.
 # The container runs `npm ci`, so it installs whatever package-lock.json
@@ -530,8 +555,9 @@ E2E_BASE_URL="${E2E_BASE_URL:-}"
 # container is for), and jq is already a dependency of this script.
 # PROJECT_ROOT rather than ROOT_DIR: ROOT_DIR is assigned further down, so
 # reading it here silently resolves /package-lock.json and finds nothing.
-if [[ -z "${IMAGE_PLAYWRIGHT:-}" ]] && [[ -f "${PROJECT_ROOT}/package-lock.json" ]] && type jq >/dev/null 2>&1; then
-    PLAYWRIGHT_VERSION="$(jq -r '.packages["node_modules/@playwright/test"].version // empty' "${PROJECT_ROOT}/package-lock.json" 2>/dev/null)"
+E2E_LOCKFILE="${PROJECT_ROOT}${E2E_TEST_DIR:+/${E2E_TEST_DIR}}/package-lock.json"
+if [[ -z "${IMAGE_PLAYWRIGHT:-}" ]] && [[ -f "${E2E_LOCKFILE}" ]] && type jq >/dev/null 2>&1; then
+    PLAYWRIGHT_VERSION="$(jq -r '.packages["node_modules/@playwright/test"].version // empty' "${E2E_LOCKFILE}" 2>/dev/null)"
     [[ -n "${PLAYWRIGHT_VERSION}" ]] && IMAGE_PLAYWRIGHT="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 fi
 
@@ -690,6 +716,7 @@ if declare -f php_image >/dev/null 2>&1; then
 fi
 IMAGE_PHP="${IMAGE_PHP:-${TYPO3_IMAGE_PREFIX}core-testing-$(echo "php${PHP_VERSION}" | sed -e 's/\.//'):latest}"
 IMAGE_ALPINE="${IMAGE_PREFIX}alpine:3.20"
+IMAGE_APACHE="${IMAGE_APACHE:-${TYPO3_IMAGE_PREFIX}core-testing-apache24:1.7}"
 IMAGE_MARIADB="docker.io/mariadb:${DBMS_VERSION}"
 IMAGE_MYSQL="docker.io/mysql:${DBMS_VERSION}"
 IMAGE_POSTGRES="docker.io/postgres:${DBMS_VERSION}-alpine"
@@ -832,6 +859,37 @@ case ${TEST_SUITE} in
         #      address, typically a local stack.
         # No fourth way: with none of them set the run stops rather than
         # guessing a host and testing against whatever answers.
+        # 0. e2e_provision from e2e-provision.sh — for an extension that owns
+        #    no environment at all and wants the runner to build one: MariaDB,
+        #    a composer-installed TYPO3, PHP-FPM and Apache. Opted into by
+        #    defining any of the e2e_provision_* hooks in the conf, so an
+        #    extension that only needs the address of a running instance is
+        #    unaffected.
+        E2E_PROVISIONED=0
+        if [[ -z "${TYPO3_BASE_URL:-}" ]] \
+           && ! declare -F e2e_target >/dev/null 2>&1 \
+           && [[ -z "${E2E_BASE_URL}" ]] \
+           && { declare -F e2e_provision_packages >/dev/null 2>&1 \
+                || declare -F e2e_provision_typoscript >/dev/null 2>&1 \
+                || declare -F e2e_provision_seed >/dev/null 2>&1 \
+                || declare -F e2e_provision_site_dependencies >/dev/null 2>&1 \
+                || [[ "${E2E_PROVISION:-}" == "1" ]]; }; then
+            PROVISION_LIB="$(cd "$(dirname "$(realpath "$0")")" && pwd)/e2e-provision.sh"
+            if [[ ! -f "${PROVISION_LIB}" ]]; then
+                echo "runTests.sh: ${PROVISION_LIB} is missing — the package is" >&2
+                echo "             installed incompletely." >&2
+                clean_up
+                exit 1
+            fi
+            # shellcheck source=/dev/null
+            source "${PROVISION_LIB}"
+            if ! e2e_provision; then
+                clean_up
+                exit 1
+            fi
+            E2E_PROVISIONED=1
+        fi
+
         if [[ -z "${TYPO3_BASE_URL:-}" ]] && declare -F e2e_target >/dev/null 2>&1; then
             TYPO3_BASE_URL="$(e2e_target)"
         fi
@@ -872,9 +930,34 @@ case ${TEST_SUITE} in
         fi
         [[ -n "${E2E_EXTRA_ARGS}" ]] && echo "e2e container arguments: ${E2E_EXTRA_ARGS}"
 
-        COMMAND="npm ci && npx playwright test $*"
+        # `npm ci` needs a lockfile and refuses without one. A consumer that
+        # gitignores it (several here do) would get EUSAGE and no tests, so fall
+        # back to `npm install --no-save` and say so — the browsers in the image
+        # are pinned to one release, and without a lockfile the resolved
+        # Playwright can drift away from them.
+        E2E_WORK_DIR="${ROOT_DIR}${E2E_TEST_DIR:+/${E2E_TEST_DIR}}"
+        if [[ -f "${E2E_WORK_DIR}/package-lock.json" ]]; then
+            COMMAND="npm ci && npx playwright test $*"
+        else
+            notice "e2e: no package-lock.json in ${E2E_TEST_DIR:-the repository root}, using npm install; the Playwright version is not pinned against ${IMAGE_PLAYWRIGHT}"
+            COMMAND="npm install --no-save && npx playwright test $*"
+        fi
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} ${E2E_EXTRA_ARGS} --name e2e-${SUFFIX} \
+            -w "${E2E_WORK_DIR}" \
             -e TYPO3_BASE_URL="${TYPO3_BASE_URL}" \
+            `# BASE_URL as well: TYPO3_BASE_URL is this script's contract, but a` \
+            `# Playwright config conventionally reads BASE_URL, and requiring every` \
+            `# consumer to rename it in playwright.config.ts buys nothing.` \
+            -e BASE_URL="${TYPO3_BASE_URL}" \
+            `# A backend test has to log in, and when this run provisioned the` \
+            `# instance the password is only known here. TYPO3_BACKEND_PASSWORD from` \
+            `# the environment wins, so a suite pointed at an existing instance keeps` \
+            `# using its own credential.` \
+            -e TYPO3_BACKEND_PASSWORD="${TYPO3_BACKEND_PASSWORD:-${E2E_ADMIN_PASSWORD:-}}" \
+            `# The variant and the effective TYPO3 major: a suite skips or adapts` \
+            `# assertions by them, and both are decided here, not in the test.` \
+            -e E2E_VARIANT="${E2E_VARIANT:-}" \
+            -e TYPO3_VERSION="${E2E_TYPO3_VERSION:-${TYPO3_VERSION}}" \
             -e CI="${CI:-}" \
             -e npm_config_cache="${ROOT_DIR}/.Build/.cache/npm" \
             ${IMAGE_PLAYWRIGHT} /bin/bash -c "${COMMAND}"
@@ -888,6 +971,9 @@ case ${TEST_SUITE} in
         # only this point knows which happened.
         if declare -F e2e_teardown >/dev/null 2>&1; then
             e2e_teardown
+        fi
+        if [[ "${E2E_PROVISIONED}" == "1" ]]; then
+            e2e_provision_teardown "${SUITE_EXIT_CODE}"
         fi
         ;;
     functional)
