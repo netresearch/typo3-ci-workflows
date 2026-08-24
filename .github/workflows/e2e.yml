@@ -128,7 +128,11 @@ on:
           TYPO3, starting any servers, AND running the tests. The
           workflow only handles checkout, env setup, and artifact
           upload around it. Env vars passed in: E2E_VARIANT,
-          E2E_TYPO3_VERSION, E2E_TYPO3_PACKAGES (JSON array). Empty
+          E2E_TYPO3_VERSION, E2E_TYPO3_PACKAGES (JSON array) and
+          COMPOSER_RETRY. Route every network-facing composer call
+          through COMPOSER_RETRY — the default pipeline does, a script
+          that does not is one upstream HTTP 504 away from a red matrix
+          (see the note at the "Run custom setup script" step). Empty
           string (default) = use built-in default pipeline.
         type: string
         default: ''
@@ -395,6 +399,21 @@ jobs:
       # using the Docker daemon preinstalled on `ubuntu-latest`. If your
       # script needs Node/npm on the host, install them inside the
       # script itself so the dependency is explicit.
+      #
+      # `composer_retry` is NOT applied for you here: the default mode's
+      # install step is skipped in scripted mode, so a script that calls
+      # `composer install` directly gets Composer's own behaviour — which
+      # aborts on the first transport error and does not fall back to git
+      # (`sourceFallback` is off by default and `setSourceFallback()` is
+      # deprecated for removal in Composer 2.11). An intermittent HTTP 504
+      # from api.github.com then fails every matrix cell. COMPOSER_RETRY is
+      # exported for this reason; `eval` it and call `composer_retry`:
+      #
+      #   eval "$COMPOSER_RETRY"
+      #   composer_retry install --no-progress
+      #
+      # If the script runs composer inside a container, pass the variable
+      # in (`-e COMPOSER_RETRY="${COMPOSER_RETRY:-}"`) and eval it there.
       - name: Run custom setup script
         if: inputs.setup-script != ''
         env:
