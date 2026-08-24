@@ -66,6 +66,9 @@ e2e_package_name() {
         sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
             "${ROOT_DIR}/composer.json" 2>/dev/null | head -n1
     fi
+    # Printing nothing is a valid answer — the caller checks for an empty name
+    # and reports it — so a failed read must not make the function itself fail.
+    return 0
 }
 
 # Bring up the instance. On success TYPO3_BASE_URL names the Apache container
@@ -426,4 +429,7 @@ e2e_provision_teardown() {
     else
         echo "e2e environment kept at ${ROOT_DIR}/.Build/e2e-typo3 for inspection"
     fi
+    # Teardown must never change the run's verdict: the suite's exit code has
+    # already been decided by the time this is called.
+    return 0
 }
