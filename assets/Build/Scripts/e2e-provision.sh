@@ -408,9 +408,11 @@ HTACCESS
         "http://apache-e2e-${SUFFIX}:80/" 2>/dev/null)
     echo "Frontend: HTTP ${code:-none}"
     if [[ "${code}" != "200" ]]; then
-        echo "e2e: the frontend answered ${code:-nothing}, not 200. TYPO3 is up but" >&2
-        echo "     not serving — running the suite now would report test failures" >&2
-        echo "     for a broken instance." >&2
+        # 000 is curl's "no reply at all" — the container went away or never
+        # served; anything else is an HTTP answer from a broken instance.
+        echo "e2e: the frontend answered ${code:-nothing}, not 200. Running the suite" >&2
+        echo "     now would report test failures for an instance that is not" >&2
+        echo "     serving; 000 means nothing answered on that address." >&2
         return 1
     fi
 
