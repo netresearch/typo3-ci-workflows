@@ -352,12 +352,21 @@ if [[ -n "${e2e_line}" ]]; then
 else
     fail "no e2e_teardown() call — a conf-built environment cannot clean up after itself"
 fi
-# It has to sit AFTER the exit code is captured, or the hook cannot branch on it.
-exit_line="$(grep -n 'SUITE_EXIT_CODE=\$?' "${RUNNER}" | awk -F: -v t="${e2e_line%%:*}" '$1 < t {n=$1} END {print n}')"
-if [[ -n "${e2e_line}" ]] && [[ -n "${exit_line}" ]]; then
-    pass "e2e_teardown() runs after SUITE_EXIT_CODE is set (line ${exit_line} before ${e2e_line%%:*})"
-else
-    fail "e2e_teardown() does not follow a SUITE_EXIT_CODE assignment"
+# It has to sit after the exit code is captured AND inside the same case branch.
+# "Some assignment appears earlier in the file" is not the same claim: the runner
+# has one per suite, so a hook dropped into the wrong branch would still satisfy
+# it. The test is that no `;;` separates the two.
+if [[ -n "${e2e_line}" ]]; then
+    between="$(awk -F: -v t="${e2e_line%%:*}" '
+        NR < t { if ($0 ~ /SUITE_EXIT_CODE=\$\?/) last = NR; if ($0 ~ /^[[:space:]]*;;[[:space:]]*$/) sep = NR }
+        END { print last "|" sep }' "${RUNNER}")"
+    exit_line="${between%%|*}"
+    sep_line="${between##*|}"
+    if [[ -n "${exit_line}" ]] && { [[ -z "${sep_line}" ]] || [[ "${sep_line}" -lt "${exit_line}" ]]; }; then
+        pass "e2e_teardown() runs after SUITE_EXIT_CODE in the same branch (${exit_line} -> ${e2e_line%%:*})"
+    else
+        fail "e2e_teardown() is not in the branch that sets SUITE_EXIT_CODE (assignment ${exit_line:-none}, ;; at ${sep_line:-none})"
+    fi
 fi
 
 exit "${FAILED}"
