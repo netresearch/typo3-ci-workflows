@@ -220,10 +220,26 @@ SITECONFIG_EOF
     # TYPO3 major -> composer constraint. e2e needs v13 or newer; anything
     # older is raised rather than silently tested against a version the suite
     # was never written for.
-    # -t is optional, so TYPO3_VERSION may be empty; the hooks branch on this
-    # value and must never see a blank. 11 and 12 are raised because the e2e
-    # suites were written against v13 and newer.
-    E2E_TYPO3_VERSION="${TYPO3_VERSION:-13}"
+    # Which TYPO3 the instance gets, in this order:
+    #
+    #   1. E2E_TYPO3_VERSION from the environment — what the reusable e2e
+    #      workflow already passes, as a constraint like "^14.3". This is the
+    #      one to use in CI, because it does NOT drag in `-t`.
+    #   2. TYPO3_VERSION, i.e. `-t <major>`, for a local run.
+    #   3. 13.
+    #
+    # Keeping 1 separate from 2 matters: `-t` is not suite-gated, so it also
+    # rewrites the extension's own composer.json and runs a full
+    # `composer require typo3/cms-core:<constraint>` before anything else. For
+    # an e2e run that is both pointless — the instance is installed separately,
+    # from scratch — and a failure path, since a resolve that fails there kills
+    # the job before provisioning starts. A constraint is reduced to its major;
+    # anything unparseable falls through to 13 rather than guessing.
+    E2E_TYPO3_VERSION="${E2E_TYPO3_VERSION:-${TYPO3_VERSION:-13}}"
+    if [[ ! "${E2E_TYPO3_VERSION}" =~ ^[0-9]+$ ]]; then
+        E2E_TYPO3_VERSION="$(printf '%s' "${E2E_TYPO3_VERSION}" | sed -n 's/^[^0-9]*\([0-9]\+\).*/\1/p')"
+        E2E_TYPO3_VERSION="${E2E_TYPO3_VERSION:-13}"
+    fi
     if [[ "${E2E_TYPO3_VERSION}" == "11" || "${E2E_TYPO3_VERSION}" == "12" ]]; then
         echo "e2e: TYPO3 ${E2E_TYPO3_VERSION} is not supported here, using 13."
         E2E_TYPO3_VERSION="13"
