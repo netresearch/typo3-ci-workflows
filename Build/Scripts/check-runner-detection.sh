@@ -340,4 +340,24 @@ else
     fail "unit config: got '${got:-<empty>}'"
 fi
 
+# 10. The e2e suite calls e2e_teardown() when the conf defines one, and the
+#     suite's exit code is readable there. Without the call, an extension that
+#     builds its own environment in e2e_target() can only always keep or always
+#     delete what it created — the runner collects containers on its network,
+#     but not files.
+printf 'e2e teardown\n'
+e2e_line="$(grep -n 'declare -F e2e_teardown' "${RUNNER}" | head -n1)"
+if [[ -n "${e2e_line}" ]]; then
+    pass "the e2e suite consults e2e_teardown()"
+else
+    fail "no e2e_teardown() call — a conf-built environment cannot clean up after itself"
+fi
+# It has to sit AFTER the exit code is captured, or the hook cannot branch on it.
+exit_line="$(grep -n 'SUITE_EXIT_CODE=\$?' "${RUNNER}" | awk -F: -v t="${e2e_line%%:*}" '$1 < t {n=$1} END {print n}')"
+if [[ -n "${e2e_line}" ]] && [[ -n "${exit_line}" ]]; then
+    pass "e2e_teardown() runs after SUITE_EXIT_CODE is set (line ${exit_line} before ${e2e_line%%:*})"
+else
+    fail "e2e_teardown() does not follow a SUITE_EXIT_CODE assignment"
+fi
+
 exit "${FAILED}"
