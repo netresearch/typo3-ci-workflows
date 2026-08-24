@@ -87,6 +87,21 @@
 #    printf '%s' "--network ddev_default --add-host your-typo3.ddev.site:${ip}"
 #}
 
+# When e2e_target() created something the runner cannot know about, take it
+# down here. Containers do NOT need this — the runner removes everything
+# attached to its network at the end, whoever started it. Run-scoped FILES do:
+# a TYPO3 instance directory is worth keeping when the suite failed and worth
+# deleting when it passed, and this is the only point that knows which
+# happened. ${SUITE_EXIT_CODE} holds the result.
+#
+#e2e_teardown() {
+#    if [ "${SUITE_EXIT_CODE}" -eq 0 ]; then
+#        rm -rf .Build/e2e-instance
+#    else
+#        echo "e2e environment kept at .Build/e2e-instance" >&2
+#    fi
+#}
+
 # The Playwright image for `-s e2e`.
 #IMAGE_PLAYWRIGHT="mcr.microsoft.com/playwright:v1.60.0-noble"
 

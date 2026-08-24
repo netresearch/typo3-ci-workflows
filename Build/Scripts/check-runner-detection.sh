@@ -340,4 +340,33 @@ else
     fail "unit config: got '${got:-<empty>}'"
 fi
 
+# 10. The e2e suite calls e2e_teardown() when the conf defines one, and the
+#     suite's exit code is readable there. Without the call, an extension that
+#     builds its own environment in e2e_target() can only always keep or always
+#     delete what it created — the runner collects containers on its network,
+#     but not files.
+printf 'e2e teardown\n'
+e2e_line="$(grep -n 'declare -F e2e_teardown' "${RUNNER}" | head -n1)"
+if [[ -n "${e2e_line}" ]]; then
+    pass "the e2e suite consults e2e_teardown()"
+else
+    fail "no e2e_teardown() call — a conf-built environment cannot clean up after itself"
+fi
+# It has to sit after the exit code is captured AND inside the same case branch.
+# "Some assignment appears earlier in the file" is not the same claim: the runner
+# has one per suite, so a hook dropped into the wrong branch would still satisfy
+# it. The test is that no `;;` separates the two.
+if [[ -n "${e2e_line}" ]]; then
+    between="$(awk -F: -v t="${e2e_line%%:*}" '
+        NR < t { if ($0 ~ /SUITE_EXIT_CODE=\$\?/) last = NR; if ($0 ~ /^[[:space:]]*;;[[:space:]]*$/) sep = NR }
+        END { print last "|" sep }' "${RUNNER}")"
+    exit_line="${between%%|*}"
+    sep_line="${between##*|}"
+    if [[ -n "${exit_line}" ]] && { [[ -z "${sep_line}" ]] || [[ "${sep_line}" -lt "${exit_line}" ]]; }; then
+        pass "e2e_teardown() runs after SUITE_EXIT_CODE in the same branch (${exit_line} -> ${e2e_line%%:*})"
+    else
+        fail "e2e_teardown() is not in the branch that sets SUITE_EXIT_CODE (assignment ${exit_line:-none}, ;; at ${sep_line:-none})"
+    fi
+fi
+
 exit "${FAILED}"

@@ -851,6 +851,16 @@ case ${TEST_SUITE} in
             -e npm_config_cache="${ROOT_DIR}/.Build/.cache/npm" \
             ${IMAGE_PLAYWRIGHT} /bin/bash -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
+
+        # An extension that built its own environment in e2e_target() gets to
+        # take it down here, with the result in hand. Containers do not need
+        # this — clean_up removes everything attached to ${NETWORK}, whoever
+        # started it. Run-scoped FILES do: a TYPO3 instance directory is worth
+        # keeping when the suite failed and worth deleting when it passed, and
+        # only this point knows which happened.
+        if declare -F e2e_teardown >/dev/null 2>&1; then
+            e2e_teardown
+        fi
         ;;
     functional)
         COMMAND=(php ${PHP_FUNCTIONAL_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_FUNCTIONAL_CONFIG} ${FUNCTIONAL_TESTSUITE:+--testsuite "${FUNCTIONAL_TESTSUITE}"} --exclude-group not-${DBMS} "$@")
