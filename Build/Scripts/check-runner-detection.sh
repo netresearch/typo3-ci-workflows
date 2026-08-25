@@ -479,4 +479,80 @@ else
     fail "lint reports no count; green would again be indistinguishable from having looked at nothing"
 fi
 
+# 14. -s integration must not re-run the unit config dressed up as integration.
+#     A separate integration config is detected like functional's; without one
+#     the variable falls back to the unit config, and the suite branch refuses
+#     when that fallback would select nothing (#212).
+printf 'integration config\n'
+int_own="${FIXTURES}/integration-own"
+mkdir -p "${int_own}/Build/phpunit"
+printf '{"name":"netresearch/fixture-int","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${int_own}/composer.json"
+printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</directory></testsuite></testsuites></phpunit>\n' \
+    > "${int_own}/Build/phpunit/UnitTests.xml"
+printf '<phpunit><testsuites><testsuite name="integration"><directory>../Tests/Integration</directory></testsuite></testsuites></phpunit>\n' \
+    > "${int_own}/Build/phpunit/IntegrationTests.xml"
+got="$(derive "${int_own}" PHPUNIT_INTEGRATION_CONFIG)"
+if [[ "${got}" == "Build/phpunit/IntegrationTests.xml" ]]; then
+    pass "a separate integration config is detected (${got})"
+else
+    fail "integration config got '${got:-<empty>}' — -s integration would re-run the unit config"
+fi
+
+int_none="${FIXTURES}/integration-none"
+mkdir -p "${int_none}/Build/phpunit"
+printf '{"name":"netresearch/fixture-int2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${int_none}/composer.json"
+printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</directory></testsuite></testsuites></phpunit>\n' \
+    > "${int_none}/Build/phpunit/UnitTests.xml"
+got="$(derive "${int_none}" PHPUNIT_INTEGRATION_CONFIG)"
+if [[ "${got}" == "Build/phpunit/UnitTests.xml" ]]; then
+    pass "without one, the variable falls back to the unit config (the suite refuses separately)"
+else
+    fail "integration fallback got '${got:-<empty>}'"
+fi
+# The refusal itself lives in the suite branch, below the sourceable head — read
+# it from the source: the guard is only real if the branch can exit non-zero.
+int_branch="$(awk '/^    integration\)/,/^        ;;/' "${RUNNER}" | grep -vE '^\s*#')"
+if printf '%s' "${int_branch}" | grep -q 'exit 1'; then
+    pass "the suite branch refuses instead of running the wrong config"
+else
+    fail "-s integration has no refusal path; a green run against the unit config is back"
+fi
+
+# 15. Tool arguments pass through (#211). The runner has only short options, so
+#     `--anything` is unambiguously for the tool; a mistyped short option must
+#     still fail. split_tool_args sits in the sourceable head, so it is called
+#     directly rather than reasoned about.
+printf 'tool argument passthrough\n'
+split_head="${FIXTURES}/split-head.sh"
+head -n "$(($(grep -n '^# Option defaults' "${RUNNER}" | head -n1 | cut -d: -f1) - 1))" "${RUNNER}" > "${split_head}"
+splitprobe() {
+    (
+        cd "${int_none}" || exit 1
+        # shellcheck disable=SC1090
+        source "${split_head}" >/dev/null 2>&1
+        split_tool_args "$@"
+        printf '%s|%s' "${RUNNER_ARGS[*]-}" "${PASSTHROUGH_ARGS[*]-}"
+    )
+}
+got="$(splitprobe -s unit --coverage-clover=x.xml)"
+if [[ "${got}" == "-s unit|--coverage-clover=x.xml" ]]; then
+    pass "the bare form splits at the first long option (${got})"
+else
+    fail "bare form split got '${got}' — the CI-appended arguments would still be rejected"
+fi
+got="$(splitprobe -s unit -- --filter Foo)"
+if [[ "${got}" == "-s unit|--filter Foo" ]]; then
+    pass "an explicit -- ends the options (${got})"
+else
+    fail "-- split got '${got}'"
+fi
+got="$(splitprobe -s unit -z)"
+if [[ "${got}" == "-s unit -z|" ]]; then
+    pass "a mistyped short option stays with the runner and still fails loudly (${got})"
+else
+    fail "short-option split got '${got}' — a typo would silently become a tool argument"
+fi
+
 exit "${FAILED}"
