@@ -479,4 +479,45 @@ else
     fail "lint reports no count; green would again be indistinguishable from having looked at nothing"
 fi
 
+# 14. -s integration must not re-run the unit config dressed up as integration.
+#     A separate integration config is detected like functional's; without one
+#     the variable falls back to the unit config, and the suite branch refuses
+#     when that fallback would select nothing (#212).
+printf 'integration config\n'
+int_own="${FIXTURES}/integration-own"
+mkdir -p "${int_own}/Build/phpunit"
+printf '{"name":"netresearch/fixture-int","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${int_own}/composer.json"
+printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</directory></testsuite></testsuites></phpunit>\n' \
+    > "${int_own}/Build/phpunit/UnitTests.xml"
+printf '<phpunit><testsuites><testsuite name="integration"><directory>../Tests/Integration</directory></testsuite></testsuites></phpunit>\n' \
+    > "${int_own}/Build/phpunit/IntegrationTests.xml"
+got="$(derive "${int_own}" PHPUNIT_INTEGRATION_CONFIG)"
+if [[ "${got}" == "Build/phpunit/IntegrationTests.xml" ]]; then
+    pass "a separate integration config is detected (${got})"
+else
+    fail "integration config got '${got:-<empty>}' — -s integration would re-run the unit config"
+fi
+
+int_none="${FIXTURES}/integration-none"
+mkdir -p "${int_none}/Build/phpunit"
+printf '{"name":"netresearch/fixture-int2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${int_none}/composer.json"
+printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</directory></testsuite></testsuites></phpunit>\n' \
+    > "${int_none}/Build/phpunit/UnitTests.xml"
+got="$(derive "${int_none}" PHPUNIT_INTEGRATION_CONFIG)"
+if [[ "${got}" == "Build/phpunit/UnitTests.xml" ]]; then
+    pass "without one, the variable falls back to the unit config (the suite refuses separately)"
+else
+    fail "integration fallback got '${got:-<empty>}'"
+fi
+# The refusal itself lives in the suite branch, below the sourceable head — read
+# it from the source: the guard is only real if the branch can exit non-zero.
+int_branch="$(awk '/^    integration\)/,/^        ;;/' "${RUNNER}" | grep -vE '^\s*#')"
+if printf '%s' "${int_branch}" | grep -q 'exit 1'; then
+    pass "the suite branch refuses instead of running the wrong config"
+else
+    fail "-s integration has no refusal path; a green run against the unit config is back"
+fi
+
 exit "${FAILED}"

@@ -421,6 +421,15 @@ PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(detect_config 'functio
 # One config carrying several testsuites is a layout, not a mistake: fall back
 # to the unit config and let the testsuite name do the selecting.
 PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
+
+# An integration config of its own, detected the way functional is. Without
+# this, -s integration on an extension that keeps its integration tests in a
+# separate config re-ran the UNIT config and reported success — 614 green unit
+# tests standing in for five integration classes that were never opened (#212).
+# The fallback to the unit config stays, but the suite refuses below when that
+# fallback would select nothing.
+PHPUNIT_INTEGRATION_CONFIG="${PHPUNIT_INTEGRATION_CONFIG:-$(detect_config 'integration config' Build/phpunit/IntegrationTests.xml Build/phpunit/IntegrationTests.xml Build/IntegrationTests.xml Build/phpunit.integration.xml phpunit.integration.xml)}"
+PHPUNIT_INTEGRATION_CONFIG="${PHPUNIT_INTEGRATION_CONFIG:-${PHPUNIT_CONFIG}}"
 PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(detect_config 'phpstan config' Build/phpstan/phpstan.neon Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
 RECTOR_CONFIG="${RECTOR_CONFIG:-$(detect_config 'rector config' Build/rector/rector.php Build/rector/rector.php Build/rector.php rector.php)}"
 # Fractor is rector's sibling for the file types rector does not read — TypoScript,
@@ -479,7 +488,13 @@ phpunit_testsuite() {
 
 UNIT_TESTSUITE="${UNIT_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'unit')}"
 FUZZY_TESTSUITE="${FUZZY_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'fuzz')}"
-INTEGRATION_TESTSUITE="${INTEGRATION_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'integration')}"
+if [[ "${PHPUNIT_INTEGRATION_CONFIG}" == "${PHPUNIT_CONFIG}" ]]; then
+    INTEGRATION_TESTSUITE="${INTEGRATION_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_CONFIG}" 'integration')}"
+else
+    # A separate integration config IS the selection; narrowing it to one suite
+    # would drop the others — the same reasoning as functional below.
+    INTEGRATION_TESTSUITE="${INTEGRATION_TESTSUITE:-}"
+fi
 if [[ "${PHPUNIT_FUNCTIONAL_CONFIG}" == "${PHPUNIT_CONFIG}" ]]; then
     FUNCTIONAL_TESTSUITE="${FUNCTIONAL_TESTSUITE-$(phpunit_testsuite "${PHPUNIT_FUNCTIONAL_CONFIG}" 'functional')}"
 else
@@ -1073,7 +1088,22 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     integration)
-        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_CONFIG} ${INTEGRATION_TESTSUITE:+--testsuite "${INTEGRATION_TESTSUITE}"} "$@")
+        # Refuse to re-run the unit config dressed up as integration. Without a
+        # config of its own and without an integration testsuite in the detected
+        # one, this suite used to run the unit tests and report success — a
+        # green result for a suite that never ran is worse than an error (#212).
+        if [[ "${PHPUNIT_INTEGRATION_CONFIG}" == "${PHPUNIT_CONFIG}" ]] && [[ -z "${INTEGRATION_TESTSUITE}" ]] \
+           && ! grep -oE '<testsuite[[:space:]]+name="[^"]*"' "${PROJECT_ROOT}/${PHPUNIT_CONFIG}" 2>/dev/null | grep -qiE 'name="integration'; then
+            echo "runTests.sh: -s integration found neither an integration config nor an" >&2
+            echo "             'integration' testsuite in ${PHPUNIT_CONFIG:-<none>}." >&2
+            echo "             Looked for a config at: Build/phpunit/IntegrationTests.xml," >&2
+            echo "             Build/IntegrationTests.xml, Build/phpunit.integration.xml," >&2
+            echo "             phpunit.integration.xml — or set PHPUNIT_INTEGRATION_CONFIG" >&2
+            echo "             in Build/Scripts/runTests.conf." >&2
+            clean_up
+            exit 1
+        fi
+        COMMAND=(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/phpunit -c ${PHPUNIT_INTEGRATION_CONFIG} ${INTEGRATION_TESTSUITE:+--testsuite "${INTEGRATION_TESTSUITE}"} "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name integration-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
