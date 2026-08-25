@@ -413,4 +413,44 @@ else
     fail "plain config got '${got:-<empty>}' — coverage is slow and must not be the default"
 fi
 
+# 12. Fractor sits beside rector and is configured the same way, so it is found
+#     the same way. Six extensions on this runner carry a fractor script; five
+#     of them keep the config flat under Build/, which is detected but reported
+#     as non-standard — the same nudge rector gives.
+printf 'fractor config\n'
+fr_std="${FIXTURES}/fractor-standard"
+mkdir -p "${fr_std}/Build/fractor"
+printf '{"name":"netresearch/fixture-fr","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${fr_std}/composer.json"
+printf '<?php\n' > "${fr_std}/Build/fractor/fractor.php"
+got="$(derive "${fr_std}" FRACTOR_CONFIG)"
+if [[ "${got}" == "Build/fractor/fractor.php" ]]; then
+    pass "the standard location is found (${got})"
+else
+    fail "standard fractor config got '${got:-<empty>}'"
+fi
+
+fr_flat="${FIXTURES}/fractor-flat"
+mkdir -p "${fr_flat}/Build"
+printf '{"name":"netresearch/fixture-fr2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${fr_flat}/composer.json"
+printf '<?php\n' > "${fr_flat}/Build/fractor.php"
+got="$(derive "${fr_flat}" FRACTOR_CONFIG)"
+if [[ "${got}" == "Build/fractor.php" ]]; then
+    pass "the flat location is found too (${got})"
+else
+    fail "flat fractor config got '${got:-<empty>}'"
+fi
+
+fr_none="${FIXTURES}/fractor-none"
+mkdir -p "${fr_none}/Build"
+printf '{"name":"netresearch/fixture-fr3","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${fr_none}/composer.json"
+got="$(derive "${fr_none}" FRACTOR_CONFIG)"
+if [[ -z "${got}" ]]; then
+    pass "no config stays empty, so the suite can refuse instead of passing an empty --config"
+else
+    fail "expected no fractor config, got '${got}'"
+fi
+
 exit "${FAILED}"

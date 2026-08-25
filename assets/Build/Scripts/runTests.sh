@@ -187,6 +187,7 @@ Options:
             - lint: PHP linting
             - phpstan: PHPStan static analysis
             - rector: Rector code upgrades
+            - fractor: Fractor upgrades for TypoScript, Fluid, YAML and TCA
             - unit: PHP unit tests (default)
             - unitCoverage: Unit tests with coverage
             - fuzz | fuzzy: Property-based (fuzzy) tests
@@ -222,7 +223,7 @@ Options:
         Enable Xdebug for debugging
 
     -n
-        Dry-run mode (for cgl, rector)
+        Dry-run mode (for cgl, rector, fractor)
 
     -h
         Show this help
@@ -422,6 +423,12 @@ PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-$(detect_config 'functio
 PHPUNIT_FUNCTIONAL_CONFIG="${PHPUNIT_FUNCTIONAL_CONFIG:-${PHPUNIT_CONFIG}}"
 PHPSTAN_CONFIG="${PHPSTAN_CONFIG:-$(detect_config 'phpstan config' Build/phpstan/phpstan.neon Build/phpstan/phpstan.neon Build/phpstan.neon phpstan.neon phpstan.neon.dist)}"
 RECTOR_CONFIG="${RECTOR_CONFIG:-$(detect_config 'rector config' Build/rector/rector.php Build/rector/rector.php Build/rector.php rector.php)}"
+# Fractor is rector's sibling for the file types rector does not read — TypoScript,
+# Fluid, YAML, TCA. Six extensions on this runner carry a fractor script and had to
+# leave the shell for it. Same candidate order and the same standard shape as
+# rector above; the two are configured side by side and should not need two
+# different layouts to be remembered.
+FRACTOR_CONFIG="${FRACTOR_CONFIG:-$(detect_config 'fractor config' Build/fractor/fractor.php Build/fractor/fractor.php Build/fractor.php fractor.php)}"
 INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infection.json.dist infection.json.dist infection.json infection.json5)}"
 # php-cs-fixer discovers only .php-cs-fixer.php / .php-cs-fixer.dist.php next to
 # the working directory. Thirteen extensions keep theirs under Build/ and two
@@ -1100,6 +1107,48 @@ case ${TEST_SUITE} in
             COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/rector process --config ${RECTOR_CONFIG}"
         fi
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name rector-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
+        SUITE_EXIT_CODE=$?
+        ;;
+    fractor)
+        # Writes by default, checks with -n, exactly like cgl and rector. An
+        # absent config is refused rather than passed on as an empty --config,
+        # which fractor reports as a parse error about the current directory and
+        # sends the reader looking in the wrong place. The other suites here
+        # share that gap; fixing them is a separate change.
+        if [[ -z "${FRACTOR_CONFIG}" ]]; then
+            echo "runTests.sh: -s fractor found no fractor config." >&2
+            echo "             Looked for: Build/fractor/fractor.php, Build/fractor.php, fractor.php" >&2
+            echo "             Set FRACTOR_CONFIG in Build/Scripts/runTests.conf to point elsewhere." >&2
+            clean_up
+            exit 1
+        fi
+        if [[ "${CGLCHECK_DRY_RUN}" -eq 1 ]]; then
+            # fractor's dry run reports pending changes and then exits 0, unlike
+            # rector, which exits 2. Measured on t3x-nr-llm with a9f/fractor
+            # v1.0.0: "[OK] 46 files would have been changed (dry-run)" and exit
+            # status 0, where `rector process --dry-run` on the same tree gives 2.
+            #
+            # --output-format=json is not a way out: on the same invocation, same
+            # cache state, it reports "changed_files": 0 while the console line
+            # says 46. Its reporter does not count dry-run changes, so the JSON is
+            # not merely a different shape of the same answer — it is the wrong
+            # answer. That leaves the console line as the only signal that tells
+            # the truth, which is why this parses text rather than a status code.
+            #
+            # Without this the check would pass on every repository with pending
+            # fractor changes, which is worse than having no check.
+            COMMAND="OUT=\$(php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/fractor process --config ${FRACTOR_CONFIG} --dry-run --no-progress-bar 2>&1); RC=\$?
+                printf '%s\\n' \"\${OUT}\"
+                [ \"\${RC}\" -eq 0 ] || exit \"\${RC}\"
+                CHANGED=\$(printf '%s' \"\${OUT}\" | sed -n 's/.*\\[OK\\] \\([0-9][0-9]*\\) files\\{0,1\\} would have been changed.*/\\1/p' | tail -n1)
+                if [ -n \"\${CHANGED}\" ] && [ \"\${CHANGED}\" -gt 0 ]; then
+                    echo \"runTests.sh: fractor would change \${CHANGED} file(s) — run without -n to apply\" >&2
+                    exit 1
+                fi"
+        else
+            COMMAND="php ${PHP_OPCACHE_OPTS} -dxdebug.mode=off ${BIN_DIR}/fractor process --config ${FRACTOR_CONFIG}"
+        fi
+        ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name fractor-${SUFFIX} -e COMPOSER_ROOT_VERSION=${COMPOSER_ROOT_VERSION} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;
     unit)
