@@ -520,4 +520,39 @@ else
     fail "-s integration has no refusal path; a green run against the unit config is back"
 fi
 
+# 15. Tool arguments pass through (#211). The runner has only short options, so
+#     `--anything` is unambiguously for the tool; a mistyped short option must
+#     still fail. split_tool_args sits in the sourceable head, so it is called
+#     directly rather than reasoned about.
+printf 'tool argument passthrough\n'
+split_head="${FIXTURES}/split-head.sh"
+head -n "$(($(grep -n '^# Option defaults' "${RUNNER}" | head -n1 | cut -d: -f1) - 1))" "${RUNNER}" > "${split_head}"
+splitprobe() {
+    (
+        cd "${int_none}" || exit 1
+        # shellcheck disable=SC1090
+        source "${split_head}" >/dev/null 2>&1
+        split_tool_args "$@"
+        printf '%s|%s' "${RUNNER_ARGS[*]-}" "${PASSTHROUGH_ARGS[*]-}"
+    )
+}
+got="$(splitprobe -s unit --coverage-clover=x.xml)"
+if [[ "${got}" == "-s unit|--coverage-clover=x.xml" ]]; then
+    pass "the bare form splits at the first long option (${got})"
+else
+    fail "bare form split got '${got}' — the CI-appended arguments would still be rejected"
+fi
+got="$(splitprobe -s unit -- --filter Foo)"
+if [[ "${got}" == "-s unit|--filter Foo" ]]; then
+    pass "an explicit -- ends the options (${got})"
+else
+    fail "-- split got '${got}'"
+fi
+got="$(splitprobe -s unit -z)"
+if [[ "${got}" == "-s unit -z|" ]]; then
+    pass "a mistyped short option stays with the runner and still fails loudly (${got})"
+else
+    fail "short-option split got '${got}' — a typo would silently become a tool argument"
+fi
+
 exit "${FAILED}"

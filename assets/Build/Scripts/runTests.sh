@@ -469,6 +469,38 @@ PHPUNIT_FUNCTIONAL_XDEBUG_ARG="$(xdebug_arg_for "${PHPUNIT_FUNCTIONAL_CONFIG}")"
 # suite as "unit", "Unit", "Unit Tests" and "Unit tests", so the name is read
 # out of the config and matched loosely rather than configured. A config with
 # a single suite needs no selection at all — the file already is one.
+# Split the command line into runner options and tool arguments (#211).
+#
+# The runner has only short options, so an argument starting with `--` can never
+# be one of its own — it is for the tool the suite runs, and everything after it
+# belongs to the tool too. getopts cannot express that: handed
+# `--coverage-clover=x` it dissects the cluster character by character and dies
+# on "illegal option". The reusable workflow appends exactly such arguments to
+# the composer scripts (`composer ci:test:php:unit -- --coverage-clover=…`), and
+# composer strips its own `--`, so what reaches this script IS the bare form —
+# six checks failed on t3x-nr-passkeys-fe this way while every local call passed.
+#
+# An explicit `--` also ends the options, mirroring getopts. A mistyped SHORT
+# option (`-z`) still fails loudly; only the unambiguous `--…` passes through.
+# Sets RUNNER_ARGS and PASSTHROUGH_ARGS.
+split_tool_args() {
+    RUNNER_ARGS=()
+    PASSTHROUGH_ARGS=()
+    while [[ $# -gt 0 ]]; do
+        if [[ "${1}" == "--" ]]; then
+            shift
+            PASSTHROUGH_ARGS=("$@")
+            return 0
+        elif [[ "${1}" == --* ]]; then
+            PASSTHROUGH_ARGS=("$@")
+            return 0
+        fi
+        RUNNER_ARGS+=("${1}")
+        shift
+    done
+    return 0
+}
+
 phpunit_testsuite() {
     # $1 config path, $2 an extended regex the wanted suite name starts with
     local file="${PROJECT_ROOT}/${1}" want="${2}" names count
@@ -663,7 +695,11 @@ CONTAINER_BIN=""
 CONTAINER_HOST="host.docker.internal"
 SUITE_EXIT_CODE=0
 
-# Parse options
+# Parse options. Tool arguments (everything from `--` or the first `--long`
+# option on) are separated first — see split_tool_args above — and re-appended
+# after getopts has consumed the runner's own flags.
+split_tool_args "$@"
+set -- ${RUNNER_ARGS[@]+"${RUNNER_ARGS[@]}"}
 OPTIND=1
 while getopts "a:b:d:i:s:p:t:xy:nhu" OPT; do
     case ${OPT} in
@@ -744,6 +780,7 @@ IMAGE_MYSQL="docker.io/mysql:${DBMS_VERSION}"
 IMAGE_POSTGRES="docker.io/postgres:${DBMS_VERSION}-alpine"
 
 shift $((OPTIND - 1))
+set -- "$@" ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}
 
 SUFFIX="$(date +%s)-${RANDOM}"
 NETWORK="${PROJECT_SLUG}-${SUFFIX}"
