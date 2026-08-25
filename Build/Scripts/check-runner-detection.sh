@@ -413,4 +413,70 @@ else
     fail "plain config got '${got:-<empty>}' — coverage is slow and must not be the default"
 fi
 
+# 12. Fractor sits beside rector and is configured the same way, so it is found
+#     the same way. Six extensions on this runner carry a fractor script; five
+#     of them keep the config flat under Build/, which is detected but reported
+#     as non-standard — the same nudge rector gives.
+printf 'fractor config\n'
+fr_std="${FIXTURES}/fractor-standard"
+mkdir -p "${fr_std}/Build/fractor"
+printf '{"name":"netresearch/fixture-fr","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${fr_std}/composer.json"
+printf '<?php\n' > "${fr_std}/Build/fractor/fractor.php"
+got="$(derive "${fr_std}" FRACTOR_CONFIG)"
+if [[ "${got}" == "Build/fractor/fractor.php" ]]; then
+    pass "the standard location is found (${got})"
+else
+    fail "standard fractor config got '${got:-<empty>}'"
+fi
+
+fr_flat="${FIXTURES}/fractor-flat"
+mkdir -p "${fr_flat}/Build"
+printf '{"name":"netresearch/fixture-fr2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${fr_flat}/composer.json"
+printf '<?php\n' > "${fr_flat}/Build/fractor.php"
+got="$(derive "${fr_flat}" FRACTOR_CONFIG)"
+if [[ "${got}" == "Build/fractor.php" ]]; then
+    pass "the flat location is found too (${got})"
+else
+    fail "flat fractor config got '${got:-<empty>}'"
+fi
+
+fr_none="${FIXTURES}/fractor-none"
+mkdir -p "${fr_none}/Build"
+printf '{"name":"netresearch/fixture-fr3","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${fr_none}/composer.json"
+got="$(derive "${fr_none}" FRACTOR_CONFIG)"
+if [[ -z "${got}" ]]; then
+    pass "no config stays empty, so the suite can refuse instead of passing an empty --config"
+else
+    fail "expected no fractor config, got '${got}'"
+fi
+
+# 13. The lint suite must not name source directories. Naming them meant a
+#     repository missing one got a find error on stderr, a discarded exit
+#     status and a green suite; and root-level PHP — ext_localconf.php,
+#     ext_emconf.php, Build/*.php — was never opened at all. Read from the
+#     source: the shape of the command IS the fix.
+printf 'lint covers the repository\n'
+# Comments are stripped first: the replacement quotes the old command in its
+# own explanation, and a guard that reads prose would match that and call the
+# fix unfixed.
+lint_body="$(awk '/^    lint\)/,/^        ;;/' "${RUNNER}" | grep -vE '^\s*#')"
+if printf '%s' "${lint_body}" | grep -q 'find Classes Configuration Tests'; then
+    fail "lint still names three fixed directories; a repository without one of them lints green having opened the others"
+else
+    pass "no fixed source directories are named"
+fi
+if printf '%s' "${lint_body}" | grep -q -- '-path ./vendor'; then
+    pass "generated directories are pruned instead"
+else
+    fail "lint prunes nothing — vendor and .Build would be linted"
+fi
+if printf '%s' "${lint_body}" | grep -q 'PHP files'; then
+    pass "the file count is printed, so a green run says what it opened"
+else
+    fail "lint reports no count; green would again be indistinguishable from having looked at nothing"
+fi
+
 exit "${FAILED}"
