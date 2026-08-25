@@ -1078,7 +1078,36 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     lint)
-        COMMAND="find Classes Configuration Tests -name \\*.php -print0 | xargs -0 -n1 -P\$(nproc) php -dxdebug.mode=off -l >/dev/null"
+        # Lint what the repository ships, by pruning what it generates — rather
+        # than naming three directories and hoping they are the right three.
+        #
+        # The previous command was `find Classes Configuration Tests …`, which
+        # had two holes. A repository missing one of those directories got a
+        # find error on stderr, an exit status the pipe discarded, and a green
+        # suite that had opened two paths out of three:
+        #
+        #   $ find Classes Nonexistent -name \*.php -print0 | xargs -0 php -l; echo $?
+        #   bfs: error: Nonexistent: No such file or directory.
+        #   0
+        #
+        # And root-level PHP was never seen at all — ext_localconf.php,
+        # ext_tables.php, ext_emconf.php, anything under Build/ — though a
+        # syntax error in ext_localconf.php takes down the whole installation.
+        #
+        # Pruning instead of naming closes both: there is no path left to be
+        # missing, and a new source directory is covered the day it appears.
+        # The count is printed because a lint that says nothing is
+        # indistinguishable from a lint that looked at nothing.
+        LINT_PRUNE="-path ./.git -o -path ./vendor -o -path ./.Build -o -path ./.build -o -path ./node_modules -o -path ./var -o -path ./public -o -path ./Documentation-GENERATED-temp"
+        COMMAND="set -e
+            COUNT=\$(find . \\( ${LINT_PRUNE} \\) -prune -o -type f -name '*.php' -print | wc -l)
+            echo \"lint: \${COUNT} PHP files\"
+            if [ \"\${COUNT}\" -eq 0 ]; then
+                echo 'lint: no PHP files found — every candidate path was pruned' >&2
+                exit 1
+            fi
+            find . \\( ${LINT_PRUNE} \\) -prune -o -type f -name '*.php' -print0 \
+                | xargs -0 -r -n1 -P\$(nproc) php -dxdebug.mode=off -l >/dev/null"
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name lint-${SUFFIX} ${IMAGE_PHP} /bin/sh -c "${COMMAND}"
         SUITE_EXIT_CODE=$?
         ;;

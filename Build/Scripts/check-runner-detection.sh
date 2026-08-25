@@ -453,4 +453,30 @@ else
     fail "expected no fractor config, got '${got}'"
 fi
 
+# 13. The lint suite must not name source directories. Naming them meant a
+#     repository missing one got a find error on stderr, a discarded exit
+#     status and a green suite; and root-level PHP — ext_localconf.php,
+#     ext_emconf.php, Build/*.php — was never opened at all. Read from the
+#     source: the shape of the command IS the fix.
+printf 'lint covers the repository\n'
+# Comments are stripped first: the replacement quotes the old command in its
+# own explanation, and a guard that reads prose would match that and call the
+# fix unfixed.
+lint_body="$(awk '/^    lint\)/,/^        ;;/' "${RUNNER}" | grep -vE '^\s*#')"
+if printf '%s' "${lint_body}" | grep -q 'find Classes Configuration Tests'; then
+    fail "lint still names three fixed directories; a repository without one of them lints green having opened the others"
+else
+    pass "no fixed source directories are named"
+fi
+if printf '%s' "${lint_body}" | grep -q -- '-path ./vendor'; then
+    pass "generated directories are pruned instead"
+else
+    fail "lint prunes nothing — vendor and .Build would be linted"
+fi
+if printf '%s' "${lint_body}" | grep -q 'PHP files'; then
+    pass "the file count is printed, so a green run says what it opened"
+else
+    fail "lint reports no count; green would again be indistinguishable from having looked at nothing"
+fi
+
 exit "${FAILED}"
