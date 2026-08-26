@@ -269,6 +269,15 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # ci.yml disables this for every job it runs (same reasoning
+          # applies here): a maintenance branch pinned to an EOL TYPO3
+          # minor can have EVERY publicly-installable core version
+          # affected by an advisory whose real fix only ships via ELTS,
+          # never public Packagist -- Composer's solver then refuses to
+          # resolve at all, not just warn, and there is no version bump
+          # that gets out of it. This does not silence `security.yml`'s
+          # audit job, which still reports the same advisories.
+          composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
           composer_retry install --no-progress --prefer-dist
 
@@ -318,6 +327,15 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # ci.yml disables this for every job it runs (same reasoning
+          # applies here): a maintenance branch pinned to an EOL TYPO3
+          # minor can have EVERY publicly-installable core version
+          # affected by an advisory whose real fix only ships via ELTS,
+          # never public Packagist -- Composer's solver then refuses to
+          # resolve at all, not just warn, and there is no version bump
+          # that gets out of it. This does not silence `security.yml`'s
+          # audit job, which still reports the same advisories.
+          composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
           composer_retry install --no-progress --prefer-dist
 
