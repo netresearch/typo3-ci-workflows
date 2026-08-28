@@ -155,6 +155,56 @@ jobs:
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-rector.php
 
+      - name: Smoke test rector boots with the shared config
+        run: |
+          FIXTURE=$(mktemp -d)
+          mkdir -p "$FIXTURE/Classes" "$FIXTURE/Configuration"
+          printf '<?php\n\ndeclare(strict_types=1);\n\nfinal class SmokeFixture\n{\n    public function noop(): void\n    {\n    }\n}\n' > "$FIXTURE/Classes/SmokeFixture.php"
+          printf '<?php\n\nreturn [];\n' > "$FIXTURE/Configuration/Services.php"
+          # Content is irrelevant; the file only has to exist so that the neon's
+          # %currentWorkingDirectory%/ext_emconf.php exclude resolves.
+          printf '<?php\n' > "$FIXTURE/ext_emconf.php"
+          cat > "$FIXTURE/rector.php" << 'PHPEOF'
+          <?php
+
+          declare(strict_types=1);
+
+          use Rector\Config\RectorConfig;
+          use Ssch\TYPO3Rector\Set\Typo3SetList;
+
+          $configure = require getenv('SHARED_RECTOR_CONFIG');
+
+          return static function (RectorConfig $rectorConfig) use ($configure): void {
+              $configure($rectorConfig, getenv('FIXTURE_ROOT'));
+
+              // A TYPO3 set is what pulls in ssch/typo3-rector's own config file.
+              // Without one the boot never reaches it, and an incompatibility
+              // between that file and rector/rector stays invisible here while
+              // breaking every consumer.
+              $rectorConfig->sets([Typo3SetList::GENERAL]);
+          };
+          PHPEOF
+          REPO="$PWD"
+          export SHARED_RECTOR_CONFIG="$REPO/config/rector/rector.php"
+          export FIXTURE_ROOT="$FIXTURE"
+          STATUS=0
+          # Run from the fixture: phpstan-rector.neon excludes
+          # %currentWorkingDirectory%/ext_emconf.php, which must resolve.
+          (cd "$FIXTURE" && "$REPO/vendor/bin/rector" process --dry-run --config "$FIXTURE/rector.php") > "$FIXTURE/out.log" 2>&1 || STATUS=$?
+          tail -20 "$FIXTURE/out.log"
+          # 0 = nothing to change, 2 = the dry run found changes in the fixture.
+          # Everything else — 1 for a Rector error, 127 for a missing binary, a
+          # signal — is a failure to boot and must not pass silently.
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 2 ]; then
+            echo "Rector failed to boot with the shared config (exit $STATUS)" >&2
+            exit 1
+          fi
+          if grep -q '\[ERROR\]' "$FIXTURE/out.log"; then
+            echo "Rector reported an error with the shared config" >&2
+            exit 1
+          fi
+          echo "rector boot smoke test: OK"
+
   lint-json:
     name: Lint JSON
     runs-on: ubuntu-latest
