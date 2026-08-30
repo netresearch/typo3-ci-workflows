@@ -30,10 +30,16 @@
 #       per line, already indented by two spaces.
 #
 #   e2e_provision_seed
-#       Runs after TYPO3 is installed and the schema exists. Gets a container
-#       with the instance at /var/www/html and the extension at /extension,
-#       and is where demo content goes. Receives ${E2E_ROOT} and
-#       ${E2E_SCRIPTS}.
+#       Runs after TYPO3 is installed and the schema exists, and is where demo
+#       content goes. It runs on the HOST — the instance directory is in
+#       ${E2E_ROOT} and writable from there, and anything needing PHP starts
+#       its own container the way the steps below do. ${E2E_SCRIPTS} holds the
+#       helper scripts this file writes, which those containers mount at
+#       /e2e-scripts.
+#
+# Defining any one of these switches provisioning on. A consumer that needs an
+# instance but none of the hooks — a suite that drives the backend only — sets
+# E2E_PROVISION=1 in runTests.conf instead.
 #
 # Requires from runTests.sh: CONTAINER_BIN, CONTAINER_COMMON_PARAMS, NETWORK,
 # SUFFIX, CI_PARAMS, IMAGE_PHP, IMAGE_APACHE, ROOT_DIR and wait_for.
@@ -88,23 +94,26 @@ e2e_provision() {
     # The helper scripts are written on the host and mounted read-only. They
     # are not inlined into the container command because quoting PHP inside a
     # double-quoted `bash -c` is how the original grew its escaping bugs.
+    # Assignments, not a returned array. TYPO3 `require`s this file for its side
+    # effects and throws the return value away
+    # (ConfigurationManager::exportConfiguration()), so a `return [...]` version
+    # of it applies nothing at all — which is how this shipped until an
+    # extension found its e2e exception reported by the ProductionExceptionHandler,
+    # the very handler the array below replaces.
     cat > "${E2E_SCRIPTS}/additional.php" << 'ADDITIONAL_EOF'
 <?php
-return [
-    'BE' => ['debug' => true],
-    'FE' => [
-        'debug' => true,
-        'debugExceptionHandler' => \TYPO3\CMS\Core\Error\DebugExceptionHandler::class,
-    ],
-    'SYS' => [
-        'devIPmask' => '*',
-        'displayErrors' => 1,
-        'exceptionalErrors' => E_WARNING | E_USER_ERROR | E_USER_WARNING | E_USER_NOTICE,
-        'trustedHostsPattern' => '.*',
-        'debugExceptionHandler' => \TYPO3\CMS\Core\Error\DebugExceptionHandler::class,
-        'productionExceptionHandler' => \TYPO3\CMS\Core\Error\DebugExceptionHandler::class,
-    ],
-];
+
+declare(strict_types=1);
+
+$GLOBALS['TYPO3_CONF_VARS']['BE']['debug'] = true;
+$GLOBALS['TYPO3_CONF_VARS']['FE']['debug'] = true;
+$GLOBALS['TYPO3_CONF_VARS']['FE']['debugExceptionHandler'] = \TYPO3\CMS\Core\Error\DebugExceptionHandler::class;
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['devIPmask'] = '*';
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['displayErrors'] = 1;
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['exceptionalErrors'] = E_WARNING | E_USER_ERROR | E_USER_WARNING | E_USER_NOTICE;
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['trustedHostsPattern'] = '.*';
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['debugExceptionHandler'] = \TYPO3\CMS\Core\Error\DebugExceptionHandler::class;
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['productionExceptionHandler'] = \TYPO3\CMS\Core\Error\DebugExceptionHandler::class;
 ADDITIONAL_EOF
 
     cat > "${E2E_SCRIPTS}/db-setup.php" << 'DBSETUP_EOF'
@@ -191,9 +200,22 @@ dependencies:
 ${E2E_SITE_DEPENDENCIES}
 SITECONFIG_EOF
 
-    # TypoScript, if the extension has any.
+    # TypoScript, if the extension has any — and a minimum if it has none.
+    # Provisioning ends by requiring HTTP 200 from the frontend, and a root page
+    # whose template defines no page object does not deliver that: TYPO3 answers
+    # 500, the check refuses the instance, and the run stops before the suite
+    # starts. A backend-only consumer has no TypoScript to give and would be
+    # stuck there, so it gets a page object that renders one line. An extension
+    # that writes its own file keeps full control; nothing here overwrites it.
     if declare -F e2e_provision_typoscript >/dev/null 2>&1; then
         e2e_provision_typoscript
+    fi
+    if [[ ! -s "${E2E_SCRIPTS}/ts-setup.typoscript" ]]; then
+        cat > "${E2E_SCRIPTS}/ts-setup.typoscript" << 'TYPOSCRIPT_EOF'
+page = PAGE
+page.10 = TEXT
+page.10.value = e2e
+TYPOSCRIPT_EOF
     fi
 
     # MariaDB, not SQLite: TYPO3's database:updateschema does not work against

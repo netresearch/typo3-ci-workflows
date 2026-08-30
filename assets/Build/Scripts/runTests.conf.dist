@@ -58,6 +58,61 @@
 # purpose: a guessed URL means testing against whatever happens to answer.
 #E2E_BASE_URL="https://your-typo3.local"
 
+# …or let the run build one. `-s e2e` can install a TYPO3 of its own —
+# MariaDB, a composer-installed instance with this extension required from a
+# path repository, PHP-FPM and Apache — and point the browser at it. Nothing
+# else in this file is then needed for the address.
+#
+# The instance is TYPO3 13 unless E2E_TYPO3_VERSION says otherwise. Prefer that
+# variable over `-t 14`: `-t` is not suite-gated, so it rewrites the extension's
+# composer.json and runs a `composer require` before provisioning even starts.
+#
+# It is thrown away when the suite passes and kept at .Build/e2e-typo3 when it
+# fails, logs included.
+#E2E_PROVISION=1
+
+# Four hooks shape that instance, all optional. Defining ANY of them switches
+# provisioning on by itself, so E2E_PROVISION is only needed by a consumer that
+# defines none — a suite that drives the backend and needs no content.
+#
+# What to require beyond the extension itself. Called with the variant in
+# ${E2E_VARIANT} and the TYPO3 constraint in ${E2E_TYPO3_CONSTRAINT}:
+#
+#e2e_provision_packages() {
+#    printf '%s' "typo3/cms-lowlevel friendsoftypo3/tt-address:^7"
+#}
+#
+# TypoScript for the root template. Write ts-constants.typoscript and/or
+# ts-setup.typoscript into ${E2E_SCRIPTS}; both land in the root sys_template.
+# Without this the runner writes a minimal page object, because provisioning
+# ends by requiring HTTP 200 from the frontend and a template without one
+# answers 500:
+#
+#e2e_provision_typoscript() {
+#    cat > "${E2E_SCRIPTS}/ts-setup.typoscript" << 'TYPOSCRIPT'
+#page = PAGE
+#page.10 = FLUIDTEMPLATE
+#page.10.file = EXT:my_ext/Resources/Private/Templates/Page.html
+#TYPOSCRIPT
+#}
+#
+# `dependencies:` entries for the site configuration, one per line, indented by
+# two spaces. A site set only resolves when the extension providing it is
+# installed, so this follows the same variant logic as the packages:
+#
+#e2e_provision_site_dependencies() {
+#    printf '  - my-vendor/my-ext\n'
+#}
+#
+# Demo content, after TYPO3 is installed and the schema exists. This runs on
+# the HOST, not in a container: ${E2E_ROOT} is the instance directory and is
+# writable from here, and anything that needs PHP starts its own container the
+# way provisioning does. ${E2E_SCRIPTS} holds the mounted helper scripts:
+#
+#e2e_provision_seed() {
+#    php "${E2E_SCRIPTS}/my-seed.php" || return 1
+#}
+
 # When the target does not exist until the run creates it — an extension that
 # starts its own web container per run, whose hostname carries that run's
 # suffix — print the URL from a function instead. It runs after the runner's

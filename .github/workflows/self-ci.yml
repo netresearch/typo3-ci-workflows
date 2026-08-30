@@ -285,6 +285,8 @@ jobs:
           shellcheck -x Build/Scripts/check-runner-variables.sh
           shellcheck -x Build/Scripts/check-runner-detection.sh
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
+          shellcheck -x Build/Scripts/check-e2e-provision-config.sh
+          shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
         # v1.7.0 shipped with IMAGE_PLAYWRIGHT referenced and never assigned,
@@ -298,6 +300,14 @@ jobs:
         # a value, this one whether the value is read out of the right file.
         # Fixture extensions, no container, no PHP.
         run: bash Build/Scripts/check-runner-detection.sh assets/Build/Scripts/runTests.sh
+
+      - name: Check that provisioning's TYPO3 config takes effect
+        # additional.php shipped as a file that RETURNS an array, and TYPO3
+        # discards that: it requires the file for its side effects
+        # (ConfigurationManager::exportConfiguration()). Every debug setting in
+        # it was inert, including the exception handlers, and the file parses
+        # either way — so this runs it and looks at $GLOBALS (#229).
+        run: bash Build/Scripts/check-e2e-provision-config.sh assets/Build/Scripts/e2e-provision.sh
 
       - name: Check that a suite with nothing to run fails
         # The fallback chain used to end in a notice and a green job, which is
