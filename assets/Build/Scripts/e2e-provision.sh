@@ -208,7 +208,14 @@ SITECONFIG_EOF
     # stuck there, so it gets a page object that renders one line. An extension
     # that writes its own file keeps full control; nothing here overwrites it.
     if declare -F e2e_provision_typoscript >/dev/null 2>&1; then
-        e2e_provision_typoscript
+        # Explicitly, because errexit does not reach in here: runTests.sh calls
+        # e2e_provision from `if ! e2e_provision`, and a failing hook would
+        # otherwise fall through to the fallback below — a green run against
+        # TypoScript the consumer never got.
+        e2e_provision_typoscript || {
+            echo "e2e: e2e_provision_typoscript failed." >&2
+            return 1
+        }
     fi
     if [[ ! -s "${E2E_SCRIPTS}/ts-setup.typoscript" ]]; then
         cat > "${E2E_SCRIPTS}/ts-setup.typoscript" << 'TYPOSCRIPT_EOF'

@@ -110,7 +110,11 @@
 # way provisioning does. ${E2E_SCRIPTS} holds the mounted helper scripts:
 #
 #e2e_provision_seed() {
-#    php "${E2E_SCRIPTS}/my-seed.php" || return 1
+#    ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name my-seed-${SUFFIX} \
+#        -v ${E2E_ROOT}:/var/www/html \
+#        -v ${E2E_SCRIPTS}:/e2e-scripts:ro \
+#        -w /var/www/html \
+#        ${IMAGE_PHP} php /e2e-scripts/my-seed.php || return 1
 #}
 
 # When the target does not exist until the run creates it — an extension that
