@@ -285,7 +285,12 @@ jobs:
         env:
           PHPUNIT_CONFIG: ${{ inputs.phpunit-config }}
           FUZZ_SUITE: ${{ needs.preflight.outputs.fuzz-suite || inputs.fuzz-testsuite }}
-        run: .Build/bin/phpunit -c "$PHPUNIT_CONFIG" --testsuite "$FUZZ_SUITE" --no-coverage --colors=never
+        # Resolve the binary through Composer's own bin-dir setting instead
+        # of a hard-coded `.Build/bin`: the fleet spells that directory
+        # `.Build`, `.build` and `vendor`, and every other job in this
+        # repository already goes through composer scripts for that reason.
+        run: |
+          "$(composer config --no-plugins bin-dir)/phpunit" -c "$PHPUNIT_CONFIG" --testsuite "$FUZZ_SUITE" --no-coverage --colors=never
 
   mutation-testing:
     needs: preflight
