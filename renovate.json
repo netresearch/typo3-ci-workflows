@@ -2,12 +2,5 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>netresearch/renovate-config"
-  ],
-  "packageRules": [
-    {
-      "description": "rector/rector 2.6.4 removed RectorConfig::bind(), which ssch/typo3-rector still calls (sabbelasichon/typo3-rector#4922). The cap in composer.json is deliberate; without this rule Renovate widens it to the next release (#232). Drop both once typo3-rector ships the fix.",
-      "matchPackageNames": ["rector/rector"],
-      "allowedVersions": "<2.6.4"
-    }
   ]
 }
