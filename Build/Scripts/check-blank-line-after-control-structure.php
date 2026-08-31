@@ -107,6 +107,38 @@ $cases['a comment before a continuation changes nothing'] = [
     'out' => inBody("        if (\$a) {\n            b();\n        } // hm\n        else {\n            d();\n        }\n"),
 ];
 
+$cases['a brace closing a string interpolation is not a block'] = [
+    // The rule keys on `}` and then asks which block it closes. A `}` ending
+    // `{$a}` closes no block, and looking for its opening brace would run past
+    // the string — an exception, or the wrong block.
+    'in'  => inBody("        \$s = \"x{\$a}y\";\n        if (\$a) {\n            b();\n        }\n        c();\n"),
+    'out' => inBody("        \$s = \"x{\$a}y\";\n        if (\$a) {\n            b();\n        }\n\n        c();\n"),
+];
+
+$cases['a brace closing an interpolation in a heredoc is not a block either'] = [
+    'in' => <<<'PHP'
+        <?php
+        $sql = <<<SQL
+            SELECT {$a} FROM t
+            SQL;
+        if ($a) {
+            b();
+        }
+        c();
+        PHP,
+    'out' => <<<'PHP'
+        <?php
+        $sql = <<<SQL
+            SELECT {$a} FROM t
+            SQL;
+        if ($a) {
+            b();
+        }
+
+        c();
+        PHP,
+];
+
 $cases['a closing tag is not a statement'] = [
     // A closing tag ends the PHP section; there is nothing after it to separate
     // from, and a blank line written there lands in the page's output. The tag
@@ -169,7 +201,7 @@ $cases['a method body end belongs to another rule'] = [
     'out' => "<?php\nclass C\n{\n    public function m(): void\n    {\n        a();\n    }\n    public function n(): void\n    {\n        b();\n    }\n}",
 ];
 
-$status = runFixtures($cases, 'applyFixer', 22);
+$status = runFixtures($cases, 'applyFixer', 24);
 
 // `blank_line_before_statement` wants to write at the same place — after a
 // closing brace, in front of a `return`. Both together must settle on exactly
