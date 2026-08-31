@@ -77,6 +77,18 @@ $cases['a block that ends its parent gets nothing'] = [
     'out' => inBody("        foreach (\$x as \$v) {\n            if (\$v) {\n                l();\n            }\n        }\n"),
 ];
 
+$cases['a comment on the brace line moves the blank line after it'] = [
+    // Without this the same code separates or not depending on whether somebody
+    // wrote `// end if` there.
+    'in'  => inBody("        if (\$a) {\n            b();\n        } // end if\n        c();\n"),
+    'out' => inBody("        if (\$a) {\n            b();\n        } // end if\n\n        c();\n"),
+];
+
+$cases['a comment before a continuation changes nothing'] = [
+    'in'  => inBody("        if (\$a) {\n            b();\n        } // hm\n        else {\n            d();\n        }\n"),
+    'out' => inBody("        if (\$a) {\n            b();\n        } // hm\n        else {\n            d();\n        }\n"),
+];
+
 $cases['a closing tag is not a statement'] = [
     // A closing tag ends the PHP section; there is nothing after it to separate
     // from, and a blank line written there lands in the page's output. The tag
@@ -139,7 +151,7 @@ $cases['a method body end belongs to another rule'] = [
     'out' => "<?php\nclass C\n{\n    public function m(): void\n    {\n        a();\n    }\n    public function n(): void\n    {\n        b();\n    }\n}",
 ];
 
-$status = runFixtures($cases, 'applyFixer', 17);
+$status = runFixtures($cases, 'applyFixer', 19);
 
 // `blank_line_before_statement` wants to write at the same place — after a
 // closing brace, in front of a `return`. Both together must settle on exactly

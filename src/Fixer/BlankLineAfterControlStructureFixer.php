@@ -136,7 +136,41 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
             }
         }
 
-        return $this->isContinuation($tokens, $next) ? null : $anchor;
+        if ($this->isContinuation($tokens, $next)) {
+            return null;
+        }
+
+        // `} // end if` — the comment belongs to the brace's line, so the blank
+        // line goes after it. Without this the same code separates or not
+        // depending on whether somebody wrote a comment there.
+        $trailing = $this->trailingComment($tokens, $anchor);
+
+        return $trailing ?? $anchor;
+    }
+
+    /**
+     * The index of a comment sitting on the same line as `$anchor`, or null.
+     */
+    private function trailingComment(Tokens $tokens, int $anchor): ?int
+    {
+        $lineEnding = $this->whitespacesConfig->getLineEnding();
+
+        if (!$tokens[$anchor + 1]->isWhitespace()
+            || str_contains($tokens[$anchor + 1]->getContent(), $lineEnding)
+        ) {
+            return null;
+        }
+
+        $comment = $anchor + 2;
+
+        if (!isset($tokens[$comment])
+            || !$tokens[$comment]->isComment()
+            || str_contains($tokens[$comment]->getContent(), $lineEnding)
+        ) {
+            return null;
+        }
+
+        return $comment;
     }
 
     private function separate(Tokens $tokens, int $anchor): void
