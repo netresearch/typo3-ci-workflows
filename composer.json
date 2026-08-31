@@ -6,6 +6,11 @@
     "bin": [
         "assets/Build/Scripts/runTests.sh"
     ],
+    "autoload": {
+        "psr-4": {
+            "Netresearch\\Typo3CiWorkflows\\": "src/"
+        }
+    },
     "require": {
         "php": "^8.2",
         "a9f/typo3-fractor": "^1.0",

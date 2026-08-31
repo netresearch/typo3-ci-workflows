@@ -1119,6 +1119,30 @@ Add this package to your extension's `require-dev`:
 
 This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows.
 
+## Code Style
+
+`config/php-cs-fixer/config.php` builds the shared PHP-CS-Fixer configuration. A third argument adds project rules on top of the shared set:
+
+```php
+$createConfig = require __DIR__ . '/../.Build/vendor/netresearch/typo3-ci-workflows/config/php-cs-fixer/config.php';
+
+return $createConfig($header, __DIR__ . '/..', [
+    'Netresearch/break_long_method_chain' => ['minimum_links' => 2],
+]);
+```
+
+### `Netresearch/break_long_method_chain`
+
+Puts every call of a method chain on its own line once the chain has at least `minimum_links` calls (default `3`). Property hops are neither counted nor broken, so `$this->connectionPool->getQueryBuilderForTable('pages')->select('uid')->executeQuery()` keeps its subject together and moves the three calls onto their own lines.
+
+The fixer is **registered but not enabled**. Reflowing every long chain in a code base is a decision each project makes in a commit of its own; arriving with a dependency update it would simply turn CGL red.
+
+Why it exists: no shipped fixer breaks a line. None of PHP-CS-Fixer's rules has a line-width concept, and `method_chaining_indentation` only indents a chain somebody already broke by hand — so a chain written on one line stays on one line however long it grows. That is invisible while humans write the code and break their own chains, and it stops being invisible as soon as code is generated from a syntax tree, because a printer reproduces whatever the rules say and a rule nobody wrote is a rule nobody applies.
+
+The trigger is the number of calls, not the width, because a fixer works on tokens and has no budget to compare against. Measured on `t3x-nr-passkeys-be` (47 classes) after re-printing it from its syntax tree: 174 lines over 120 columns without the rule, 169 at `minimum_links = 3`, 153 at `minimum_links = 2`. On the same code as its authors wrote it the rule touches 14 of 47 files at `minimum_links = 2` and 2 of 47 at `minimum_links = 3`.
+
+`Build/Scripts/check-break-long-method-chain.php` holds the fixtures, including idempotence and the hand-off to `statement_indentation`.
+
 ## Git Worktree + captainhook Workaround
 
 When using [git worktrees](https://git-scm.com/docs/git-worktree), `.git` is a file (not a directory), which causes `captainhook/hook-installer` to fail during `composer install`.
