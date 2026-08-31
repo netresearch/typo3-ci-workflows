@@ -25,8 +25,10 @@ use SplFileInfo;
  * syntax tree and reproduces whatever the rules say. Every blank line a rule
  * does not describe is gone the first time a file is written back.
  *
- * The alternative syntax (`if (…): … endif;`) has no brace and is not covered.
- * A syntax tree never prints it, which is the case this rule exists for.
+ * Two forms are out of scope, both for the same reason: a syntax tree never
+ * prints them, and that is the case this rule exists for. The alternative
+ * syntax (`if (…): … endif;`) has no brace to key on, and a body without braces
+ * (`if (…) b();`) has no block — `@PER-CS3.0` braces both anyway.
  */
 final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareFixer
 {
@@ -209,14 +211,21 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
         return $semicolon !== null && $tokens[$semicolon]->equals(';') ? $semicolon : null;
     }
 
+    /**
+     * Whether what follows must stay attached — either because it continues the
+     * structure, or because it is not a statement to be separated from at all.
+     */
     private function isContinuation(Tokens $tokens, int $index): bool
     {
         // `}` closing the parent, and `};` / `},` / `})` — a brace that is part
-        // of an expression rather than the end of a statement.
+        // of an expression rather than the end of a statement. A closing tag
+        // ends the PHP section; there is nothing after it to separate from.
+        // (Spelled out rather than written: in a line comment it would close
+        // this file's PHP section too, which is how it was found.)
         if ($tokens[$index]->equalsAny(['}', ';', ',', ')', ']'])) {
             return true;
         }
 
-        return $tokens[$index]->isGivenKind(self::CONTINUATIONS);
+        return $tokens[$index]->isGivenKind([...self::CONTINUATIONS, T_CLOSE_TAG]);
     }
 }

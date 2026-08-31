@@ -77,6 +77,22 @@ $cases['a block that ends its parent gets nothing'] = [
     'out' => inBody("        foreach (\$x as \$v) {\n            if (\$v) {\n                l();\n            }\n        }\n"),
 ];
 
+$cases['a closing tag is not a statement'] = [
+    // A closing tag ends the PHP section; there is nothing after it to separate
+    // from, and a blank line written there lands in the page's output. The tag
+    // is spelled out here rather than written: in a line comment it would close
+    // this file's own PHP section, which is how the case was found.
+    'in'  => "<?php\nif (\$a) {\n    b();\n}\n?>\ntext\n",
+    'out' => "<?php\nif (\$a) {\n    b();\n}\n?>\ntext\n",
+];
+
+$cases['a body without braces has no block'] = [
+    // Out of scope by construction, and `@PER-CS3.0` braces it before this rule
+    // ever sees it.
+    'in'  => inBody("        if (\$a) b();\n        c();\n"),
+    'out' => inBody("        if (\$a) b();\n        c();\n"),
+];
+
 $cases['a closure is not a control structure'] = [
     'in'  => inBody("        \$fn = function () {\n            return 1;\n        };\n        n();\n"),
     'out' => inBody("        \$fn = function () {\n            return 1;\n        };\n        n();\n"),
@@ -123,7 +139,7 @@ $cases['a method body end belongs to another rule'] = [
     'out' => "<?php\nclass C\n{\n    public function m(): void\n    {\n        a();\n    }\n    public function n(): void\n    {\n        b();\n    }\n}",
 ];
 
-$status = runFixtures($cases, 'applyFixer', 15);
+$status = runFixtures($cases, 'applyFixer', 17);
 
 // `blank_line_before_statement` wants to write at the same place — after a
 // closing brace, in front of a `return`. Both together must settle on exactly
