@@ -67,6 +67,13 @@ $cases['catch and finally stay attached'] = [
     'out' => inBody("        try {\n            f();\n        } catch (Throwable \$t) {\n            g();\n        } finally {\n            h();\n        }\n"),
 ];
 
+$cases['a while loop after another block is separated'] = [
+    // `while` continues a structure only after a `do` block. Treating the
+    // keyword as a continuation on its own left this loop attached to the `if`.
+    'in'  => inBody("        if (\$a) {\n            b();\n        }\n        while (\$a) {\n            c();\n        }\n"),
+    'out' => inBody("        if (\$a) {\n            b();\n        }\n\n        while (\$a) {\n            c();\n        }\n"),
+];
+
 $cases['a do-while is separated after its semicolon, not its brace'] = [
     'in'  => inBody("        do {\n            j();\n        } while (\$a);\n        k();\n"),
     'out' => inBody("        do {\n            j();\n        } while (\$a);\n\n        k();\n"),
@@ -162,7 +169,7 @@ $cases['a method body end belongs to another rule'] = [
     'out' => "<?php\nclass C\n{\n    public function m(): void\n    {\n        a();\n    }\n    public function n(): void\n    {\n        b();\n    }\n}",
 ];
 
-$status = runFixtures($cases, 'applyFixer', 21);
+$status = runFixtures($cases, 'applyFixer', 22);
 
 // `blank_line_before_statement` wants to write at the same place — after a
 // closing brace, in front of a `return`. Both together must settle on exactly

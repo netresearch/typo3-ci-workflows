@@ -53,14 +53,18 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
 
     /**
      * A blank line in front of any of these would separate a structure from its
-     * own continuation. `while` is here for `do { … } while (…);`.
+     * own continuation.
+     *
+     * `while` is deliberately absent. It continues a structure only after a
+     * `do` block, and that case is settled by looking at the block's head
+     * instead: treating every `while` as a continuation left a `while` loop
+     * following any other block unseparated.
      */
     private const CONTINUATIONS = [
         T_ELSE,
         T_ELSEIF,
         T_CATCH,
         T_FINALLY,
-        T_WHILE,
     ];
 
     public function getName(): string
@@ -99,11 +103,17 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
         // Only whitespace is replaced, never inserted, so the indices hold
         // anyway — the direction is what keeps that true if that ever changes.
         for ($index = count($tokens) - 1; $index > 0; --$index) {
-            if (!$tokens[$index]->equals('}') || !$this->closesControlStructure($tokens, $index)) {
+            if (!$tokens[$index]->equals('}')) {
                 continue;
             }
 
-            $anchor = $this->separationPoint($tokens, $index);
+            $head = $this->headOf($tokens, $index);
+
+            if ($head === null || !$tokens[$head]->isGivenKind(self::HEADS)) {
+                continue;
+            }
+
+            $anchor = $this->separationPoint($tokens, $index, $tokens[$head]->isGivenKind(T_DO));
 
             if ($anchor !== null) {
                 $this->separate($tokens, $anchor);
@@ -114,9 +124,9 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
     /**
      * Where the blank line goes, or null when nothing is to be separated.
      */
-    private function separationPoint(Tokens $tokens, int $brace): ?int
+    private function separationPoint(Tokens $tokens, int $brace, bool $isDoBlock): ?int
     {
-        $anchor = $this->endOfStructure($tokens, $brace);
+        $anchor = $this->endOfStructure($tokens, $brace, $isDoBlock);
 
         if ($anchor === null) {
             return null;
@@ -140,7 +150,7 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
      * The brace itself, except for `do { … } while (…);`, which ends at the
      * semicolon. Null when nothing follows the brace at all.
      */
-    private function endOfStructure(Tokens $tokens, int $brace): ?int
+    private function endOfStructure(Tokens $tokens, int $brace, bool $isDoBlock): ?int
     {
         $next = $tokens->getNextMeaningfulToken($brace);
 
@@ -148,7 +158,7 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
             return null;
         }
 
-        return $tokens[$next]->isGivenKind(T_WHILE)
+        return $isDoBlock && $tokens[$next]->isGivenKind(T_WHILE)
             ? $this->endOfDoWhile($tokens, $next) ?? $brace
             : $brace;
     }
@@ -214,16 +224,18 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
     }
 
     /**
-     * Whether the brace at `$index` closes the block of a control structure —
-     * as opposed to a function body, a class body, a closure or a match arm.
+     * The keyword whose block the brace at `$index` closes, or null.
+     *
+     * For a function body, a class body, a closure or a match arm that keyword
+     * is simply not one of `HEADS`; the caller decides on it.
      */
-    private function closesControlStructure(Tokens $tokens, int $index): bool
+    private function headOf(Tokens $tokens, int $index): ?int
     {
         $open = $tokens->findBlockStart(Tokens::BLOCK_TYPE_CURLY_BRACE, $index);
         $head = $tokens->getPrevMeaningfulToken($open);
 
         if ($head === null) {
-            return false;
+            return null;
         }
 
         // `if (…) {`, `foreach (…) {`, `catch (…) {` — step over the condition.
@@ -233,11 +245,11 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
             );
 
             if ($head === null) {
-                return false;
+                return null;
             }
         }
 
-        return $tokens[$head]->isGivenKind(self::HEADS);
+        return $head;
     }
 
     /**
