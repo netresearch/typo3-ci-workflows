@@ -82,6 +82,39 @@ $cases['a chain inside a string is left alone'] = [
     'out' => "<?php\n\$s = \"x{\$a->b()->c()->d()}y\";",
 ];
 
+$cases['a chain inside a heredoc is left alone'] = [
+    // The guard against writing a line break into a string's value is a flag
+    // carried along the scan, so it is checked in both places a `{$...}` can
+    // appear, not only in a double-quoted string.
+    'in' => <<<'PHP'
+        <?php
+        $sql = <<<SQL
+            SELECT {$a->b()->c()->d()} FROM t
+            SQL;
+        PHP,
+    'out' => <<<'PHP'
+        <?php
+        $sql = <<<SQL
+            SELECT {$a->b()->c()->d()} FROM t
+            SQL;
+        PHP,
+];
+
+$cases['a chain that only looks like one inside a nowdoc is left alone'] = [
+    'in' => <<<'PHP'
+        <?php
+        $text = <<<'SQL'
+            literal $a->b()->c()->d()
+            SQL;
+        PHP,
+    'out' => <<<'PHP'
+        <?php
+        $text = <<<'SQL'
+            literal $a->b()->c()->d()
+            SQL;
+        PHP,
+];
+
 $cases['a dynamic call aborts the chain'] = [
     'in'  => "<?php\n\$a->b()->{\$c}()->d()->e();",
     'out' => "<?php\n\$a->b()->{\$c}()->d()->e();",
@@ -188,8 +221,8 @@ $status = 0;
 
 // A case whose fixture silently loses its body — an unescaped `$a` in a
 // double-quoted string, say — still passes, so the count is asserted too.
-if (count($cases) !== 13) {
-    echo 'FAIL: expected 13 cases, found ' . count($cases) . "\n";
+if (count($cases) !== 15) {
+    echo 'FAIL: expected 15 cases, found ' . count($cases) . "\n";
     $status = 1;
 }
 
