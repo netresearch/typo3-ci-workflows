@@ -32,6 +32,10 @@ function applyFixer(string $code, array $configuration = []): string
     return $tokens->generateCode();
 }
 
+// Used as the input of the two-call case and of the threshold check, which are
+// the same code read against two different settings.
+const TWO_CALLS = "<?php\n\$q->from('pages')->executeQuery();";
+
 $cases = [];
 
 $cases['three calls are broken'] = [
@@ -49,8 +53,8 @@ $cases['three calls are broken'] = [
 ];
 
 $cases['two calls stay on one line'] = [
-    'in'  => "<?php\n\$q->from('pages')->executeQuery();",
-    'out' => "<?php\n\$q->from('pages')->executeQuery();",
+    'in'  => TWO_CALLS,
+    'out' => TWO_CALLS,
 ];
 
 $cases['property hops keep their subject'] = [
@@ -248,7 +252,7 @@ foreach ($cases as $name => $case) {
 }
 
 // The threshold is what the rule is configured on, so it is checked directly.
-$twoLinks = applyFixer("<?php\n\$q->from('pages')->executeQuery();", ['minimum_links' => 2]);
+$twoLinks = applyFixer(TWO_CALLS, ['minimum_links' => 2]);
 
 if ($twoLinks !== "<?php\n\$q\n    ->from('pages')\n    ->executeQuery();") {
     echo "FAIL: minimum_links is not honoured\n--- actual ---\n{$twoLinks}\n";
