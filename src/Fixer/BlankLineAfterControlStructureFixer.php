@@ -140,34 +140,44 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
             return null;
         }
 
-        // `} // end if` — the comment belongs to the brace's line, so the blank
-        // line goes after it. Without this the same code separates or not
+        // `} // end if` — a comment on the brace's line belongs to it, so the
+        // blank line goes after it. Without this the same code separates or not
         // depending on whether somebody wrote a comment there.
-        $trailing = $this->trailingComment($tokens, $anchor);
-
-        return $trailing ?? $anchor;
+        return $this->trailingComments($tokens, $anchor) ?? $anchor;
     }
 
     /**
-     * The index of a comment that starts on the same line as `$anchor`.
+     * The last of the comments that start on the same line as `$anchor`.
      *
-     * Where it ends does not matter — a block comment opened on the brace's
-     * line belongs to that line just as a `//` one does, and the blank line
-     * goes after all of it.
+     * Where a comment ends does not matter — one opened on the brace's line
+     * belongs to that line just as a `//` one does, and the blank line goes
+     * after all of them. Null when the brace's line ends right there.
      */
-    private function trailingComment(Tokens $tokens, int $anchor): ?int
+    private function trailingComments(Tokens $tokens, int $anchor): ?int
     {
         $lineEnding = $this->whitespacesConfig->getLineEnding();
+        $last       = null;
 
-        if (!$tokens[$anchor + 1]->isWhitespace()
-            || str_contains($tokens[$anchor + 1]->getContent(), $lineEnding)
-        ) {
-            return null;
+        for ($index = $anchor + 1; isset($tokens[$index]); ++$index) {
+            $token = $tokens[$index];
+
+            if ($token->isWhitespace()) {
+                // A line break ends the brace's line; what follows is not on it.
+                if (str_contains($token->getContent(), $lineEnding)) {
+                    return $last;
+                }
+
+                continue;
+            }
+
+            if (!$token->isComment()) {
+                return $last;
+            }
+
+            $last = $index;
         }
 
-        $comment = $anchor + 2;
-
-        return isset($tokens[$comment]) && $tokens[$comment]->isComment() ? $comment : null;
+        return $last;
     }
 
     private function separate(Tokens $tokens, int $anchor): void
