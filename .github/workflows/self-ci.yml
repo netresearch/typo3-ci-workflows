@@ -148,6 +148,11 @@ jobs:
         # violation once made `statement_indentation` die on the result.
         run: php -dzend.assertions=1 Build/Scripts/check-break-long-method-chain.php
 
+      - name: Check the blank-line-after-control-structure fixer
+        # Same reasoning as the step above: the shared config factory registers
+        # this fixer, so a defect in it reaches every consumer that opts in.
+        run: php -dzend.assertions=1 Build/Scripts/check-blank-line-after-control-structure.php
+
       - name: Smoke test rector config factory
         run: |
           cat > /tmp/smoke-rector.php << 'PHPEOF'
