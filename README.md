@@ -1127,9 +1127,30 @@ This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, t
 $createConfig = require __DIR__ . '/../.Build/vendor/netresearch/typo3-ci-workflows/config/php-cs-fixer/config.php';
 
 return $createConfig($header, __DIR__ . '/..', [
+    'Netresearch/blank_line_after_control_structure' => true,
     'Netresearch/break_long_method_chain' => ['minimum_links' => 2],
 ]);
 ```
+
+### `Netresearch/blank_line_after_control_structure`
+
+Separates a control structure from the statement after it by a blank line — `if`, `else`, `elseif`, `for`, `foreach`, `while`, `do … while`, `switch`, `try`, `catch`, `finally`. A continuation (`else`, `catch`, `finally`, the `while` of a `do`) is never torn off its structure, a closure or a `match` arm list is not a control structure, and a brace that ends its parent gets nothing.
+
+Also **registered but not enabled**, for the same reason as the rule below.
+
+Why it exists: `blank_line_before_statement` writes a blank line in *front* of a statement; nothing writes one *after* a block. That gap is not a matter of taste. Measured over the 48 classes of `t3x-nr-passkeys-be`, a closing brace inside a method body is followed by a blank line in **232 of 247 places — 93 %**, against 37 % for the blank line before an `if` that the shipped rule does enforce. The one rule the code actually keeps is the one no fixer knows, and it is gone the first time a file is written back from a syntax tree.
+
+What it recovers, on the same 48 classes re-printed from their syntax tree, counted by position rather than by number of blank lines:
+
+| rules | blank lines back in place | at a new place |
+|---|---|---|
+| `@PER-CS3.0` alone | 185 of 916 (20 %) | 0 |
+| `+ class_attributes_separation + blank_line_before_statement` | 512 (55 %) | 208 |
+| `+ Netresearch/blank_line_after_control_structure` | 624 (68 %) | 213 |
+
+The rule adds 112 correct positions and 5 wrong ones. What no rule recovers — 180 blank lines between plain statements, 28 in front of comments — is habit rather than rule: the authors set them in 45 % of the eligible places. The blank lines *at a new place* are the rules doing their job, not a defect: the shipped `blank_line_before_statement` enforces something the authors did in 37–50 % of cases.
+
+`Build/Scripts/check-blank-line-after-control-structure.php` holds the fixtures, including the hand-off to `blank_line_before_statement`, which wants to write at the same place.
 
 ### `Netresearch/break_long_method_chain`
 

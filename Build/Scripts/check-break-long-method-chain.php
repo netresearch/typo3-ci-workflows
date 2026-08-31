@@ -2,11 +2,7 @@
 
 /*
  * Fixture check for the Netresearch/break_long_method_chain fixer.
- *
- * Every case states the input and the exact expected output, and every case is
- * run twice: a formatting rule that does not reach a fixed point rewrites the
- * code base on each run, so idempotence is checked here rather than noticed in
- * a pull request.
+ * The frame every case runs in is in fixture-runner.php.
  *
  * Usage: php Build/Scripts/check-break-long-method-chain.php
  */
@@ -17,6 +13,7 @@ use Netresearch\Typo3CiWorkflows\Fixer\BreakLongMethodChainFixer;
 use PhpCsFixer\Tokenizer\Tokens;
 
 require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/fixture-runner.php';
 
 /**
  * @param array{minimum_links?: int} $configuration
@@ -221,60 +218,7 @@ $cases['a nullsafe operator counts as a link'] = [
     'out' => "<?php\n\$a\n    ?->b()\n    ?->c()\n    ?->d();",
 ];
 
-$status = 0;
-
-// A case whose fixture silently loses its body — an unescaped `$a` in a
-// double-quoted string, say — still passes, so the count is asserted too.
-if (count($cases) !== 15) {
-    echo 'FAIL: expected 15 cases, found ' . count($cases) . "\n";
-    $status = 1;
-}
-
-foreach ($cases as $name => $case) {
-    $first  = applyFixer($case['in']);
-    $second = applyFixer($first);
-
-    if ($first !== $case['out']) {
-        echo "FAIL: {$name}\n--- expected ---\n{$case['out']}\n--- actual ---\n{$first}\n\n";
-        $status = 1;
-
-        continue;
-    }
-
-    if ($second !== $first) {
-        echo "FAIL: {$name} — not idempotent\n--- run 2 ---\n{$second}\n\n";
-        $status = 1;
-
-        continue;
-    }
-
-    echo "ok: {$name}\n";
-}
-
-// The threshold is what the rule is configured on, so it is checked directly.
-$twoLinks = applyFixer(TWO_CALLS, ['minimum_links' => 2]);
-
-if ($twoLinks !== "<?php\n\$q\n    ->from('pages')\n    ->executeQuery();") {
-    echo "FAIL: minimum_links is not honoured\n--- actual ---\n{$twoLinks}\n";
-    $status = 1;
-} else {
-    echo "ok: minimum_links is honoured\n";
-}
-
-// Tabs must reach the output, otherwise the rule fights the project's own
-// indentation on every run.
-$fixer = new BreakLongMethodChainFixer();
-$fixer->configure([]);
-$fixer->setWhitespacesConfig(new PhpCsFixer\WhitespacesFixerConfig("\t", "\n"));
-$tokens = Tokens::fromCode("<?php\n\$q->a()->b()->c();");
-$fixer->fix(new SplFileInfo(__FILE__), $tokens);
-
-if ($tokens->generateCode() !== "<?php\n\$q\n\t->a()\n\t->b()\n\t->c();") {
-    echo "FAIL: the configured indent is ignored\n--- actual ---\n" . $tokens->generateCode() . "\n";
-    $status = 1;
-} else {
-    echo "ok: the configured indent is used\n";
-}
+$status = runFixtures($cases, static fn (string $code): string => applyFixer($code), 15);
 
 // A threshold below one is not a smaller threshold, it is a different fixer:
 // every property access becomes an empty candidate chain and the first link is
@@ -325,11 +269,10 @@ foreach (explode("\n", $fixed) as $number => $line) {
     }
 }
 
-if ($stray !== []) {
-    echo "FAIL: a break landed in front of an argument separator\n  " . implode("\n  ", $stray) . "\n";
-    $status = 1;
-} else {
-    echo "ok: no break lands in front of a separator\n";
-}
+$status |= assertFixture(
+    $stray === [],
+    'no break lands in front of a separator',
+    implode("\n", $stray),
+);
 
 exit($status);

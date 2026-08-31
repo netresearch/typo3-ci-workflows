@@ -24,6 +24,7 @@
 
 declare(strict_types=1);
 
+use Netresearch\Typo3CiWorkflows\Fixer\BlankLineAfterControlStructureFixer;
 use Netresearch\Typo3CiWorkflows\Fixer\BreakLongMethodChainFixer;
 
 /**
@@ -44,7 +45,10 @@ return static function (string $header, string $projectRoot, array $extraRules =
         // Registered, not enabled: a rule that reflows every long chain in a
         // code base has to be adopted in a commit of its own, per project, not
         // arrive with a dependency update. See docs/php-cs-fixer.md.
-        ->registerCustomFixers([new BreakLongMethodChainFixer()])
+        ->registerCustomFixers([
+            new BlankLineAfterControlStructureFixer(),
+            new BreakLongMethodChainFixer(),
+        ])
         ->setRules(array_merge($rules, [
             'header_comment' => [
                 'header'       => $header,

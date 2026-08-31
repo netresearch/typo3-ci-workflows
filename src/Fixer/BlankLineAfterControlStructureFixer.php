@@ -1,0 +1,291 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Netresearch\Typo3CiWorkflows\Fixer;
+
+use PhpCsFixer\FixerDefinition\CodeSample;
+use PhpCsFixer\FixerDefinition\FixerDefinition;
+use PhpCsFixer\FixerDefinition\FixerDefinitionInterface;
+use PhpCsFixer\Tokenizer\Token;
+use PhpCsFixer\Tokenizer\Tokens;
+use SplFileInfo;
+
+/**
+ * Separates a control structure from whatever follows it with a blank line.
+ *
+ * `blank_line_before_statement` writes a blank line in front of a statement;
+ * nothing writes one after a block. That gap is not a matter of taste: measured
+ * over a 48-class extension, a closing brace inside a method body is followed by
+ * a blank line in 232 of 247 places — 93 %, against 37 % for the blank line
+ * before an `if` that the shipped rule does enforce. The one rule the code
+ * actually keeps is the one no fixer knows.
+ *
+ * It matters for the same reason the chain rule does: a printer renders from a
+ * syntax tree and reproduces whatever the rules say. Every blank line a rule
+ * does not describe is gone the first time a file is written back.
+ *
+ * Two forms are out of scope, both for the same reason: a syntax tree never
+ * prints them, and that is the case this rule exists for. The alternative
+ * syntax (`if (…): … endif;`) has no brace to key on, and a body without braces
+ * (`if (…) b();`) has no block — `@PER-CS3.0` braces both anyway.
+ */
+final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareFixer
+{
+    /**
+     * The keywords whose block this rule applies to. `else`, `elseif`, `catch`
+     * and `finally` are in here as block heads; they are excluded separately as
+     * *followers*, where a blank line would tear one structure apart.
+     */
+    private const HEADS = [
+        T_IF,
+        T_ELSE,
+        T_ELSEIF,
+        T_FOR,
+        T_FOREACH,
+        T_WHILE,
+        T_DO,
+        T_SWITCH,
+        T_TRY,
+        T_CATCH,
+        T_FINALLY,
+    ];
+
+    /**
+     * A blank line in front of any of these would separate a structure from its
+     * own continuation.
+     *
+     * `while` is deliberately absent. It continues a structure only after a
+     * `do` block, and that case is settled by looking at the block's head
+     * instead: treating every `while` as a continuation left a `while` loop
+     * following any other block unseparated.
+     */
+    private const CONTINUATIONS = [
+        T_ELSE,
+        T_ELSEIF,
+        T_CATCH,
+        T_FINALLY,
+    ];
+
+    public function getName(): string
+    {
+        return 'Netresearch/blank_line_after_control_structure';
+    }
+
+    public function getPriority(): int
+    {
+        // Below `no_extra_blank_lines` (-20 in the shipped set is lower still),
+        // so that whatever removes blank lines has had its say first and this
+        // rule is not undone right after it ran.
+        return -21;
+    }
+
+    public function isCandidate(Tokens $tokens): bool
+    {
+        return $tokens->isAnyTokenKindsFound(self::HEADS);
+    }
+
+    public function getDefinition(): FixerDefinitionInterface
+    {
+        return new FixerDefinition(
+            'A control structure is separated from the statement after it by a blank line.',
+            [
+                new CodeSample(
+                    "<?php\nif (\$a) {\n    b();\n}\nc();\n",
+                ),
+            ],
+        );
+    }
+
+    public function fix(SplFileInfo $file, Tokens $tokens): void
+    {
+        // Back to front, so that a brace still to be looked at keeps its index.
+        // Only whitespace is replaced, never inserted, so the indices hold
+        // anyway — the direction is what keeps that true if that ever changes.
+        for ($index = count($tokens) - 1; $index > 0; --$index) {
+            if (!$tokens[$index]->equals('}')) {
+                continue;
+            }
+
+            $head = $this->headOf($tokens, $index);
+
+            if ($head === null || !$tokens[$head]->isGivenKind(self::HEADS)) {
+                continue;
+            }
+
+            $anchor = $this->separationPoint($tokens, $index, $tokens[$head]->isGivenKind(T_DO));
+
+            if ($anchor !== null) {
+                $this->separate($tokens, $anchor);
+            }
+        }
+    }
+
+    /**
+     * Where the blank line goes, or null when nothing is to be separated.
+     */
+    private function separationPoint(Tokens $tokens, int $brace, bool $isDoBlock): ?int
+    {
+        $anchor = $this->endOfStructure($tokens, $brace, $isDoBlock);
+
+        if ($anchor === null) {
+            return null;
+        }
+
+        $next = $tokens->getNextMeaningfulToken($anchor);
+
+        if ($next === null || $this->isContinuation($tokens, $next)) {
+            return null;
+        }
+
+        // `} // end if` — a comment on the brace's line belongs to it, so the
+        // blank line goes after it. Without this the same code separates or not
+        // depending on whether somebody wrote a comment there.
+        return $this->trailingComments($tokens, $anchor) ?? $anchor;
+    }
+
+    /**
+     * The last token of the structure the brace at `$brace` closes.
+     *
+     * The brace itself, except for `do { … } while (…);`, which ends at the
+     * semicolon. Null when nothing follows the brace at all.
+     */
+    private function endOfStructure(Tokens $tokens, int $brace, bool $isDoBlock): ?int
+    {
+        $next = $tokens->getNextMeaningfulToken($brace);
+
+        if ($next === null) {
+            return null;
+        }
+
+        return $isDoBlock && $tokens[$next]->isGivenKind(T_WHILE)
+            ? $this->endOfDoWhile($tokens, $next) ?? $brace
+            : $brace;
+    }
+
+    /**
+     * The last of the comments that start on the same line as `$anchor`.
+     *
+     * Where a comment ends does not matter — one opened on the brace's line
+     * belongs to that line just as a `//` one does, and the blank line goes
+     * after all of them. Null when the brace's line ends right there.
+     */
+    private function trailingComments(Tokens $tokens, int $anchor): ?int
+    {
+        $lineEnding = $this->whitespacesConfig->getLineEnding();
+        $last       = null;
+
+        for ($index = $anchor + 1; isset($tokens[$index]); ++$index) {
+            $token = $tokens[$index];
+
+            if ($token->isWhitespace()) {
+                // A line break ends the brace's line; what follows is not on it.
+                if (str_contains($token->getContent(), $lineEnding)) {
+                    return $last;
+                }
+
+                continue;
+            }
+
+            if (!$token->isComment()) {
+                return $last;
+            }
+
+            $last = $index;
+        }
+
+        return $last;
+    }
+
+    private function separate(Tokens $tokens, int $anchor): void
+    {
+        $lineEnding = $this->whitespacesConfig->getLineEnding();
+        $whitespace = $tokens[$anchor + 1];
+
+        // Nothing to separate when the next statement continues on the same
+        // line: this rule writes a blank line, it does not break one. How
+        // compactly the body itself is written does not matter.
+        if (!$whitespace->isWhitespace() || !str_contains($whitespace->getContent(), $lineEnding)) {
+            return;
+        }
+
+        $lines = explode($lineEnding, $whitespace->getContent());
+
+        // More than one blank line already: how many is too many belongs to
+        // `no_extra_blank_lines`, and fighting it would cost the fixed point.
+        if (count($lines) > 2) {
+            return;
+        }
+
+        $tokens[$anchor + 1] = new Token([
+            T_WHITESPACE,
+            $lineEnding . $lineEnding . end($lines),
+        ]);
+    }
+
+    /**
+     * The keyword whose block the brace at `$index` closes, or null.
+     *
+     * For a function body, a class body, a closure or a match arm that keyword
+     * is simply not one of `HEADS`; the caller decides on it.
+     */
+    private function headOf(Tokens $tokens, int $index): ?int
+    {
+        $open = $tokens->findBlockStart(Tokens::BLOCK_TYPE_CURLY_BRACE, $index);
+        $head = $tokens->getPrevMeaningfulToken($open);
+
+        if ($head === null) {
+            return null;
+        }
+
+        // `if (…) {`, `foreach (…) {`, `catch (…) {` — step over the condition.
+        if ($tokens[$head]->equals(')')) {
+            $head = $tokens->getPrevMeaningfulToken(
+                $tokens->findBlockStart(Tokens::BLOCK_TYPE_PARENTHESIS_BRACE, $head),
+            );
+
+            if ($head === null) {
+                return null;
+            }
+        }
+
+        return $head;
+    }
+
+    /**
+     * The semicolon that ends a `do { … } while (…);`, or null when the `while`
+     * at `$index` opens a loop of its own.
+     */
+    private function endOfDoWhile(Tokens $tokens, int $index): ?int
+    {
+        $condition = $tokens->getNextMeaningfulToken($index);
+
+        if ($condition === null || !$tokens[$condition]->equals('(')) {
+            return null;
+        }
+
+        $semicolon = $tokens->getNextMeaningfulToken(
+            $tokens->findBlockEnd(Tokens::BLOCK_TYPE_PARENTHESIS_BRACE, $condition),
+        );
+
+        return $semicolon !== null && $tokens[$semicolon]->equals(';') ? $semicolon : null;
+    }
+
+    /**
+     * Whether what follows must stay attached — either because it continues the
+     * structure, or because it is not a statement to be separated from at all.
+     */
+    private function isContinuation(Tokens $tokens, int $index): bool
+    {
+        // `}` closing the parent, and `};` / `},` / `})` — a brace that is part
+        // of an expression rather than the end of a statement. A closing tag
+        // ends the PHP section; there is nothing after it to separate from.
+        // (Spelled out rather than written: in a line comment it would close
+        // this file's PHP section too, which is how it was found.)
+        if ($tokens[$index]->equalsAny(['}', ';', ',', ')', ']'])) {
+            return true;
+        }
+
+        return $tokens[$index]->isGivenKind([...self::CONTINUATIONS, T_CLOSE_TAG]);
+    }
+}
