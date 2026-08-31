@@ -112,31 +112,19 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
     }
 
     /**
-     * The token the structure ends at, or null when nothing is to be separated.
-     *
-     * That is the brace itself, except for `do { … } while (…);`, which ends at
-     * the semicolon.
+     * Where the blank line goes, or null when nothing is to be separated.
      */
     private function separationPoint(Tokens $tokens, int $brace): ?int
     {
-        $next = $tokens->getNextMeaningfulToken($brace);
+        $anchor = $this->endOfStructure($tokens, $brace);
 
-        if ($next === null) {
+        if ($anchor === null) {
             return null;
         }
 
-        $anchor = $brace;
+        $next = $tokens->getNextMeaningfulToken($anchor);
 
-        if ($tokens[$next]->isGivenKind(T_WHILE)) {
-            $anchor = $this->endOfDoWhile($tokens, $next) ?? $anchor;
-            $next   = $tokens->getNextMeaningfulToken($anchor);
-
-            if ($next === null) {
-                return null;
-            }
-        }
-
-        if ($this->isContinuation($tokens, $next)) {
+        if ($next === null || $this->isContinuation($tokens, $next)) {
             return null;
         }
 
@@ -144,6 +132,25 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
         // blank line goes after it. Without this the same code separates or not
         // depending on whether somebody wrote a comment there.
         return $this->trailingComments($tokens, $anchor) ?? $anchor;
+    }
+
+    /**
+     * The last token of the structure the brace at `$brace` closes.
+     *
+     * The brace itself, except for `do { … } while (…);`, which ends at the
+     * semicolon. Null when nothing follows the brace at all.
+     */
+    private function endOfStructure(Tokens $tokens, int $brace): ?int
+    {
+        $next = $tokens->getNextMeaningfulToken($brace);
+
+        if ($next === null) {
+            return null;
+        }
+
+        return $tokens[$next]->isGivenKind(T_WHILE)
+            ? $this->endOfDoWhile($tokens, $next) ?? $brace
+            : $brace;
     }
 
     /**
