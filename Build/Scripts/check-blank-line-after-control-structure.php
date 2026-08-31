@@ -35,11 +35,16 @@ function inBody(string $body): string
     return "<?php\nclass C\n{\n    public function m(): void\n    {\n" . $body . "    }\n}";
 }
 
+// The if/c() pair is the rule's basic shape and stands in three cases: what it
+// writes, and what it leaves alone once it is there.
+const IF_JOINED    = "        if (\$a) {\n            b();\n        }\n        c();\n";
+const IF_SEPARATED = "        if (\$a) {\n            b();\n        }\n\n        c();\n";
+
 $cases = [];
 
 $cases['an if is separated from what follows'] = [
-    'in'  => inBody("        if (\$a) {\n            b();\n        }\n        c();\n"),
-    'out' => inBody("        if (\$a) {\n            b();\n        }\n\n        c();\n"),
+    'in'  => inBody(IF_JOINED),
+    'out' => inBody(IF_SEPARATED),
 ];
 
 $cases['else is not torn off its if'] = [
@@ -105,8 +110,8 @@ $cases['what continues on the same line is left alone'] = [
 ];
 
 $cases['a blank line that is already there stays one'] = [
-    'in'  => inBody("        if (\$a) {\n            b();\n        }\n\n        c();\n"),
-    'out' => inBody("        if (\$a) {\n            b();\n        }\n\n        c();\n"),
+    'in'  => inBody(IF_SEPARATED),
+    'out' => inBody(IF_SEPARATED),
 ];
 
 $cases['two blank lines are left to the rule that owns them'] = [

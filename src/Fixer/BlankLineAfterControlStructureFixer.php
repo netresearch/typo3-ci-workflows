@@ -118,8 +118,6 @@ final class BlankLineAfterControlStructureFixer implements FixerInterface, White
 
     public function fix(SplFileInfo $file, Tokens $tokens): void
     {
-        $lineEnding = $this->whitespacesConfig->getLineEnding();
-
         // Back to front, so that a brace still to be looked at keeps its index.
         // Only whitespace is replaced, never inserted, so the indices hold
         // anyway — the direction is what keeps that true if that ever changes.
@@ -128,49 +126,66 @@ final class BlankLineAfterControlStructureFixer implements FixerInterface, White
                 continue;
             }
 
-            // Where the statement ends. That is the brace, except for
-            // `do { … } while (…);`, which ends at the semicolon — and this is
-            // never the loop counter, which has to keep walking backwards.
-            $anchor = $index;
+            $anchor = $this->separationPoint($tokens, $index);
+
+            if ($anchor !== null) {
+                $this->separate($tokens, $anchor);
+            }
+        }
+    }
+
+    /**
+     * The token the structure ends at, or null when nothing is to be separated.
+     *
+     * That is the brace itself, except for `do { … } while (…);`, which ends at
+     * the semicolon.
+     */
+    private function separationPoint(Tokens $tokens, int $brace): ?int
+    {
+        $next = $tokens->getNextMeaningfulToken($brace);
+
+        if ($next === null) {
+            return null;
+        }
+
+        $anchor = $brace;
+
+        if ($tokens[$next]->isGivenKind(T_WHILE)) {
+            $anchor = $this->endOfDoWhile($tokens, $next) ?? $anchor;
             $next   = $tokens->getNextMeaningfulToken($anchor);
 
             if ($next === null) {
-                continue;
+                return null;
             }
-
-            if ($tokens[$next]->isGivenKind(T_WHILE)) {
-                $anchor = $this->endOfDoWhile($tokens, $next) ?? $anchor;
-                $next   = $tokens->getNextMeaningfulToken($anchor);
-
-                if ($next === null) {
-                    continue;
-                }
-            }
-
-            if ($this->isContinuation($tokens, $next)) {
-                continue;
-            }
-
-            $whitespace = $tokens[$anchor + 1];
-
-            // Nothing to separate when the next statement continues on the
-            // same line: this rule writes a blank line, it does not break one.
-            // How compactly the body itself is written does not matter.
-            if (!$whitespace->isWhitespace() || !str_contains($whitespace->getContent(), $lineEnding)) {
-                continue;
-            }
-
-            $lines = explode($lineEnding, $whitespace->getContent());
-
-            if (count($lines) > 2) {
-                continue;
-            }
-
-            $tokens[$anchor + 1] = new Token([
-                T_WHITESPACE,
-                $lineEnding . $lineEnding . end($lines),
-            ]);
         }
+
+        return $this->isContinuation($tokens, $next) ? null : $anchor;
+    }
+
+    private function separate(Tokens $tokens, int $anchor): void
+    {
+        $lineEnding = $this->whitespacesConfig->getLineEnding();
+        $whitespace = $tokens[$anchor + 1];
+
+        // Nothing to separate when the next statement continues on the same
+        // line: this rule writes a blank line, it does not break one. How
+        // compactly the body itself is written does not matter.
+        if (!$whitespace->isWhitespace() || !str_contains($whitespace->getContent(), $lineEnding)) {
+            return;
+        }
+
+        $lines = explode($lineEnding, $whitespace->getContent());
+
+        // More than one blank line already: how many is too many belongs to
+        // `no_extra_blank_lines`, and fighting it would cost the fixed point.
+        if (count($lines) > 2) {
+            return;
+        }
+
+        $tokens[$anchor + 1] = new Token([
+            T_WHITESPACE,
+            $lineEnding . $lineEnding . end($lines),
+        ]);
     }
 
     /**
