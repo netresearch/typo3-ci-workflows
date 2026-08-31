@@ -2,11 +2,7 @@
 
 /*
  * Fixture check for the Netresearch/blank_line_after_control_structure fixer.
- *
- * Every case states the input and the exact expected output, and every case is
- * run twice: a formatting rule that does not reach a fixed point rewrites the
- * code base on each run, so idempotence is checked here rather than noticed in
- * a pull request.
+ * The frame every case runs in is in fixture-runner.php.
  *
  * Usage: php Build/Scripts/check-blank-line-after-control-structure.php
  */
@@ -17,6 +13,7 @@ use Netresearch\Typo3CiWorkflows\Fixer\BlankLineAfterControlStructureFixer;
 use PhpCsFixer\Tokenizer\Tokens;
 
 require_once __DIR__ . '/../../vendor/autoload.php';
+require_once __DIR__ . '/fixture-runner.php';
 
 function applyFixer(string $code): string
 {
@@ -126,35 +123,7 @@ $cases['a method body end belongs to another rule'] = [
     'out' => "<?php\nclass C\n{\n    public function m(): void\n    {\n        a();\n    }\n    public function n(): void\n    {\n        b();\n    }\n}",
 ];
 
-$status = 0;
-
-// A case whose fixture silently loses its body still passes, so the count is
-// asserted too.
-if (count($cases) !== 15) {
-    echo 'FAIL: expected 15 cases, found ' . count($cases) . "\n";
-    $status = 1;
-}
-
-foreach ($cases as $name => $case) {
-    $first  = applyFixer($case['in']);
-    $second = applyFixer($first);
-
-    if ($first !== $case['out']) {
-        echo "FAIL: {$name}\n--- expected ---\n{$case['out']}\n--- actual ---\n{$first}\n\n";
-        $status = 1;
-
-        continue;
-    }
-
-    if ($second !== $first) {
-        echo "FAIL: {$name} — not idempotent\n--- run 2 ---\n{$second}\n\n";
-        $status = 1;
-
-        continue;
-    }
-
-    echo "ok: {$name}\n";
-}
+$status = runFixtures($cases, 'applyFixer', 15);
 
 // `blank_line_before_statement` wants to write at the same place — after a
 // closing brace, in front of a `return`. Both together must settle on exactly
@@ -165,12 +134,11 @@ $statements = new PhpCsFixer\Fixer\Whitespace\BlankLineBeforeStatementFixer();
 $statements->configure(['statements' => ['return']]);
 $statements->fix(new SplFileInfo(__FILE__), $both);
 
-if ($both->generateCode() !== inBody("        if (\$a) {\n            b();\n        }\n\n        return 1;\n")) {
-    echo "FAIL: together with blank_line_before_statement\n--- actual ---\n" . $both->generateCode() . "\n";
-    $status = 1;
-} else {
-    echo "ok: settles on one blank line with blank_line_before_statement\n";
-}
+$status |= assertFixture(
+    $both->generateCode() === inBody("        if (\$a) {\n            b();\n        }\n\n        return 1;\n"),
+    'settles on one blank line with blank_line_before_statement',
+    $both->generateCode(),
+);
 
 // Tabs must reach the output, otherwise the rule fights the project's own
 // indentation on every run.
@@ -179,11 +147,10 @@ $fixer  = new BlankLineAfterControlStructureFixer();
 $fixer->setWhitespacesConfig(new PhpCsFixer\WhitespacesFixerConfig("\t", "\n"));
 $fixer->fix(new SplFileInfo(__FILE__), $tabbed);
 
-if ($tabbed->generateCode() !== "<?php\nif (\$a) {\n\tb();\n}\n\nc();") {
-    echo "FAIL: the configured line ending is ignored\n--- actual ---\n" . $tabbed->generateCode() . "\n";
-    $status = 1;
-} else {
-    echo "ok: the configured whitespace is used\n";
-}
+$status |= assertFixture(
+    $tabbed->generateCode() === "<?php\nif (\$a) {\n\tb();\n}\n\nc();",
+    'the configured whitespace is used',
+    $tabbed->generateCode(),
+);
 
 exit($status);

@@ -4,14 +4,11 @@ declare(strict_types=1);
 
 namespace Netresearch\Typo3CiWorkflows\Fixer;
 
-use PhpCsFixer\Fixer\FixerInterface;
-use PhpCsFixer\Fixer\WhitespacesAwareFixerInterface;
 use PhpCsFixer\FixerDefinition\CodeSample;
 use PhpCsFixer\FixerDefinition\FixerDefinition;
 use PhpCsFixer\FixerDefinition\FixerDefinitionInterface;
 use PhpCsFixer\Tokenizer\Token;
 use PhpCsFixer\Tokenizer\Tokens;
-use PhpCsFixer\WhitespacesFixerConfig;
 use SplFileInfo;
 
 /**
@@ -31,7 +28,7 @@ use SplFileInfo;
  * The alternative syntax (`if (…): … endif;`) has no brace and is not covered.
  * A syntax tree never prints it, which is the case this rule exists for.
  */
-final class BlankLineAfterControlStructureFixer implements FixerInterface, WhitespacesAwareFixerInterface
+final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareFixer
 {
     /**
      * The keywords whose block this rule applies to. `else`, `elseif`, `catch`
@@ -64,18 +61,6 @@ final class BlankLineAfterControlStructureFixer implements FixerInterface, White
         T_WHILE,
     ];
 
-    private WhitespacesFixerConfig $whitespacesConfig;
-
-    public function __construct()
-    {
-        $this->whitespacesConfig = new WhitespacesFixerConfig();
-    }
-
-    public function setWhitespacesConfig(WhitespacesFixerConfig $config): void
-    {
-        $this->whitespacesConfig = $config;
-    }
-
     public function getName(): string
     {
         return 'Netresearch/blank_line_after_control_structure';
@@ -87,16 +72,6 @@ final class BlankLineAfterControlStructureFixer implements FixerInterface, White
         // so that whatever removes blank lines has had its say first and this
         // rule is not undone right after it ran.
         return -21;
-    }
-
-    public function supports(SplFileInfo $file): bool
-    {
-        return true;
-    }
-
-    public function isRisky(): bool
-    {
-        return false;
     }
 
     public function isCandidate(Tokens $tokens): bool

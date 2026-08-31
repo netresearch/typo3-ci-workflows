@@ -6,7 +6,6 @@ namespace Netresearch\Typo3CiWorkflows\Fixer;
 
 use PhpCsFixer\ConfigurationException\InvalidFixerConfigurationException;
 use PhpCsFixer\Fixer\ConfigurableFixerInterface;
-use PhpCsFixer\Fixer\WhitespacesAwareFixerInterface;
 use PhpCsFixer\FixerConfiguration\FixerConfigurationResolver;
 use PhpCsFixer\FixerConfiguration\FixerConfigurationResolverInterface;
 use PhpCsFixer\FixerConfiguration\FixerOptionBuilder;
@@ -15,7 +14,6 @@ use PhpCsFixer\FixerDefinition\FixerDefinition;
 use PhpCsFixer\FixerDefinition\FixerDefinitionInterface;
 use PhpCsFixer\Tokenizer\Token;
 use PhpCsFixer\Tokenizer\Tokens;
-use PhpCsFixer\WhitespacesFixerConfig;
 use SplFileInfo;
 use Symfony\Component\OptionsResolver\Exception\ExceptionInterface;
 
@@ -37,16 +35,9 @@ use Symfony\Component\OptionsResolver\Exception\ExceptionInterface;
  *
  * @implements ConfigurableFixerInterface<array{minimum_links?: int}, array{minimum_links: int}>
  */
-final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, WhitespacesAwareFixerInterface
+final class BreakLongMethodChainFixer extends AbstractWhitespaceAwareFixer implements ConfigurableFixerInterface
 {
     private int $minimumLinks = 3;
-
-    private WhitespacesFixerConfig $whitespacesConfig;
-
-    public function __construct()
-    {
-        $this->whitespacesConfig = new WhitespacesFixerConfig();
-    }
 
     public function configure(array $configuration): void
     {
@@ -83,11 +74,6 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
         ]);
     }
 
-    public function setWhitespacesConfig(WhitespacesFixerConfig $config): void
-    {
-        $this->whitespacesConfig = $config;
-    }
-
     public function getName(): string
     {
         return 'Netresearch/break_long_method_chain';
@@ -98,16 +84,6 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
         // Above `method_chaining_indentation` (0), so that a chain broken here
         // is still seen by the fixer that owns chain indentation.
         return 1;
-    }
-
-    public function supports(SplFileInfo $file): bool
-    {
-        return true;
-    }
-
-    public function isRisky(): bool
-    {
-        return false;
     }
 
     public function isCandidate(Tokens $tokens): bool
