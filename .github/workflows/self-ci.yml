@@ -137,6 +137,30 @@ jobs:
               fwrite(STDERR, "Factory must return PhpCsFixer\\Config" . PHP_EOL);
               exit(1);
           }
+
+          // The custom fixers are registered by the factory and enabled by the
+          // project. A rule named here that the factory does not register is a
+          // fatal error in every consumer that opts in, and nothing else in
+          // this repository would notice: the fixture checks construct the
+          // fixers directly and never go through the factory.
+          $withRules = $factory("Test header", $tmpDir, [
+              "Netresearch/blank_line_after_control_structure" => true,
+              "Netresearch/break_long_method_chain" => ["minimum_links" => 3],
+          ]);
+          $names = array_keys($withRules->getRules());
+          foreach (["Netresearch/blank_line_after_control_structure", "Netresearch/break_long_method_chain"] as $rule) {
+              if (!in_array($rule, $names, true)) {
+                  fwrite(STDERR, "Factory dropped the rule {$rule}" . PHP_EOL);
+                  exit(1);
+              }
+          }
+          $registered = array_map(static fn ($fixer) => $fixer->getName(), $withRules->getCustomFixers());
+          foreach (["Netresearch/blank_line_after_control_structure", "Netresearch/break_long_method_chain"] as $rule) {
+              if (!in_array($rule, $registered, true)) {
+                  fwrite(STDERR, "Factory does not register a fixer named {$rule}" . PHP_EOL);
+                  exit(1);
+              }
+          }
           echo "php-cs-fixer config factory: OK" . PHP_EOL;
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-cgl.php
