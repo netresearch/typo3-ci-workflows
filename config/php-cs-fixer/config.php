@@ -14,11 +14,23 @@
  *       Copyright (c) 2025-2026 Netresearch DTT GmbH
  *       SPDX-License-Identifier: AGPL-3.0-or-later
  *       EOF, __DIR__ . '/..');
+ *
+ * A third argument adds project rules on top of the shared set:
+ *
+ *   return $createConfig($header, __DIR__ . '/..', [
+ *       'Netresearch/break_long_method_chain' => ['minimum_links' => 3],
+ *   ]);
  */
 
 declare(strict_types=1);
 
-return static function (string $header, string $projectRoot): PhpCsFixer\Config {
+use Netresearch\Typo3CiWorkflows\Fixer\BreakLongMethodChainFixer;
+
+/**
+ * @param array<string, mixed> $extraRules rules to add on top of the shared set,
+ *                                         e.g. ['Netresearch/break_long_method_chain' => true]
+ */
+return static function (string $header, string $projectRoot, array $extraRules = []): PhpCsFixer\Config {
     $rules = require __DIR__ . '/rules.php';
 
     $finder = PhpCsFixer\Finder::create()
@@ -29,6 +41,10 @@ return static function (string $header, string $projectRoot): PhpCsFixer\Config 
     $config = new PhpCsFixer\Config();
     $config
         ->setRiskyAllowed(true)
+        // Registered, not enabled: a rule that reflows every long chain in a
+        // code base has to be adopted in a commit of its own, per project, not
+        // arrive with a dependency update. See docs/php-cs-fixer.md.
+        ->registerCustomFixers([new BreakLongMethodChainFixer()])
         ->setRules(array_merge($rules, [
             'header_comment' => [
                 'header'       => $header,
@@ -36,7 +52,7 @@ return static function (string $header, string $projectRoot): PhpCsFixer\Config 
                 'location'     => 'after_open',
                 'separate'     => 'both',
             ],
-        ]))
+        ], $extraRules))
         ->setFinder($finder);
 
     if (method_exists($config, 'setUnsupportedPhpVersionAllowed')) {

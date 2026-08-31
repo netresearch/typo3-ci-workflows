@@ -119,9 +119,9 @@ jobs:
 
       - name: PHP syntax check
         run: |
-          FILE_COUNT=$(find config/ -name '*.php' | wc -l)
+          FILE_COUNT=$(find config/ src/ Build/ -name '*.php' | wc -l)
           echo "Linting $FILE_COUNT PHP files..."
-          find config/ -name '*.php' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
+          find config/ src/ Build/ -name '*.php' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
 
       - name: Smoke test php-cs-fixer config factory
         run: |
@@ -140,6 +140,13 @@ jobs:
           echo "php-cs-fixer config factory: OK" . PHP_EOL;
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-cgl.php
+
+      - name: Check the method-chain fixer
+        # The fixer is registered by the shared config factory, so a defect in
+        # it reaches every consumer that opts in. Fixtures, no container: input,
+        # expected output, idempotence, and the structural property whose
+        # violation once made `statement_indentation` die on the result.
+        run: php -dzend.assertions=1 Build/Scripts/check-break-long-method-chain.php
 
       - name: Smoke test rector config factory
         run: |
