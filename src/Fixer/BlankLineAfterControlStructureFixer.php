@@ -149,7 +149,11 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
     }
 
     /**
-     * The index of a comment sitting on the same line as `$anchor`, or null.
+     * The index of a comment that starts on the same line as `$anchor`.
+     *
+     * Where it ends does not matter — a block comment opened on the brace's
+     * line belongs to that line just as a `//` one does, and the blank line
+     * goes after all of it.
      */
     private function trailingComment(Tokens $tokens, int $anchor): ?int
     {
@@ -163,14 +167,7 @@ final class BlankLineAfterControlStructureFixer extends AbstractWhitespaceAwareF
 
         $comment = $anchor + 2;
 
-        if (!isset($tokens[$comment])
-            || !$tokens[$comment]->isComment()
-            || str_contains($tokens[$comment]->getContent(), $lineEnding)
-        ) {
-            return null;
-        }
-
-        return $comment;
+        return isset($tokens[$comment]) && $tokens[$comment]->isComment() ? $comment : null;
     }
 
     private function separate(Tokens $tokens, int $anchor): void

@@ -84,6 +84,12 @@ $cases['a comment on the brace line moves the blank line after it'] = [
     'out' => inBody("        if (\$a) {\n            b();\n        } // end if\n\n        c();\n"),
 ];
 
+$cases['a block comment opened on the brace line counts the same'] = [
+    // Where the comment ends does not matter; it was opened on that line.
+    'in'  => inBody("        if (\$a) {\n            b();\n        } /* eins\n             zwei */\n        c();\n"),
+    'out' => inBody("        if (\$a) {\n            b();\n        } /* eins\n             zwei */\n\n        c();\n"),
+];
+
 $cases['a comment before a continuation changes nothing'] = [
     'in'  => inBody("        if (\$a) {\n            b();\n        } // hm\n        else {\n            d();\n        }\n"),
     'out' => inBody("        if (\$a) {\n            b();\n        } // hm\n        else {\n            d();\n        }\n"),
@@ -151,7 +157,7 @@ $cases['a method body end belongs to another rule'] = [
     'out' => "<?php\nclass C\n{\n    public function m(): void\n    {\n        a();\n    }\n    public function n(): void\n    {\n        b();\n    }\n}",
 ];
 
-$status = runFixtures($cases, 'applyFixer', 19);
+$status = runFixtures($cases, 'applyFixer', 20);
 
 // `blank_line_before_statement` wants to write at the same place — after a
 // closing brace, in front of a `return`. Both together must settle on exactly
