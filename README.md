@@ -1139,7 +1139,9 @@ The fixer is **registered but not enabled**. Reflowing every long chain in a cod
 
 Why it exists: no shipped fixer breaks a line. None of PHP-CS-Fixer's rules has a line-width concept, and `method_chaining_indentation` only indents a chain somebody already broke by hand — so a chain written on one line stays on one line however long it grows. That is invisible while humans write the code and break their own chains, and it stops being invisible as soon as code is generated from a syntax tree, because a printer reproduces whatever the rules say and a rule nobody wrote is a rule nobody applies.
 
-The trigger is the number of calls, not the width, because a fixer works on tokens and has no budget to compare against. Measured on `t3x-nr-passkeys-be` (47 classes) after re-printing it from its syntax tree: 174 lines over 120 columns without the rule, 169 at `minimum_links = 3`, 153 at `minimum_links = 2`. On the same code as its authors wrote it the rule touches 14 of 47 files at `minimum_links = 2` and 2 of 47 at `minimum_links = 3`.
+The trigger is the number of calls, not the width, because a fixer works on tokens and has no budget to compare against. The cost of that is real and worth knowing before switching the rule on: a short chain is broken too, so `$a->b()->c()->d();` becomes four lines at `minimum_links = 3`. `minimum_links` is where a project sets how much of that it wants.
+
+Measured on `t3x-nr-passkeys-be` (47 classes) after re-printing it from its syntax tree: 174 lines over 120 columns without the rule, 169 at `minimum_links = 3`, 153 at `minimum_links = 2`. On the same code as its authors wrote it the rule touches 14 of 47 files at `minimum_links = 2` and 2 of 47 at `minimum_links = 3`.
 
 `Build/Scripts/check-break-long-method-chain.php` holds the fixtures, including idempotence and the hand-off to `statement_indentation`.
 
