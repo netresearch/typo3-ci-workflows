@@ -1143,7 +1143,9 @@ The trigger is the number of calls, not the width, because a fixer works on toke
 
 Measured on `t3x-nr-passkeys-be` (47 classes) after re-printing it from its syntax tree: 174 lines over 120 columns without the rule, 169 at `minimum_links = 3`, 153 at `minimum_links = 2`. On the same code as its authors wrote it the rule touches 14 of 47 files at `minimum_links = 2` and 2 of 47 at `minimum_links = 3`.
 
-`Build/Scripts/check-break-long-method-chain.php` holds the fixtures, including idempotence and the hand-off to `statement_indentation`.
+Cost: the fixer is linear in file size and mildly superlinear in the number of chains per file — 0.05 s for 100 chains, 0.69 s for 400, against 0.10 s for the largest class of a real extension.
+
+`Build/Scripts/check-break-long-method-chain.php` holds the fixtures, including idempotence and the structural property that a break never lands in front of an argument separator.
 
 ## Git Worktree + captainhook Workaround
 

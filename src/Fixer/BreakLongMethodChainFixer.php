@@ -133,45 +133,111 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
 
     public function fix(SplFileInfo $file, Tokens $tokens): void
     {
-        // One chain per pass, and the chains are collected again after every
-        // one of them. A chain nested in another chain's argument list sits at
-        // higher token indices than the outer chain's later links, so breaking
-        // both from one collected set would apply the outer breaks at indices
-        // the inner insertions have already moved — and it also lets the inner
-        // chain take its indentation from where the outer chain has put it.
-        $remaining = count($this->collectChains($tokens)) + 1;
+        // One chain per pass. A chain nested in another chain's argument list
+        // sits at higher token indices than the outer chain's later links, so
+        // breaking both from one collected set would apply the outer breaks at
+        // indices the inner insertions have already moved — and it also lets the
+        // inner chain take its indentation from where the outer chain has put it,
+        // which is what keeps the result idempotent.
+        //
+        // Three things made that quadratic, and 400 chains in one file took 22
+        // seconds: scanning to the end of the file on every pass, re-scanning
+        // from the front, and one insertAt per break, each copying the whole
+        // collection. So the scan stops at the first chain it has to break, it
+        // resumes where the last one started — every chain in front of that is
+        // settled — and a chain's breaks go in as one slice. Same file: 0.69 s.
+        $from = 0;
 
-        while ($remaining-- > 0 && $this->breakFirstUnbrokenChain($tokens)) {
-            // Each pass leaves one more chain broken, and a broken chain is
-            // recognised as such, so this terminates.
-        }
-    }
+        while (true) {
+            $chain = $this->firstUnbrokenChain($tokens, $from);
 
-    private function breakFirstUnbrokenChain(Tokens $tokens): bool
-    {
-        foreach ($this->collectChains($tokens) as $chain) {
-            $break = $this->whitespacesConfig->getLineEnding()
-                . $this->statementIndent($tokens, $chain[0])
-                . $this->whitespacesConfig->getIndent();
-
-            if ($this->isAlreadyBroken($tokens, $chain, $break)) {
-                continue;
+            if ($chain === null) {
+                return;
             }
 
-            foreach (array_reverse($chain) as $operator) {
+            [$calls, $break] = $chain;
+            $insertions = [];
+
+            foreach ($calls as $operator) {
+                // Replacing is index-stable and can happen right away; the
+                // insertions go in together, because each one on its own copies
+                // the whole collection.
                 if ($tokens[$operator - 1]->isWhitespace()) {
                     $tokens[$operator - 1] = new Token([T_WHITESPACE, $break]);
 
                     continue;
                 }
 
-                $tokens->insertAt($operator, new Token([T_WHITESPACE, $break]));
+                $insertions[$operator] = new Token([T_WHITESPACE, $break]);
             }
 
-            return true;
+            if ($insertions !== []) {
+                $tokens->insertSlices($insertions);
+            }
+
+            $from = $calls[0];
+        }
+    }
+
+    /**
+     * The first chain from `$from` that is not broken yet.
+     *
+     * Stops at that chain rather than collecting them all: `fix()` calls this
+     * once per chain, so scanning to the end of the file every time is what made
+     * the whole run quadratic.
+     *
+     * @return null|array{non-empty-list<int>, string} the chain's call operators and the whitespace to put in front of each
+     */
+    private function firstUnbrokenChain(Tokens $tokens, int $from): ?array
+    {
+        $consumed = [];
+
+        // A line break written inside `{$...}` would land in the string's value.
+        // `$from` is either the start of the file or the start of a chain, so it
+        // is never itself inside one, and interpolation does not nest — a flag is
+        // enough. The brace-less form (`"$a->b"`) cannot hold a call and so never
+        // reaches the threshold.
+        $interpolating = false;
+
+        for ($index = $from, $last = count($tokens); $index < $last; ++$index) {
+            $token = $tokens[$index];
+
+            if ($interpolating) {
+                $interpolating = $token->getContent() !== '}';
+
+                continue;
+            }
+
+            if ($token->isGivenKind([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES])) {
+                $interpolating = true;
+
+                continue;
+            }
+
+            if (!$this->isObjectOperator($token) || isset($consumed[$index])) {
+                continue;
+            }
+
+            [$links, $calls] = $this->parseChain($tokens, $index);
+
+            foreach ($links as $link) {
+                $consumed[$link] = true;
+            }
+
+            if (count($calls) < $this->minimumLinks) {
+                continue;
+            }
+
+            $break = $this->whitespacesConfig->getLineEnding()
+                . $this->statementIndent($tokens, $calls[0])
+                . $this->whitespacesConfig->getIndent();
+
+            if (!$this->isAlreadyBroken($tokens, $calls, $break)) {
+                return [$calls, $break];
+            }
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -227,44 +293,17 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
                 continue;
             }
 
-            if ($token->equalsAny([';', ',']) || $token->isGivenKind([T_OPEN_TAG, T_DOUBLE_ARROW])) {
+            // A comma is deliberately not a boundary. Taking it as one lets the
+            // second of two chains in one argument list derive its indentation
+            // from the first one after that has already been broken, so the two
+            // come out a level apart for no reason. The enclosing bracket is the
+            // same for both.
+            if ($token->equals(';') || $token->isGivenKind([T_OPEN_TAG, T_DOUBLE_ARROW])) {
                 return $this->indentOf($tokens, $tokens->getNextMeaningfulToken($i) ?? $index);
             }
         }
 
         return $this->indentOf($tokens, $index);
-    }
-
-    /**
-     * @return list<non-empty-list<int>> the call operators of every chain long enough to break
-     */
-    private function collectChains(Tokens $tokens): array
-    {
-        $unsafe   = $this->interpolatedRanges($tokens);
-        $chains   = [];
-        $consumed = [];
-
-        foreach ($tokens as $index => $token) {
-            if (!$this->isObjectOperator($token)) {
-                continue;
-            }
-
-            if (isset($consumed[$index]) || $this->isInside($unsafe, $index)) {
-                continue;
-            }
-
-            [$links, $calls] = $this->parseChain($tokens, $index);
-
-            foreach ($links as $link) {
-                $consumed[$link] = true;
-            }
-
-            if (count($calls) >= $this->minimumLinks) {
-                $chains[] = $calls;
-            }
-        }
-
-        return $chains;
     }
 
     /**
@@ -323,73 +362,6 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
         }
 
         return $index;
-    }
-
-    /**
-     * Ranges of `{$...}` inside a string or heredoc.
-     *
-     * A line break inserted there would land in the string's value, so those
-     * chains are skipped. The brace-less form (`"$a->b"`) cannot hold a call and
-     * therefore never reaches the threshold.
-     *
-     * @return list<array{int, int}>
-     */
-    private function interpolatedRanges(Tokens $tokens): array
-    {
-        $ranges = [];
-
-        foreach ($tokens as $index => $token) {
-            if (!$token->isGivenKind([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES])) {
-                continue;
-            }
-
-            $ranges[] = [$index, $this->closingBrace($tokens, $index)];
-        }
-
-        return $ranges;
-    }
-
-    /**
-     * `T_CURLY_OPEN` is not registered as the start of any block type, so the
-     * matching brace is counted rather than looked up.
-     */
-    private function closingBrace(Tokens $tokens, int $index): int
-    {
-        $depth = 0;
-
-        for ($i = $index, $last = count($tokens); $i < $last; ++$i) {
-            $content = $tokens[$i]->getContent();
-
-            if ($content === '{' || $content === '${') {
-                ++$depth;
-
-                continue;
-            }
-
-            if ($content !== '}') {
-                continue;
-            }
-
-            if (--$depth === 0) {
-                return $i;
-            }
-        }
-
-        return $last - 1;
-    }
-
-    /**
-     * @param list<array{int, int}> $ranges
-     */
-    private function isInside(array $ranges, int $index): bool
-    {
-        foreach ($ranges as [$start, $end]) {
-            if ($index > $start && $index < $end) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private function isObjectOperator(Token $token): bool

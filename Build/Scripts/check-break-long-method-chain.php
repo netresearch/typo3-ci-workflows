@@ -154,6 +154,26 @@ $cases['a chain nested in another chain is broken against the outer one'] = [
         PHP,
 ];
 
+$cases['two chains in one argument list land on the same level'] = [
+    // Regression guard: with a comma taken as a statement boundary, the second
+    // chain derives its indentation from the first one *after* that has been
+    // broken, and the two come out a level apart for no reason.
+    'in' => <<<'PHP'
+        <?php
+        foo($a->b()->c()->d(), $e->f()->g()->h());
+        PHP,
+    'out' => <<<'PHP'
+        <?php
+        foo($a
+            ->b()
+            ->c()
+            ->d(), $e
+            ->f()
+            ->g()
+            ->h());
+        PHP,
+];
+
 $cases['an array access between links does not end the chain'] = [
     'in'  => "<?php\n\$a->b()[0]->c()->d();",
     'out' => "<?php\n\$a\n    ->b()[0]\n    ->c()\n    ->d();",
@@ -165,6 +185,13 @@ $cases['a nullsafe operator counts as a link'] = [
 ];
 
 $status = 0;
+
+// A case whose fixture silently loses its body — an unescaped `$a` in a
+// double-quoted string, say — still passes, so the count is asserted too.
+if (count($cases) !== 13) {
+    echo 'FAIL: expected 13 cases, found ' . count($cases) . "\n";
+    $status = 1;
+}
 
 foreach ($cases as $name => $case) {
     $first  = applyFixer($case['in']);
