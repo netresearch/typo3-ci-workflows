@@ -212,6 +212,19 @@ if ($tokens->generateCode() !== "<?php\n\$q\n\t->a()\n\t->b()\n\t->c();") {
     echo "ok: the configured indent is used\n";
 }
 
+// A threshold below one is not a smaller threshold, it is a different fixer:
+// every property access becomes an empty candidate chain and the first link is
+// read out of an empty list.
+foreach ([0, -1] as $invalid) {
+    try {
+        applyFixer("<?php\n\$a->b->c;", ['minimum_links' => $invalid]);
+        echo "FAIL: minimum_links = {$invalid} was accepted\n";
+        $status = 1;
+    } catch (PhpCsFixer\ConfigurationException\InvalidFixerConfigurationException) {
+        echo "ok: minimum_links = {$invalid} is rejected\n";
+    }
+}
+
 // The bug that made the nested case necessary showed itself on a whole file
 // rather than on one statement: applying the outer chain's breaks at indices the
 // inner insertions had already moved pushed a `(` or a `,` onto the front of a

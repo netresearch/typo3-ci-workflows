@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Netresearch\Typo3CiWorkflows\Fixer;
 
+use PhpCsFixer\ConfigurationException\InvalidFixerConfigurationException;
 use PhpCsFixer\Fixer\ConfigurableFixerInterface;
 use PhpCsFixer\Fixer\WhitespacesAwareFixerInterface;
 use PhpCsFixer\FixerConfiguration\FixerConfigurationResolver;
@@ -16,6 +17,7 @@ use PhpCsFixer\Tokenizer\Token;
 use PhpCsFixer\Tokenizer\Tokens;
 use PhpCsFixer\WhitespacesFixerConfig;
 use SplFileInfo;
+use Symfony\Component\OptionsResolver\Exception\ExceptionInterface;
 
 /**
  * Puts every call of a long method chain on its own line.
@@ -48,8 +50,18 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
 
     public function configure(array $configuration): void
     {
-        /** @var array{minimum_links: int} $resolved */
-        $resolved = $this->getConfigurationDefinition()->resolve($configuration);
+        try {
+            /** @var array{minimum_links: int} $resolved */
+            $resolved = $this->getConfigurationDefinition()->resolve($configuration);
+        } catch (ExceptionInterface $exception) {
+            // Shipped fixers reach this through ConfigurableFixerTrait, which is
+            // marked internal; the exception type callers see is the same.
+            throw new InvalidFixerConfigurationException(
+                $this->getName(),
+                $exception->getMessage(),
+                $exception,
+            );
+        }
 
         $this->minimumLinks = $resolved['minimum_links'];
     }
@@ -62,6 +74,10 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
                 'Number of method calls in one chain from which the chain is broken.',
             ))
                 ->setAllowedTypes(['int'])
+                // A chain of fewer than one call is not a chain: at 0 every
+                // property access becomes an empty candidate and the fixer
+                // reads a link that is not there.
+                ->setAllowedValues([static fn (int $minimum): bool => $minimum >= 1])
                 ->setDefault(3)
                 ->getOption(),
         ]);
@@ -237,47 +253,7 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
                 continue;
             }
 
-            $calls = [];
-            $links = [];
-            $cursor = $index;
-
-            while (true) {
-                $links[] = $cursor;
-
-                $name = $tokens->getNextMeaningfulToken($cursor);
-
-                if ($name === null) {
-                    break;
-                }
-
-                // `$foo->{$bar}()`, `$foo->$bar()` and anything else dynamic is
-                // left alone rather than guessed at.
-                if (!$tokens[$name]->isGivenKind(T_STRING)) {
-                    $calls = [];
-
-                    break;
-                }
-
-                $end  = $name;
-                $next = $tokens->getNextMeaningfulToken($name);
-
-                if ($next !== null && $tokens[$next]->equals('(')) {
-                    $calls[] = $cursor;
-                    $end     = $tokens->findBlockEnd(Tokens::BLOCK_TYPE_PARENTHESIS_BRACE, $next);
-                    $next    = $tokens->getNextMeaningfulToken($end);
-                }
-
-                while ($next !== null && $tokens[$next]->equals('[')) {
-                    $end  = $tokens->findBlockEnd(Tokens::BLOCK_TYPE_INDEX_SQUARE_BRACE, $next);
-                    $next = $tokens->getNextMeaningfulToken($end);
-                }
-
-                if ($next === null || !$this->isObjectOperator($tokens[$next])) {
-                    break;
-                }
-
-                $cursor = $next;
-            }
+            [$links, $calls] = $this->parseChain($tokens, $index);
 
             foreach ($links as $link) {
                 $consumed[$link] = true;
@@ -289,6 +265,64 @@ final class BreakLongMethodChainFixer implements ConfigurableFixerInterface, Whi
         }
 
         return $chains;
+    }
+
+    /**
+     * Walks one chain from its first operator.
+     *
+     * @return array{non-empty-list<int>, list<int>} every operator of the chain, and those that are a call
+     */
+    private function parseChain(Tokens $tokens, int $start): array
+    {
+        $links  = [];
+        $calls  = [];
+        $cursor = $start;
+
+        while (true) {
+            $links[] = $cursor;
+
+            $name = $tokens->getNextMeaningfulToken($cursor);
+
+            if ($name === null) {
+                break;
+            }
+
+            // `$foo->{$bar}()`, `$foo->$bar()` and anything else dynamic is left
+            // alone rather than guessed at.
+            if (!$tokens[$name]->isGivenKind(T_STRING)) {
+                return [$links, []];
+            }
+
+            $next = $tokens->getNextMeaningfulToken($name);
+
+            if ($next !== null && $tokens[$next]->equals('(')) {
+                $calls[] = $cursor;
+                $next    = $tokens->getNextMeaningfulToken(
+                    $tokens->findBlockEnd(Tokens::BLOCK_TYPE_PARENTHESIS_BRACE, $next),
+                );
+            }
+
+            $next = $this->skipArrayAccess($tokens, $next);
+
+            if ($next === null || !$this->isObjectOperator($tokens[$next])) {
+                break;
+            }
+
+            $cursor = $next;
+        }
+
+        return [$links, $calls];
+    }
+
+    private function skipArrayAccess(Tokens $tokens, ?int $index): ?int
+    {
+        while ($index !== null && $tokens[$index]->equals('[')) {
+            $index = $tokens->getNextMeaningfulToken(
+                $tokens->findBlockEnd(Tokens::BLOCK_TYPE_INDEX_SQUARE_BRACE, $index),
+            );
+        }
+
+        return $index;
     }
 
     /**
