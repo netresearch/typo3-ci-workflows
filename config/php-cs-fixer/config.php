@@ -45,7 +45,8 @@ return static function (string $header, string $projectRoot, array $extraRules =
         ->setRiskyAllowed(true)
         // Registered, not enabled — all of them. A rule that reflows a code
         // base has to be adopted in a commit of its own, per project, not
-        // arrive with a dependency update. See the README.
+        // arrive with a dependency update. The README's Code Style section documents
+        // each of them and shows how a project switches one on.
         ->registerCustomFixers([
             new BlankLineAfterControlStructureFixer(),
             new BlankLineBeforeCommentFixer(),
