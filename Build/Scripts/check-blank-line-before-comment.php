@@ -55,6 +55,15 @@ $cases['a comment between array entries is left alone'] = [
     'out' => inBody("        \$a = [\n            'a' => 1,\n            // why b\n            'b' => 2,\n        ];\n"),
 ];
 
+$cases['a completed statement block above is not a list'] = [
+    // The backward scan skips balanced braces to find an enclosing bracket. An
+    // `if` block above the comment is balanced too, so the scan runs past it —
+    // and must then stop at the statement boundary rather than take the `if`'s
+    // own parenthesis for a list opener.
+    'in'  => inBody("        if (\$a) { work(); }\n        // what comes next\n        more();\n"),
+    'out' => inBody("        if (\$a) { work(); }\n\n        // what comes next\n        more();\n"),
+];
+
 $cases['a closure inside an array entry does not end the search'] = [
     // The backward scan looks for the enclosing bracket. A `}` on the way — a
     // closure in an entry above — used to stop it, and the rule then wrote into
@@ -95,7 +104,7 @@ $cases['two blank lines are left to the rule that owns them'] = [
     'out' => inBody("        \$a = 1;\n\n\n        // still separated\n        \$b = 2;\n"),
 ];
 
-$status = runFixtures($cases, 'applyFixer', 11);
+$status = runFixtures($cases, 'applyFixer', 12);
 
 // Tabs must reach the output, otherwise the rule fights the project's own
 // indentation on every run.
