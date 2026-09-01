@@ -55,6 +55,14 @@ $cases['a comment between array entries is left alone'] = [
     'out' => inBody("        \$a = [\n            'a' => 1,\n            // why b\n            'b' => 2,\n        ];\n"),
 ];
 
+$cases['a closure inside an array entry does not end the search'] = [
+    // The backward scan looks for the enclosing bracket. A `}` on the way — a
+    // closure in an entry above — used to stop it, and the rule then wrote into
+    // the list it exists to leave alone.
+    'in'  => inBody("        \$a = [\n            'a' => function () { return 1; },\n            // why b\n            'b' => 2,\n        ];\n"),
+    'out' => inBody("        \$a = [\n            'a' => function () { return 1; },\n            // why b\n            'b' => 2,\n        ];\n"),
+];
+
 $cases['a comment between arguments is left alone'] = [
     'in'  => inBody("        foo(\n            \$a,\n            // why b\n            \$b,\n        );\n"),
     'out' => inBody("        foo(\n            \$a,\n            // why b\n            \$b,\n        );\n"),
@@ -87,18 +95,18 @@ $cases['two blank lines are left to the rule that owns them'] = [
     'out' => inBody("        \$a = 1;\n\n\n        // still separated\n        \$b = 2;\n"),
 ];
 
-$status = runFixtures($cases, 'applyFixer', 10);
+$status = runFixtures($cases, 'applyFixer', 11);
 
 // Tabs must reach the output, otherwise the rule fights the project's own
 // indentation on every run.
-$tabbed = Tokens::fromCode("<?php\n\$a = 1;\n// why\n\$b = 2;");
+$tabbed = Tokens::fromCode("<?php\nif (true) {\n\t\$a = 1;\n\t// why\n\t\$b = 2;\n}");
 $fixer  = new BlankLineBeforeCommentFixer();
 $fixer->setWhitespacesConfig(new PhpCsFixer\WhitespacesFixerConfig("\t", "\n"));
 $fixer->fix(new SplFileInfo(__FILE__), $tabbed);
 
 $status |= assertFixture(
-    $tabbed->generateCode() === "<?php\n\$a = 1;\n\n// why\n\$b = 2;",
-    'the configured line ending is used',
+    $tabbed->generateCode() === "<?php\nif (true) {\n\t\$a = 1;\n\n\t// why\n\t\$b = 2;\n}",
+    'the tab indentation survives the inserted blank line',
     $tabbed->generateCode(),
 );
 

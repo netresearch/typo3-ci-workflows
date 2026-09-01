@@ -129,27 +129,38 @@ final class BlankLineBeforeCommentFixer extends AbstractWhitespaceAwareFixer
             // between array entries is exactly the case this guards.
             $content = $tokens[$i]->getContent();
 
-            if ($content === ')' || $content === ']') {
+            // A closing brace of any kind opens a balanced region going
+            // backwards — a closure inside an array entry, for one. Skipping it
+            // is what keeps the search from stopping short of the list.
+            if ($content === ')' || $content === ']' || $content === '}') {
                 ++$depth;
 
                 continue;
             }
 
-            if ($content !== '(' && $content !== '[') {
-                // A statement boundary or a block edge ends the search: an open
-                // bracket further up cannot enclose this comment.
-                if ($content === ';' || $content === '{' || $content === '}') {
-                    return false;
+            if ($content === '(' || $content === '[') {
+                if ($depth === 0) {
+                    return true;
+                }
+
+                --$depth;
+
+                continue;
+            }
+
+            if ($depth > 0) {
+                if ($content === '{') {
+                    --$depth;
                 }
 
                 continue;
             }
 
-            if ($depth === 0) {
-                return true;
+            // At depth zero a block edge or a statement end means the comment
+            // is not in a list: an opening bracket further up cannot enclose it.
+            if ($content === '{' || $content === ';') {
+                return false;
             }
-
-            --$depth;
         }
 
         return false;

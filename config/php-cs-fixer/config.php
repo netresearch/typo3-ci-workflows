@@ -43,9 +43,9 @@ return static function (string $header, string $projectRoot, array $extraRules =
     $config = new PhpCsFixer\Config();
     $config
         ->setRiskyAllowed(true)
-        // Registered, not enabled: a rule that reflows every long chain in a
-        // code base has to be adopted in a commit of its own, per project, not
-        // arrive with a dependency update. See docs/php-cs-fixer.md.
+        // Registered, not enabled — all of them. A rule that reflows a code
+        // base has to be adopted in a commit of its own, per project, not
+        // arrive with a dependency update. See the README.
         ->registerCustomFixers([
             new BlankLineAfterControlStructureFixer(),
             new BlankLineBeforeCommentFixer(),
