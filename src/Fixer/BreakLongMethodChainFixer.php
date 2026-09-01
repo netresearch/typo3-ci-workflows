@@ -208,7 +208,7 @@ final class BreakLongMethodChainFixer extends AbstractWhitespaceAwareFixer imple
                 . $this->statementIndent($tokens, $calls[0])
                 . $this->whitespacesConfig->getIndent();
 
-            if (!$this->isAlreadyBroken($tokens, $calls, $break)) {
+            if (!$this->isAlreadyBroken($tokens, $calls)) {
                 return [$calls, $break];
             }
         }
@@ -228,7 +228,7 @@ final class BreakLongMethodChainFixer extends AbstractWhitespaceAwareFixer imple
      *
      * @param non-empty-list<int> $chain
      */
-    private function isAlreadyBroken(Tokens $tokens, array $chain, string $break): bool
+    private function isAlreadyBroken(Tokens $tokens, array $chain): bool
     {
         $lineEnding = $this->whitespacesConfig->getLineEnding();
 
