@@ -25,6 +25,7 @@
 declare(strict_types=1);
 
 use Netresearch\Typo3CiWorkflows\Fixer\BlankLineAfterControlStructureFixer;
+use Netresearch\Typo3CiWorkflows\Fixer\BlankLineBeforeCommentFixer;
 use Netresearch\Typo3CiWorkflows\Fixer\BreakLongMethodChainFixer;
 
 /**
@@ -47,6 +48,7 @@ return static function (string $header, string $projectRoot, array $extraRules =
         // arrive with a dependency update. See docs/php-cs-fixer.md.
         ->registerCustomFixers([
             new BlankLineAfterControlStructureFixer(),
+            new BlankLineBeforeCommentFixer(),
             new BreakLongMethodChainFixer(),
         ])
         ->setRules(array_merge($rules, [
