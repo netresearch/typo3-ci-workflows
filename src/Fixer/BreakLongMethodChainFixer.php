@@ -204,13 +204,18 @@ final class BreakLongMethodChainFixer extends AbstractWhitespaceAwareFixer imple
                 continue;
             }
 
-            $break = $this->whitespacesConfig->getLineEnding()
-                . $this->statementIndent($tokens, $calls[0])
-                . $this->whitespacesConfig->getIndent();
-
-            if (!$this->isAlreadyBroken($tokens, $calls)) {
-                return [$calls, $break];
+            if ($this->isAlreadyBroken($tokens, $calls)) {
+                continue;
             }
+
+            // Only now: the indent walk costs a backward scan per chain, and
+            // every chain in an already-formatted file would pay it for nothing.
+            return [
+                $calls,
+                $this->whitespacesConfig->getLineEnding()
+                    . $this->statementIndent($tokens, $calls[0])
+                    . $this->whitespacesConfig->getIndent(),
+            ];
         }
 
         return null;
