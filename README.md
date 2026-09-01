@@ -1128,9 +1128,24 @@ $createConfig = require __DIR__ . '/../.Build/vendor/netresearch/typo3-ci-workfl
 
 return $createConfig($header, __DIR__ . '/..', [
     'Netresearch/blank_line_after_control_structure' => true,
+    'Netresearch/blank_line_before_comment' => true,
     'Netresearch/break_long_method_chain' => ['minimum_links' => 2],
 ]);
 ```
+
+### `Netresearch/blank_line_before_comment`
+
+Separates a comment on a line of its own from the code above it. Inside an array or an argument list the rule is off — a comment there explains the entry below, and a blank line would split a list that belongs together.
+
+**Registered but not enabled**, like the two below.
+
+Why it exists: `blank_line_before_statement` can write a blank line in front of a docblock, but not in front of a `//` comment — a comment is not a statement, and no shipped fixer treats it as one. So a comment introducing the next few statements loses the gap that made it an introduction the first time a file is written back from a syntax tree.
+
+Measured over the 48 classes of `t3x-nr-passkeys-be` plus its tests: a line comment on a line of its own has a blank line above it in **274 of 309 places, 89 %** — docblocks sit at 99 % and are left to the rules that own them. All 35 counter-examples are inside brackets, which is where the exception comes from.
+
+On the re-printed corpus it puts 643 of 916 blank lines back in place against 624 without it — a smaller step than the other two, because most comment positions are already covered by the blank line after a block or before a statement.
+
+`Build/Scripts/check-blank-line-before-comment.php` holds the fixtures.
 
 ### `Netresearch/blank_line_after_control_structure`
 

@@ -25,6 +25,7 @@
 declare(strict_types=1);
 
 use Netresearch\Typo3CiWorkflows\Fixer\BlankLineAfterControlStructureFixer;
+use Netresearch\Typo3CiWorkflows\Fixer\BlankLineBeforeCommentFixer;
 use Netresearch\Typo3CiWorkflows\Fixer\BreakLongMethodChainFixer;
 
 /**
@@ -42,11 +43,13 @@ return static function (string $header, string $projectRoot, array $extraRules =
     $config = new PhpCsFixer\Config();
     $config
         ->setRiskyAllowed(true)
-        // Registered, not enabled: a rule that reflows every long chain in a
-        // code base has to be adopted in a commit of its own, per project, not
-        // arrive with a dependency update. See docs/php-cs-fixer.md.
+        // Registered, not enabled — all of them. A rule that reflows a code
+        // base has to be adopted in a commit of its own, per project, not
+        // arrive with a dependency update. The README's Code Style section documents
+        // each of them and shows how a project switches one on.
         ->registerCustomFixers([
             new BlankLineAfterControlStructureFixer(),
+            new BlankLineBeforeCommentFixer(),
             new BreakLongMethodChainFixer(),
         ])
         ->setRules(array_merge($rules, [
