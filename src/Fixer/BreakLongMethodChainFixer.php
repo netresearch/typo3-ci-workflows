@@ -204,29 +204,45 @@ final class BreakLongMethodChainFixer extends AbstractWhitespaceAwareFixer imple
                 continue;
             }
 
-            $break = $this->whitespacesConfig->getLineEnding()
-                . $this->statementIndent($tokens, $calls[0])
-                . $this->whitespacesConfig->getIndent();
-
-            if (!$this->isAlreadyBroken($tokens, $calls, $break)) {
-                return [$calls, $break];
+            if ($this->isAlreadyBroken($tokens, $calls)) {
+                continue;
             }
+
+            // Only now: the indent walk costs a backward scan per chain, and
+            // every chain in an already-formatted file would pay it for nothing.
+            return [
+                $calls,
+                $this->whitespacesConfig->getLineEnding()
+                    . $this->statementIndent($tokens, $calls[0])
+                    . $this->whitespacesConfig->getIndent(),
+            ];
         }
 
         return null;
     }
 
     /**
+     * Whether every call of the chain already starts a line.
+     *
+     * Only the line break is checked, not the indentation in front of it.
+     * `statement_indentation` owns indentation and re-indents what this fixer
+     * writes; comparing the exact whitespace made the two disagree on a chain
+     * nested in another chain's argument, each run moving it back to its own
+     * answer — the fixer broke, the other re-indented, the next run saw a
+     * mismatch and broke again.
+     *
      * @param non-empty-list<int> $chain
      */
-    private function isAlreadyBroken(Tokens $tokens, array $chain, string $break): bool
+    private function isAlreadyBroken(Tokens $tokens, array $chain): bool
     {
+        $lineEnding = $this->whitespacesConfig->getLineEnding();
+
         foreach ($chain as $operator) {
             if (!$tokens[$operator - 1]->isWhitespace()) {
                 return false;
             }
 
-            if ($tokens[$operator - 1]->getContent() !== $break) {
+            if (!str_contains($tokens[$operator - 1]->getContent(), $lineEnding)) {
                 return false;
             }
         }
