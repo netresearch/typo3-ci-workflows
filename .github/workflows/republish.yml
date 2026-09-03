@@ -46,6 +46,15 @@ on:
         required: false
         type: string
         default: ''
+      exclude-from-packaging:
+        description: |
+          Path, relative to the checkout root, of a PHP file replacing tailor's
+          conf/ExcludeFromPackaging.php for the TER zip. Pass the same value the
+          release used, otherwise a republish repacks the unfiltered set and
+          undoes the filtering of the version it is meant to restore.
+        required: false
+        type: string
+        default: ''
     secrets:
       TYPO3_TER_ACCESS_TOKEN:
         required: false
@@ -149,6 +158,7 @@ jobs:
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
       ref: ${{ inputs.tag }}
+      exclude-from-packaging: ${{ inputs.exclude-from-packaging }}
     # Explicit secret pass-through (NOT `secrets: inherit`) so a
     # compromised action in the called workflow can't reach unrelated
     # org secrets. Forwards only the TER token actually needed.

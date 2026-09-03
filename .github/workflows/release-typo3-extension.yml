@@ -69,6 +69,14 @@ on:
         required: false
         type: boolean
         default: false
+      exclude-from-packaging:
+        description: >-
+          Path, relative to the checkout root, of a PHP file replacing tailor's
+          conf/ExcludeFromPackaging.php for the TER zip. See publish-to-ter.yml
+          for the contract; empty leaves tailor's built-in list in force.
+        required: false
+        type: string
+        default: ''
       skip-packagist:
         description: Skip Packagist publish + verification
         required: false
@@ -308,6 +316,7 @@ jobs:
       # release body it would otherwise prefer. Hand it the same notes.
       release-notes: ${{ needs.build-and-sign.outputs.release-notes }}
       derive-tags-from-composer: ${{ inputs.derive-tags-from-composer }}
+      exclude-from-packaging: ${{ inputs.exclude-from-packaging }}
     # Explicit secret pass-through (NOT `secrets: inherit`) so a
     # compromised action in the called workflow can't reach unrelated
     # org secrets. Forwards only the TER token actually needed.
