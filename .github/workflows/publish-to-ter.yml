@@ -494,6 +494,16 @@ jobs:
             echo "::error::exclude-from-packaging points at '$EXCLUDE_FILE', which does not exist in the checkout"
             exit 1
           fi
+          # The textual checks above are not enough: a symlink committed inside
+          # the checkout passes them and `-f`, then resolves anywhere on the
+          # runner. Compare the resolved paths instead, which is what `require`
+          # will actually open.
+          RESOLVED="$(realpath -- "$EXCLUDE_FILE")"
+          WORKSPACE="$(realpath -- "${GITHUB_WORKSPACE:-$PWD}")"
+          if [[ "$RESOLVED" != "$WORKSPACE"/* ]]; then
+            echo "::error::exclude-from-packaging resolves to '$RESOLVED', outside the checkout at '$WORKSPACE'"
+            exit 1
+          fi
           # Fail here rather than inside tailor: it throws
           # RequiredConfigurationMissing (1605734681) for a malformed file, but
           # only after the archive has been built. The key check alone is not
