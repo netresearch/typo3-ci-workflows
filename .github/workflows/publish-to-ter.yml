@@ -476,20 +476,52 @@ jobs:
         env:
           EXCLUDE_FILE: ${{ inputs.exclude-from-packaging }}
         run: |
+          # The input contract says "relative to the checkout root", so enforce
+          # it: the file is `require`d, and an absolute path or a .. segment
+          # would let a caller execute PHP from anywhere on the runner. Same
+          # shape as the archive-prefix check in release-typo3-extension.yml.
+          case "$EXCLUDE_FILE" in
+            /*|~*)
+              echo "::error::exclude-from-packaging must be relative to the checkout root, got '$EXCLUDE_FILE'"
+              exit 1
+              ;;
+            *..*)
+              echo "::error::exclude-from-packaging must not contain '..', got '$EXCLUDE_FILE'"
+              exit 1
+              ;;
+          esac
           if [[ ! -f "$EXCLUDE_FILE" ]]; then
             echo "::error::exclude-from-packaging points at '$EXCLUDE_FILE', which does not exist in the checkout"
             exit 1
           fi
           # Fail here rather than inside tailor: it throws
           # RequiredConfigurationMissing (1605734681) for a malformed file, but
-          # only after the archive has been built.
+          # only after the archive has been built. The key check alone is not
+          # enough — tailor iterates both values, so a config whose keys hold
+          # strings passes an isset() test and then fatals on count().
           cat > /tmp/check-exclude.php <<'PHP'
           <?php
           $file = $_SERVER['argv'][1];
           $config = require $file;
-          if (!is_array($config) || !isset($config['directories'], $config['files'])) {
-              fwrite(STDERR, "must return an array with 'directories' and 'files' keys\n");
+          if (!is_array($config)) {
+              fwrite(STDERR, "must return an array\n");
               exit(1);
+          }
+          foreach (['directories', 'files'] as $key) {
+              if (!isset($config[$key])) {
+                  fwrite(STDERR, "missing the '{$key}' key\n");
+                  exit(1);
+              }
+              if (!is_array($config[$key])) {
+                  fwrite(STDERR, "'{$key}' must be an array, got " . get_debug_type($config[$key]) . "\n");
+                  exit(1);
+              }
+              foreach ($config[$key] as $entry) {
+                  if (!is_string($entry)) {
+                      fwrite(STDERR, "every '{$key}' entry must be a string, got " . get_debug_type($entry) . "\n");
+                      exit(1);
+                  }
+              }
           }
           printf("%s: %d directories, %d files\n", $file, count($config['directories']), count($config['files']));
           PHP
