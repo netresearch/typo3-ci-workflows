@@ -106,6 +106,22 @@ on:
         required: false
         type: string
         default: ''
+      exclude-from-packaging:
+        description: >-
+          Path, relative to the checkout root, of a PHP file returning
+          ['directories' => [...], 'files' => [...]] that replaces tailor's own
+          conf/ExcludeFromPackaging.php. tailor zips the WORKING DIRECTORY and
+          never reads .gitattributes, so `export-ignore` has no effect on the
+          TER artifact — this is the only way a caller can keep agent
+          instructions, DDEV scaffolding or repository tooling out of it.
+          The file REPLACES the default list rather than merging with it
+          (VersionService::getExcludeConfiguration returns the loaded array
+          verbatim), so it must restate tailor's own entries or vendor/, .git/
+          and the test suite end up in the zip. Empty (the default) leaves
+          tailor's built-in list in force, so existing callers are unaffected.
+        required: false
+        type: string
+        default: ''
     secrets:
       TYPO3_EXTENSION_KEY:
         description: "Deprecated: extension key is auto-resolved from composer.json"
@@ -451,6 +467,79 @@ jobs:
             echo "TER precheck status for $VERSION: $STATUS (will publish)"
           fi
 
+      # Fail loudly on a misspelled path. tailor itself throws
+      # InvalidArgumentException 1605734677 and exits 255 for a non-existent
+      # file, but that happens after the archive is built and reads as a tailor
+      # crash rather than a caller configuration error.
+      - name: Check the exclude-from-packaging file exists
+        if: inputs.exclude-from-packaging != ''
+        env:
+          EXCLUDE_FILE: ${{ inputs.exclude-from-packaging }}
+        run: |
+          # The input contract says "relative to the checkout root", so enforce
+          # it: the file is `require`d, and an absolute path or a .. segment
+          # would let a caller execute PHP from anywhere on the runner. Same
+          # shape as the archive-prefix check in release-typo3-extension.yml.
+          case "$EXCLUDE_FILE" in
+            /*)
+              echo "::error::exclude-from-packaging must be relative to the checkout root, got '$EXCLUDE_FILE'"
+              exit 1
+              ;;
+          esac
+          # Only a parent-directory COMPONENT, so that a legitimate name such as
+          # config/Exclude..php is not rejected. The surrounding slashes make
+          # the test work for a leading, trailing or bare "..".
+          if [[ "/$EXCLUDE_FILE/" == *"/../"* ]]; then
+            echo "::error::exclude-from-packaging must not contain a '..' path component, got '$EXCLUDE_FILE'"
+            exit 1
+          fi
+          if [[ ! -f "$EXCLUDE_FILE" ]]; then
+            echo "::error::exclude-from-packaging points at '$EXCLUDE_FILE', which does not exist in the checkout"
+            exit 1
+          fi
+          # The textual checks above are not enough: a symlink committed inside
+          # the checkout passes them and `-f`, then resolves anywhere on the
+          # runner. Compare the resolved paths instead, which is what `require`
+          # will actually open.
+          RESOLVED="$(realpath -- "$EXCLUDE_FILE")"
+          WORKSPACE="$(realpath -- "${GITHUB_WORKSPACE:-$PWD}")"
+          if [[ "$RESOLVED" != "$WORKSPACE"/* ]]; then
+            echo "::error::exclude-from-packaging resolves to '$RESOLVED', outside the checkout at '$WORKSPACE'"
+            exit 1
+          fi
+          # Fail here rather than inside tailor: it throws
+          # RequiredConfigurationMissing (1605734681) for a malformed file, but
+          # only after the archive has been built. The key check alone is not
+          # enough — tailor iterates both values, so a config whose keys hold
+          # strings passes an isset() test and then fatals on count().
+          cat > /tmp/check-exclude.php <<'PHP'
+          <?php
+          $file = $_SERVER['argv'][1];
+          $config = require $file;
+          if (!is_array($config)) {
+              fwrite(STDERR, "must return an array\n");
+              exit(1);
+          }
+          foreach (['directories', 'files'] as $key) {
+              if (!isset($config[$key])) {
+                  fwrite(STDERR, "missing the '{$key}' key\n");
+                  exit(1);
+              }
+              if (!is_array($config[$key])) {
+                  fwrite(STDERR, "'{$key}' must be an array, got " . get_debug_type($config[$key]) . "\n");
+                  exit(1);
+              }
+              foreach ($config[$key] as $entry) {
+                  if (!is_string($entry)) {
+                      fwrite(STDERR, "every '{$key}' entry must be a string, got " . get_debug_type($entry) . "\n");
+                      exit(1);
+                  }
+              }
+          }
+          printf("%s: %d directories, %d files\n", $file, count($config['directories']), count($config['files']));
+          PHP
+          php /tmp/check-exclude.php "$EXCLUDE_FILE"
+
       - name: Publish to TER
         if: steps.precheck.outputs.already-published != 'true'
         env:
@@ -458,6 +547,9 @@ jobs:
           TYPO3_API_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           COMMENT: ${{ steps.comment.outputs.comment }}
+          # tailor's Variables::has() treats an empty string as unset, so the
+          # default '' falls back to its built-in list without a conditional.
+          TYPO3_EXCLUDE_FROM_PACKAGING: ${{ inputs.exclude-from-packaging }}
         run: php ~/.composer/vendor/bin/tailor ter:publish --comment="$COMMENT" "$VERSION"
 
       - name: Verify TER serves the version
