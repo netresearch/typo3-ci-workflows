@@ -137,7 +137,7 @@ gh api repos/netresearch/REPO/hooks --method POST \
 | Workflow | Purpose | Trigger |
 |----------|---------|---------|
 | [`release.yml`](#release) | Enterprise release pipeline (archive, SBOM, cosign, attestation) | tag push |
-| [`release-gate.yml`](#release-gate) | Block a release until named workflows succeeded for the released commit | tag push |
+| [`release-gate.yml`](#release-gate) | Block a release until named workflows succeeded for the released commit | `workflow_call` (first job of a release workflow) |
 | [`publish-to-ter.yml`](#publish-to-ter) | Publish extension to TYPO3 TER | tag push |
 | [`changelog-assemble.yml`](#changelog-fragments) | Assemble changelog fragments into a released section | release prep |
 | [`changelog-check.yml`](#changelog-fragments) | Require a changelog fragment on a pull request | PR |
@@ -683,9 +683,9 @@ Every named workflow must run for the released commit: for a tag on `main`, a wo
 |-------|------|----------|---------|-------------|
 | `required-workflows` | string | **yes** | - | Whitespace-separated workflow file names in the calling repository |
 | `sha` | string | no | triggering commit | Commit to gate |
-| `timeout-minutes` | number | no | `120` | How long to wait for the named workflows |
-| `grace-seconds` | number | no | `600` | How long a named workflow may take to create its run for the commit |
-| `poll-interval-seconds` | number | no | `30` | Seconds between status polls |
+| `timeout-minutes` | number | no | `120` | How long to wait for the named workflows; positive integer |
+| `grace-seconds` | number | no | `600` | How long a named workflow may take to create its run for the commit; positive integer |
+| `poll-interval-seconds` | number | no | `30` | Seconds between status polls; positive number, fractions allowed |
 
 ---
 

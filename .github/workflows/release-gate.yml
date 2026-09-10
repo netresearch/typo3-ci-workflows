@@ -64,19 +64,19 @@ on:
         type: string
         default: ''
       timeout-minutes:
-        description: How long to wait for the named workflows to finish.
+        description: How long to wait for the named workflows to finish. Positive integer.
         required: false
         type: number
         default: 120
       grace-seconds:
         description: >-
           How long a named workflow may take to create its run for the commit
-          before the gate gives up on it.
+          before the gate gives up on it. Positive integer.
         required: false
         type: number
         default: 600
       poll-interval-seconds:
-        description: Seconds between status polls.
+        description: Seconds between status polls. Positive number; fractions are allowed.
         required: false
         type: number
         default: 30
@@ -112,6 +112,19 @@ jobs:
           SHA="${SHA_INPUT:-$GITHUB_SHA}"
           if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Not a full commit SHA: '$SHA'"
+            exit 1
+          fi
+
+          # A zero poll interval would hammer the API until the deadline, and
+          # the deadline arithmetic below is integer-only.
+          for pair in "timeout-minutes=$TIMEOUT_MINUTES" "grace-seconds=$GRACE_SECONDS"; do
+            if ! [[ "${pair#*=}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::${pair%%=*} must be a positive integer, got '${pair#*=}'."
+              exit 1
+            fi
+          done
+          if ! [[ "$POLL_INTERVAL" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ "$POLL_INTERVAL" =~ ^0+(\.0+)?$ ]]; then
+            echo "::error::poll-interval-seconds must be a positive number, got '${POLL_INTERVAL}'."
             exit 1
           fi
 
