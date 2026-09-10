@@ -137,6 +137,7 @@ gh api repos/netresearch/REPO/hooks --method POST \
 | Workflow | Purpose | Trigger |
 |----------|---------|---------|
 | [`release.yml`](#release) | Enterprise release pipeline (archive, SBOM, cosign, attestation) | tag push |
+| [`release-gate.yml`](#release-gate) | Block a release until named workflows succeeded for the released commit | `workflow_call` (first job of a release workflow) |
 | [`publish-to-ter.yml`](#publish-to-ter) | Publish extension to TYPO3 TER | tag push |
 | [`changelog-assemble.yml`](#changelog-fragments) | Assemble changelog fragments into a released section | release prep |
 | [`changelog-check.yml`](#changelog-fragments) | Require a changelog fragment on a pull request | PR |
@@ -636,6 +637,55 @@ jobs:
       package-name: vendor/my-extension
       make-latest: false
 ```
+
+---
+
+## Release gate
+
+Blocks a release until the named workflows have succeeded for the exact commit being released. Without it, a release and the workflows that judge the same commit run side by side, and a failed test matrix or security check is only *visible next to* a release that is already signed and published. With it, the failure stops the release.
+
+The gate reads the newest run of each named workflow for the commit, waits while it is queued or running, and fails unless it concluded `success`. It fails closed: a run that never appears within `grace-seconds`, an API error, a cancelled or failed run, and the timeout all stop the release.
+
+It is a separate reusable rather than an input of `release-typo3-extension.yml` on purpose: listing workflow runs needs `actions: read`, and GitHub rejects every caller of a reusable that declares a permission the caller did not grant. Only repositories that opt in grant it.
+
+### Minimal caller
+
+```yaml
+jobs:
+  gate:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/release-gate.yml@main
+    permissions:
+      actions: read
+      contents: read
+    with:
+      required-workflows: 'ci.yml release-evidence.yml'
+
+  release:
+    needs: gate
+    uses: netresearch/typo3-ci-workflows/.github/workflows/release-typo3-extension.yml@main
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    with:
+      archive-prefix: my-extension
+      package-name: vendor/my-extension
+      extension-key: my_extension
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+```
+
+Every named workflow must run for the released commit: for a tag on `main`, a workflow triggered by pushes to `main` has run for it, and one triggered by the tag push runs alongside the release. The calling workflow itself cannot be named — it would wait for itself.
+
+### Inputs
+
+| Input | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `required-workflows` | string | **yes** | - | Whitespace-separated workflow file names in the calling repository |
+| `sha` | string | no | triggering commit | Commit to gate |
+| `timeout-minutes` | number | no | `120` | How long to wait for the named workflows; positive integer |
+| `grace-seconds` | number | no | `600` | How long a named workflow may take to create its run for the commit; positive integer |
+| `poll-interval-seconds` | number | no | `30` | Seconds between status polls; positive number, fractions allowed |
 
 ---
 

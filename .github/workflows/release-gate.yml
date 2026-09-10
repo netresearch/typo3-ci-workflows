@@ -1,0 +1,219 @@
+name: Release gate
+
+# Blocks a release until the named workflows have succeeded for the exact
+# commit being released.
+#
+# A release workflow and the workflows that judge the same commit (the test
+# matrix, a security-evidence run) are usually triggered by the same push and
+# run side by side. Without a gate their failures are merely *visible at* the
+# release — the archives are already signed and TER, Packagist and the GitHub
+# release already published by the time anyone reads them. Called as the first
+# job of a caller's release workflow, with the release job depending on it,
+# this turns "failures show up next to the release" into "failures stop the
+# release".
+#
+# The gate reads the newest run of each named workflow whose head SHA is the
+# commit under release, waits while it is queued or running, and fails unless
+# it concluded `success`. It fails closed: a run that never appears within the
+# grace window, an API error, a cancelled or failed run and a timeout all stop
+# the release. Re-run the failed workflow (or push a fix and re-tag), then
+# re-run the release workflow.
+#
+# WHY A SEPARATE REUSABLE AND NOT AN INPUT OF release-typo3-extension.yml
+# ======================================================================
+# Listing workflow runs needs `actions: read`. GitHub rejects a caller at
+# startup when a reusable declares a permission the caller did not grant, and
+# that validation covers every job of the reusable, used or not. Adding the
+# gate to the orchestrator would therefore force every existing caller to
+# grant `actions: read` or break. As its own reusable, only the callers that
+# opt in grant it.
+#
+# CALLER REQUIREMENTS
+# ===================
+#
+#   jobs:
+#     gate:
+#       uses: netresearch/typo3-ci-workflows/.github/workflows/release-gate.yml@main
+#       permissions:
+#         actions: read
+#         contents: read
+#       with:
+#         required-workflows: 'ci.yml release-evidence.yml'
+#     release:
+#       needs: gate
+#       uses: netresearch/typo3-ci-workflows/.github/workflows/release-typo3-extension.yml@main
+#       ...
+#
+# Every named workflow must actually run for the released commit — for a tag
+# on `main`, a workflow triggered by pushes to `main` has run for it, and one
+# triggered by the tag push runs alongside the release.
+
+on:
+  workflow_call:
+    inputs:
+      required-workflows:
+        description: >-
+          Whitespace-separated workflow file names in the calling repository
+          (e.g. "ci.yml release-evidence.yml") whose newest run for the
+          released commit must have concluded successfully.
+        required: true
+        type: string
+      sha:
+        description: Commit to gate. Defaults to the commit that triggered the caller.
+        required: false
+        type: string
+        default: ''
+      timeout-minutes:
+        description: How long to wait for the named workflows to finish. Positive integer.
+        required: false
+        type: number
+        default: 120
+      grace-seconds:
+        description: >-
+          How long a named workflow may take to create its run for the commit
+          before the gate gives up on it. Positive integer.
+        required: false
+        type: number
+        default: 600
+      poll-interval-seconds:
+        description: Seconds between status polls. Positive number; fractions are allowed.
+        required: false
+        type: number
+        default: 30
+
+permissions: {}
+
+jobs:
+  gate:
+    name: Required workflows succeeded
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Wait for the required workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_WORKFLOWS: ${{ inputs.required-workflows }}
+          SHA_INPUT: ${{ inputs.sha }}
+          TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          GRACE_SECONDS: ${{ inputs.grace-seconds }}
+          POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+          CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+
+          SHA="${SHA_INPUT:-$GITHUB_SHA}"
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Not a full commit SHA: '$SHA'"
+            exit 1
+          fi
+
+          # A zero poll interval would hammer the API until the deadline, and
+          # the deadline arithmetic below is integer-only.
+          for pair in "timeout-minutes=$TIMEOUT_MINUTES" "grace-seconds=$GRACE_SECONDS"; do
+            if ! [[ "${pair#*=}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::${pair%%=*} must be a positive integer, got '${pair#*=}'."
+              exit 1
+            fi
+          done
+          if ! [[ "$POLL_INTERVAL" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ "$POLL_INTERVAL" =~ ^0+(\.0+)?$ ]]; then
+            echo "::error::poll-interval-seconds must be a positive number, got '${POLL_INTERVAL}'."
+            exit 1
+          fi
+
+          read -r -a WORKFLOWS <<< "$REQUIRED_WORKFLOWS"
+          if [[ ${#WORKFLOWS[@]} -eq 0 ]]; then
+            echo "::error::required-workflows is empty — nothing would gate the release."
+            exit 1
+          fi
+
+          # The calling workflow runs for the same commit; waiting for itself
+          # would never end.
+          CALLER_FILE="${CALLER_WORKFLOW_REF%@*}"
+          CALLER_FILE="${CALLER_FILE##*/}"
+          for wf in "${WORKFLOWS[@]}"; do
+            if ! [[ "$wf" =~ ^[A-Za-z0-9._-]+\.ya?ml$ ]]; then
+              echo "::error::Not a workflow file name: '$wf'"
+              exit 1
+            fi
+            if [[ "$wf" == "$CALLER_FILE" ]]; then
+              echo "::error::'$wf' is the calling workflow itself and can never finish before this gate."
+              exit 1
+            fi
+          done
+
+          echo "Gating commit $SHA on: ${WORKFLOWS[*]}"
+          {
+            echo "### Release gate for \`${SHA}\`"
+            echo ""
+            echo "| Workflow | Conclusion | Run |"
+            echo "|----------|------------|-----|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          START=$(date +%s)
+          DEADLINE=$(( START + TIMEOUT_MINUTES * 60 ))
+          declare -A PASSED=()
+
+          while :; do
+            pending=0
+            for wf in "${WORKFLOWS[@]}"; do
+              [[ -n "${PASSED[$wf]:-}" ]] && continue
+
+              # Runs come back newest first, so the first one for this SHA is
+              # the one that counts; a re-run keeps its id and updates in place.
+              if ! RUN=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${SHA}&per_page=1" \
+                  --jq '.workflow_runs[0] // empty | {status, conclusion, html_url}' 2>&1); then
+                echo "::error::Could not list runs of ${wf}: ${RUN}"
+                exit 1
+              fi
+
+              if [[ -z "$RUN" ]]; then
+                if (( $(date +%s) - START > GRACE_SECONDS )); then
+                  echo "::error::${wf} has no run for ${SHA} after ${GRACE_SECONDS}s. Does it trigger for this commit?"
+                  exit 1
+                fi
+                echo "… ${wf}: no run yet"
+                pending=1
+                continue
+              fi
+
+              STATUS=$(jq -r '.status' <<< "$RUN")
+              CONCLUSION=$(jq -r '.conclusion // ""' <<< "$RUN")
+              URL=$(jq -r '.html_url' <<< "$RUN")
+
+              if [[ "$STATUS" != 'completed' ]]; then
+                echo "… ${wf}: ${STATUS} (${URL})"
+                pending=1
+                continue
+              fi
+
+              if [[ "$CONCLUSION" != 'success' ]]; then
+                echo "::error::${wf} concluded '${CONCLUSION}' for ${SHA}: ${URL}"
+                echo "| \`${wf}\` | ${CONCLUSION} | ${URL} |" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+
+              echo "✓ ${wf}: success (${URL})"
+              echo "| \`${wf}\` | success | ${URL} |" >> "$GITHUB_STEP_SUMMARY"
+              PASSED[$wf]=1
+            done
+
+            if (( pending == 0 )); then
+              break
+            fi
+
+            if (( $(date +%s) >= DEADLINE )); then
+              echo "::error::Timed out after ${TIMEOUT_MINUTES} minutes waiting for the required workflows."
+              exit 1
+            fi
+
+            sleep "$POLL_INTERVAL"
+          done
+
+          echo "::notice::All required workflows succeeded for ${SHA}."
