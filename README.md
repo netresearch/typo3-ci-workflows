@@ -243,7 +243,7 @@ Commands are auto-detected from composer scripts (in order):
 - **Rector:** `ci:test:php:rector`, `check:php:rector`
 - **Unit tests:** `ci:test:php:unit` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:unit`, `check:tests:unit`, `test:unit`
 - **Functional tests:** `ci:test:php:functional` (+ `--no-coverage`/`--coverage-clover`), `ci:tests:functional`, `check:tests:functional`, `test:functional`
-- **Acceptance tests:** `ci:test:php:acceptance`
+- **Acceptance tests:** `ci:test:php:acceptance` (+ `--no-coverage`/`--coverage-clover`)
 
 CGL and Rector run on a single PHP version — `php-versions[0]`, or `cgl-php-version` / `rector-php-version` when the respective input is set. PHPStan and tests run on the full matrix.
 
