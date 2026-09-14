@@ -166,7 +166,15 @@ on:
 
       # Coverage
       upload-coverage:
-        description: Upload coverage to Codecov
+        description: >-
+          Upload coverage to Codecov, under the flags unit, functional and
+          acceptance. The built-in ci:test:php:unit/functional/acceptance
+          invocations are handed --coverage-clover themselves. A custom
+          unit-test-command / functional-test-command / acceptance-test-command
+          runs unchanged and must write coverage-unit.xml,
+          coverage-functional.xml or coverage-acceptance.xml itself -- the
+          upload step uses fail_ci_if_error: false, so a missing report passes
+          silently and that tier is absent from the Codecov report.
         type: boolean
         default: false
       coverage-tool:
@@ -1220,7 +1228,7 @@ jobs:
           extensions: ${{ inputs.php-extensions }}
           tools: composer:v2
           ini-values: zend.assertions=1
-          coverage: none
+          coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -1283,16 +1291,30 @@ jobs:
       - name: Run acceptance tests
         env:
           ACCEPTANCE_TEST_COMMAND: ${{ inputs.acceptance-test-command }}
+          UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$ACCEPTANCE_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$ACCEPTANCE_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:acceptance'; then
-            composer ci:test:php:acceptance
+            if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
+              composer ci:test:php:acceptance -- --coverage-clover=coverage-acceptance.xml
+            else
+              composer ci:test:php:acceptance -- --no-coverage
+            fi
           else
             echo "::error::No acceptance test script found. This job would report success without running anything. Add ci:test:php:acceptance to composer scripts, pass acceptance-test-command, or set run-acceptance-tests: false if this extension has none."
             exit 1
           fi
+
+      - name: Upload coverage to Codecov
+        if: ${{ inputs.upload-coverage }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-acceptance.xml
+          flags: acceptance
+          fail_ci_if_error: false
 
   functional-tests:
     needs: preflight
