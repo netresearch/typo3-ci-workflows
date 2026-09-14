@@ -215,7 +215,7 @@ jobs:
 | `run-acceptance-tests` | boolean | `false` | Run PHPUnit acceptance tests |
 | `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
 | `db-image` | string | `mysql:9.6` | Docker image for database service |
-| `upload-coverage` | boolean | `false` | Upload coverage to Codecov |
+| `upload-coverage` | boolean | `false` | Upload coverage to Codecov, under the flags `unit`, `functional` and `acceptance`. Custom `*-test-command` overrides run unchanged and must write `coverage-unit.xml` / `coverage-functional.xml` / `coverage-acceptance.xml` themselves — the upload uses `fail_ci_if_error: false`, so a missing report passes silently. |
 | `upload-test-results` | boolean | `false` | Upload per-test JUnit reports to [Codecov Test Analytics](https://docs.codecov.com/docs/test-analytics) (flaky-test detection, per-test durations). Custom `*-test-command` overrides must emit `junit-unit.xml` / `junit-functional.xml` themselves. |
 | `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (branch + path coverage, matches local `XDEBUG_MODE=coverage`) or `pcov` (line-only, ~3-10× faster) |
 | `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |

@@ -166,7 +166,15 @@ on:
 
       # Coverage
       upload-coverage:
-        description: Upload coverage to Codecov
+        description: >-
+          Upload coverage to Codecov, under the flags unit, functional and
+          acceptance. The built-in ci:test:php:unit/functional/acceptance
+          invocations are handed --coverage-clover themselves. A custom
+          unit-test-command / functional-test-command / acceptance-test-command
+          runs unchanged and must write coverage-unit.xml,
+          coverage-functional.xml or coverage-acceptance.xml itself -- the
+          upload step uses fail_ci_if_error: false, so a missing report passes
+          silently and that tier is absent from the Codecov report.
         type: boolean
         default: false
       coverage-tool:
