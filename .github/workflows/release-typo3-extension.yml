@@ -433,12 +433,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release (atomic, all assets)
+        id: gh-release
+        # Failure here is not the end of the release: the action creates the
+        # release as a draft, uploads every asset, and only then finalizes it,
+        # so an upload that dies leaves an unpublished draft with a partial
+        # asset set. The completion step below finishes the job or fails
+        # loudly, and `continue-on-error` is what lets it run at all.
+        continue-on-error: true
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           make_latest: ${{ inputs.make-latest }}
           files: |
             dist/*
           fail_on_unmatched_files: true
+          # Sequentially, not in parallel. The default uploads every asset at
+          # once (`Promise.all` in the action's run.ts), and concurrent uploads
+          # against one release make GitHub's asset endpoint answer
+          # `Error creating asset temp dir` — a server-side failure with no
+          # retry behind it, which then aborts the whole step. Seen twice on
+          # one release, at a different asset each time.
+          preserve_order: true
           body: |
             ## Changes
             ${{ needs.build-and-sign.outputs.release-notes }}
@@ -474,3 +488,91 @@ jobs:
             ## Software Bill of Materials (SBOM)
 
             SBOMs are provided in both SPDX and CycloneDX formats for supply chain transparency.
+
+      # The guarantee this job is built on is that a published release is
+      # complete: every artifact the build produced, present, on a page nobody
+      # edited afterwards. GitHub's asset endpoint does not cooperate — it
+      # answers `Error creating asset temp dir` often enough that a release of
+      # ten assets hits it regularly, and neither the endpoint nor the action
+      # retries. `preserve_order` above removes the concurrency that provokes
+      # it; this step covers the rest, per asset rather than per run, so one
+      # bad upload costs one retry instead of the whole release.
+      #
+      # It is deliberately not a second author of the release. It uploads only
+      # files the build produced and the release is missing, and it publishes
+      # only once the set is complete: a release that cannot be completed stays
+      # an unpublished draft and the job fails, which is the same outcome as
+      # today minus the manual repair.
+      - name: Complete and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          ATTEMPTS: '4'
+        run: |
+          set -euo pipefail
+
+          # Read the two sides into files rather than through a pipeline or a
+          # process substitution. `set -e` does not see a failure inside
+          # `<(...)`, so a `gh` call that dies there would hand the loop an
+          # empty "nothing is missing" answer and publish an incomplete
+          # release -- the exact fail-open this step exists to prevent.
+          [[ -d dist ]] || { echo "::error::dist/ is missing; nothing to upload."; exit 1; }
+          find dist -maxdepth 1 -type f -printf '%f\n' | sort > expected.txt
+          [[ -s expected.txt ]] || { echo "::error::dist/ holds no files."; exit 1; }
+
+          # Only assets the API reports as `uploaded` count as present. A
+          # failed upload can leave the name behind in `starter` state -- an
+          # empty asset that a name-only listing cannot tell from a real one,
+          # and that would let this step publish a release carrying a file
+          # nobody can use. `--clobber` replaces such a leftover.
+          read_present() {
+            if ! gh release view "$TAG" --json assets \
+                --jq '.assets[] | select(.state == "uploaded") | .name' > present.raw 2> present.err; then
+              echo "::error::No release for ${TAG} to complete: $(cat present.err)"
+              exit 1
+            fi
+            sort present.raw > present.txt
+          }
+
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            read_present
+            comm -23 expected.txt present.txt > missing.txt
+            [[ -s missing.txt ]] || break
+
+            echo "Attempt ${attempt}/${ATTEMPTS}: $(wc -l < missing.txt) asset(s) missing:"
+            cat missing.txt
+
+            while IFS= read -r name; do
+              # --clobber so a half-written asset from a failed attempt is
+              # replaced rather than colliding with the retry.
+              if gh release upload "$TAG" "dist/${name}" --clobber; then
+                echo "  uploaded ${name}"
+              else
+                echo "::warning::upload of ${name} failed on attempt ${attempt}; retrying"
+              fi
+            done < missing.txt
+
+            # An `if`, not `[[ … ]] && sleep`: as the last command of the loop
+            # body the latter returns 1 on the final round, and whether that
+            # trips `set -e` is a bash subtlety nobody should have to recall
+            # while reading a release path.
+            if [[ "$attempt" -lt "$ATTEMPTS" ]]; then
+              sleep $(( attempt * 5 ))
+            fi
+          done
+
+          # Verified after the last round, not before it: deciding inside the
+          # loop would spend one iteration on the verdict instead of on an
+          # upload, so ATTEMPTS would buy ATTEMPTS-1 tries.
+          read_present
+          comm -23 expected.txt present.txt > missing.txt
+          if [[ -s missing.txt ]]; then
+            echo "::error::Still missing after ${ATTEMPTS} attempts: $(paste -sd' ' missing.txt). The release stays an unpublished draft."
+            exit 1
+          fi
+          echo "All $(wc -l < expected.txt) assets are on the release."
+
+          if [[ "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" == "true" ]]; then
+            echo "Publishing the completed release."
+            gh release edit "$TAG" --draft=false
+          fi
