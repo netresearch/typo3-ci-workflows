@@ -361,10 +361,11 @@ jobs:
     # verify-docs is deliberately NOT part of this gate: docs.typo3.org renders
     # via the external Intercept webhook, which can be down or slow at tag time
     # (a 500 from docs-hook.typo3.org once blocked an otherwise-complete
-    # release). Its result is reported in the evidence block, and the render
-    # catches up on the next Intercept delivery — it must never hold back the
-    # GitHub release, TER, or Packagist. verify-docs stays in `needs` only so
-    # its result is available to the evidence step.
+    # release). It must never hold back the GitHub release, TER, or Packagist.
+    # Since it also stopped failing on a miss, it no longer reddens the run
+    # either — the two halves of the same intent, which used to disagree.
+    # verify-docs stays in `needs` so its `dispatched` output reaches the
+    # evidence step.
     if: >-
       ${{
         always()
@@ -397,6 +398,7 @@ jobs:
           TER_RESULT: ${{ needs.publish-to-ter.result }}
           PKGST_RESULT: ${{ needs.verify-packagist.result }}
           DOCS_RESULT: ${{ needs.verify-docs.result }}
+          DOCS_DISPATCHED: ${{ needs.verify-docs.outputs.dispatched }}
         run: |
           DELIMITER="ghadelim_$(openssl rand -hex 8)"
           # Intercept maps the tag to a major.minor docs branch (v0.8.1 → 0.8),
@@ -416,11 +418,16 @@ jobs:
             elif [[ "$PKGST_RESULT" == "skipped" ]]; then
               echo "- Packagist: skipped"
             fi
-            if [[ "$DOCS_RESULT" == "success" ]]; then
-              # docs.typo3.org path uses the composer package name verbatim
-              # (`{vendor}/{repo-name}` with dashes), NOT the TYPO3 extension
-              # key (which uses underscores).
-              echo "- Documentation: [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/) — render verified"
+            # docs.typo3.org path uses the composer package name verbatim
+            # (`{vendor}/{repo-name}` with dashes), NOT the TYPO3 extension key
+            # (which uses underscores).
+            #
+            # "accepted by Intercept" is the strongest claim available here:
+            # the verify job no longer waits for the render to finish, so it
+            # knows the job was dispatched and nothing about its outcome.
+            # Saying "render verified" would overclaim.
+            if [[ "$DOCS_DISPATCHED" == "true" ]]; then
+              echo "- Documentation: [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/) — render accepted by Intercept"
             elif [[ "$DOCS_RESULT" == "skipped" ]]; then
               echo "- Documentation: skipped"
             else
