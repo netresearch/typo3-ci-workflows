@@ -552,7 +552,13 @@ jobs:
               fi
             done < missing.txt
 
-            [[ "$attempt" -lt "$ATTEMPTS" ]] && sleep $(( attempt * 5 ))
+            # An `if`, not `[[ … ]] && sleep`: as the last command of the loop
+            # body the latter returns 1 on the final round, and whether that
+            # trips `set -e` is a bash subtlety nobody should have to recall
+            # while reading a release path.
+            if [[ "$attempt" -lt "$ATTEMPTS" ]]; then
+              sleep $(( attempt * 5 ))
+            fi
           done
 
           # Verified after the last round, not before it: deciding inside the
