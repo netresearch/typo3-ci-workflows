@@ -134,6 +134,12 @@ jobs:
           # grace window expires with zero successful jobs queries, the
           # problem is the API (rate limit / auth), not Intercept —
           # report accordingly instead of misleading on the webhook.
+          # Two flags, not one. "no jobs query succeeded" and "no jobs query
+          # was made" look the same to a single flag, and they are opposite
+          # diagnoses: the first is a rate limit or an auth problem on our
+          # side, the second just means no render run created since $SINCE was
+          # on the page — the ordinary case this search is built for.
+          JOBS_QUERY_ATTEMPTED=false
           JOBS_QUERY_OK=false
           echo "Looking for render job named: $JOB_NAME"
           echo "Only considering runs created on or after: $SINCE"
@@ -173,6 +179,7 @@ jobs:
               # quoted (a `"` or other special character in package-name
               # would otherwise break the jq filter and silently miss the
               # match). Surface API errors instead of swallowing them.
+              JOBS_QUERY_ATTEMPTED=true
               if ! JOBS_JSON=$(gh api \
                 "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${ID}/jobs" 2>&1); then
                 echo "::warning::Failed to list jobs for run ${ID}: ${JOBS_JSON}"
@@ -201,7 +208,7 @@ jobs:
               # window — the render queue is shared by the whole ecosystem and
               # this search sees one page of it. That is not evidence the
               # render failed, so it must not colour a release run red.
-              if [[ "$JOBS_QUERY_OK" != "true" ]]; then
+              if [[ "$JOBS_QUERY_ATTEMPTED" == "true" && "$JOBS_QUERY_OK" != "true" ]]; then
                 echo "::warning::Could not inspect any candidate run's jobs within ${GRACE_SECONDS}s — every jobs API query failed (likely auth or secondary rate limiting). This says nothing about Intercept; check the warnings above."
               else
                 echo "::warning::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s. Intercept may not have fired yet, or the run is outside the window this search covers. The render catches up on the next delivery."
