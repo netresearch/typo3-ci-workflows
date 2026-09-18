@@ -6,14 +6,33 @@ name: Verify docs.typo3.org rendering
 # for the job whose name matches the caller's package, then reports its
 # success/failure.
 #
-# Polling the render workflow (not the rendered URL) is authoritative:
-# - a 200 on the rendered URL only confirms success, never distinguishes
-#   "still rendering" from "render failed and will never succeed";
-# - Intercept maps tags to major.minor docs branches (v0.8.1 → 0.8), so the
-#   rendered URL pattern depends on git-ref vs. major.minor conventions the
-#   caller shouldn't need to reconstruct;
-# - the render workflow's job conclusion is deterministic and exposes an
-#   upstream run URL the release body can cite as evidence.
+# WHAT THIS ASSERTS, AND WHAT IT DOES NOT
+# =======================================
+# It asserts that the render job reached Intercept: a run for this package
+# exists in the render workflow. It does NOT wait for that run to finish, and
+# it never fails the caller.
+#
+# Both halves are deliberate. The render queue is shared by the whole TYPO3
+# ecosystem, so how long a render takes — and whether ours is still inside the
+# window this search can see — depends on what everyone else is publishing at
+# that minute, not on the release being verified. Waiting for the outcome made
+# a green release run a function of ecosystem load: two attempts at one release
+# both failed here while the documentation rendered correctly and is live.
+#
+# A release must not be marked failed by that, which is why the orchestrator
+# already keeps this job out of the gate for TER, Packagist and the GitHub
+# release. Reporting it as a failed job did the same damage one level up: the
+# run went red for something that had not gone wrong.
+#
+# Polling the render workflow rather than the rendered URL is still the right
+# probe for the dispatch question: Intercept maps tags to major.minor docs
+# branches (v0.8.1 → 0.8), so the rendered URL pattern depends on conventions
+# the caller shouldn't need to reconstruct, and the matched run URL is evidence
+# the release body can cite.
+#
+# The outcome is exposed as the `dispatched` output so the caller can word its
+# release notes truthfully — "accepted by Intercept" is not "render verified",
+# and this workflow no longer knows the second.
 
 on:
   workflow_call:
@@ -36,7 +55,10 @@ on:
         type: string
         default: ''
       timeout-minutes:
-        description: Max minutes to wait for the render run to complete
+        description: |
+          Job-level timeout. Only a backstop since the search gave up waiting
+          for the render to finish — `intercept-grace-seconds` is what bounds
+          the search itself.
         required: false
         type: number
         default: 45
@@ -46,10 +68,18 @@ on:
         type: number
         default: 30
       intercept-grace-seconds:
-        description: Seconds to wait for Intercept to create the render run before timing out the initial search
+        description: Seconds to wait for Intercept to create the render run before giving up on the search
         required: false
         type: number
         default: 180
+    outputs:
+      dispatched:
+        description: |
+          "true" when a render run for this package was found, i.e. Intercept
+          accepted the job. "false" when none appeared within
+          `intercept-grace-seconds` — which is not evidence that the render
+          failed, only that it was not visible yet.
+        value: ${{ jobs.verify.outputs.dispatched }}
 
 # CALLER REQUIREMENTS
 # ===================
@@ -77,17 +107,19 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+    outputs:
+      dispatched: ${{ steps.search.outputs.dispatched }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
-      - name: Poll t3docs-ci-deploy for the render run
+      - name: Look for the render run Intercept created
+        id: search
         env:
           PACKAGE: ${{ inputs.package-name }}
           SINCE_INPUT: ${{ inputs.since }}
-          TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
           POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
           GRACE_SECONDS: ${{ inputs.intercept-grace-seconds }}
           GH_TOKEN: ${{ github.token }}
@@ -96,7 +128,6 @@ jobs:
 
           JOB_NAME="Render ${PACKAGE}"
           SINCE="${SINCE_INPUT:-$(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ)}"
-          DEADLINE=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
           GRACE_DEADLINE=$(( $(date +%s) + GRACE_SECONDS ))
           RUN_ID=""
           # Track whether any jobs query has succeeded so far. If the
@@ -119,8 +150,13 @@ jobs:
             if ! RUNS_JSON=$(gh api \
               "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/workflows/main-rendering.yml/runs?per_page=30" \
               --jq '.workflow_runs' 2>&1); then
-              echo "::error::Failed to list render workflow runs: ${RUNS_JSON}"
-              exit 1
+              # Also a warning, for the same reason as the grace expiry below:
+              # this is a statement about a GitHub API call, not about the
+              # release being published. Failing here would redden a run over
+              # someone else's rate limit.
+              echo "::warning::Failed to list render workflow runs: ${RUNS_JSON}"
+              echo "dispatched=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
 
             # For each run, ask the jobs endpoint whether our render job is
@@ -160,48 +196,25 @@ jobs:
             fi
 
             if [[ $(date +%s) -ge $GRACE_DEADLINE ]]; then
+              # A warning, not an error, and the job still succeeds. Not
+              # finding the run means it was not visible here within the
+              # window — the render queue is shared by the whole ecosystem and
+              # this search sees one page of it. That is not evidence the
+              # render failed, so it must not colour a release run red.
               if [[ "$JOBS_QUERY_OK" != "true" ]]; then
-                echo "::error::Could not inspect any candidate run's jobs within ${GRACE_SECONDS}s — every jobs API query failed (likely auth or secondary rate limiting). This is NOT an Intercept-webhook problem; check the warnings above."
+                echo "::warning::Could not inspect any candidate run's jobs within ${GRACE_SECONDS}s — every jobs API query failed (likely auth or secondary rate limiting). This says nothing about Intercept; check the warnings above."
               else
-                echo "::error::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s — Intercept webhook may not have fired."
+                echo "::warning::No render run for '${JOB_NAME}' appeared within ${GRACE_SECONDS}s. Intercept may not have fired yet, or the run is outside the window this search covers. The render catches up on the next delivery."
               fi
-              exit 1
+              echo "dispatched=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
             echo "No matching render run yet. Retrying in ${POLL_INTERVAL}s."
             sleep "$POLL_INTERVAL"
           done
 
-          # Phase 2: wait for the matched job to finish. Surface API errors
-          # so a transient auth/rate-limit failure isn't retried silently
-          # until the job timeout fires.
-          while true; do
-            if ! JOB_STATE=$(gh api \
-              "repos/TYPO3-Documentation/t3docs-ci-deploy/actions/jobs/${JOB_ID}" \
-              --jq '"\(.status):\(.conclusion // "-")"' 2>&1); then
-              echo "::error::Failed to query docs render job state: ${JOB_STATE}"
-              echo "::error::See https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
-              exit 1
-            fi
-            case "$JOB_STATE" in
-              completed:success)
-                echo "docs render succeeded — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
-                exit 0
-                ;;
-              completed:failure|completed:cancelled|completed:timed_out|completed:startup_failure)
-                echo "::error::docs render did not succeed ($JOB_STATE) — see https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
-                exit 1
-                ;;
-              completed:*)
-                echo "::error::unexpected terminal state: $JOB_STATE"
-                exit 1
-                ;;
-              *)
-                if [[ $(date +%s) -ge $DEADLINE ]]; then
-                  echo "::error::Timed out waiting for docs render to finish (last: $JOB_STATE) — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
-                  exit 1
-                fi
-                echo "render job ${JOB_ID}: $JOB_STATE — retrying in ${POLL_INTERVAL}s"
-                sleep "$POLL_INTERVAL"
-                ;;
-            esac
-          done
+          # Found: Intercept accepted the job. The render's own outcome is
+          # deliberately not awaited — see the header. The run URL is the
+          # evidence a release body can cite.
+          echo "dispatched=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Intercept accepted the render for ${PACKAGE} — https://github.com/TYPO3-Documentation/t3docs-ci-deploy/actions/runs/${RUN_ID}"
