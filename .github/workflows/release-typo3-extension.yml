@@ -520,8 +520,14 @@ jobs:
           find dist -maxdepth 1 -type f -printf '%f\n' | sort > expected.txt
           [[ -s expected.txt ]] || { echo "::error::dist/ holds no files."; exit 1; }
 
+          # Only assets the API reports as `uploaded` count as present. A
+          # failed upload can leave the name behind in `starter` state -- an
+          # empty asset that a name-only listing cannot tell from a real one,
+          # and that would let this step publish a release carrying a file
+          # nobody can use. `--clobber` replaces such a leftover.
           read_present() {
-            if ! gh release view "$TAG" --json assets --jq '.assets[].name' > present.raw 2> present.err; then
+            if ! gh release view "$TAG" --json assets \
+                --jq '.assets[] | select(.state == "uploaded") | .name' > present.raw 2> present.err; then
               echo "::error::No release for ${TAG} to complete: $(cat present.err)"
               exit 1
             fi
@@ -531,20 +537,10 @@ jobs:
           for attempt in $(seq 1 "$ATTEMPTS"); do
             read_present
             comm -23 expected.txt present.txt > missing.txt
-            COUNT=$(wc -l < missing.txt)
+            [[ -s missing.txt ]] || break
 
-            if [[ "$COUNT" -eq 0 ]]; then
-              echo "All $(wc -l < expected.txt) assets are on the release."
-              break
-            fi
-
-            echo "Attempt ${attempt}/${ATTEMPTS}: ${COUNT} asset(s) missing:"
+            echo "Attempt ${attempt}/${ATTEMPTS}: $(wc -l < missing.txt) asset(s) missing:"
             cat missing.txt
-
-            if [[ "$attempt" -eq "$ATTEMPTS" ]]; then
-              echo "::error::Still missing after ${ATTEMPTS} attempts: $(paste -sd' ' missing.txt). The release stays an unpublished draft."
-              exit 1
-            fi
 
             while IFS= read -r name; do
               # --clobber so a half-written asset from a failed attempt is
@@ -556,8 +552,19 @@ jobs:
               fi
             done < missing.txt
 
-            sleep $(( attempt * 5 ))
+            [[ "$attempt" -lt "$ATTEMPTS" ]] && sleep $(( attempt * 5 ))
           done
+
+          # Verified after the last round, not before it: deciding inside the
+          # loop would spend one iteration on the verdict instead of on an
+          # upload, so ATTEMPTS would buy ATTEMPTS-1 tries.
+          read_present
+          comm -23 expected.txt present.txt > missing.txt
+          if [[ -s missing.txt ]]; then
+            echo "::error::Still missing after ${ATTEMPTS} attempts: $(paste -sd' ' missing.txt). The release stays an unpublished draft."
+            exit 1
+          fi
+          echo "All $(wc -l < expected.txt) assets are on the release."
 
           if [[ "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" == "true" ]]; then
             echo "Publishing the completed release."
