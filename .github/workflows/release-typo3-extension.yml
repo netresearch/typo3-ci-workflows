@@ -506,6 +506,11 @@ jobs:
       - name: Complete and publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job never checks the repository out -- it only downloads
+          # `dist/` -- so `gh` has no git remote to infer the repository from
+          # and answers `fatal: not a git repository`. Every call below names
+          # it explicitly.
+          REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           ATTEMPTS: '4'
         run: |
@@ -526,7 +531,7 @@ jobs:
           # and that would let this step publish a release carrying a file
           # nobody can use. `--clobber` replaces such a leftover.
           read_present() {
-            if ! gh release view "$TAG" --json assets \
+            if ! gh release view "$TAG" --repo "$REPO" --json assets \
                 --jq '.assets[] | select(.state == "uploaded") | .name' > present.raw 2> present.err; then
               echo "::error::No release for ${TAG} to complete: $(cat present.err)"
               exit 1
@@ -545,7 +550,7 @@ jobs:
             while IFS= read -r name; do
               # --clobber so a half-written asset from a failed attempt is
               # replaced rather than colliding with the retry.
-              if gh release upload "$TAG" "dist/${name}" --clobber; then
+              if gh release upload "$TAG" "dist/${name}" --repo "$REPO" --clobber; then
                 echo "  uploaded ${name}"
               else
                 echo "::warning::upload of ${name} failed on attempt ${attempt}; retrying"
@@ -572,7 +577,7 @@ jobs:
           fi
           echo "All $(wc -l < expected.txt) assets are on the release."
 
-          if [[ "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" == "true" ]]; then
+          if [[ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft')" == "true" ]]; then
             echo "Publishing the completed release."
-            gh release edit "$TAG" --draft=false
+            gh release edit "$TAG" --repo "$REPO" --draft=false
           fi
