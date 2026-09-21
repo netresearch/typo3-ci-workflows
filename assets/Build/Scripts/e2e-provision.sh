@@ -453,7 +453,7 @@ HTACCESS
     code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
         --name curl-check-${SUFFIX} \
         --network ${NETWORK} \
-        ${IMAGE_PHP} curl -sS -o /dev/null -w '%{http_code}' \
+        ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
         "${instance_url}:80/" 2>/dev/null)
     echo "Frontend: HTTP ${code:-none}"
     if [[ "${code}" != "200" ]]; then
@@ -475,7 +475,7 @@ HTACCESS
     backend_code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
         --name curl-check-be-${SUFFIX} \
         --network ${NETWORK} \
-        ${IMAGE_PHP} curl -sS -o /dev/null -w '%{http_code}' \
+        ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
         "${instance_url}:80/typo3/login" 2>/dev/null)
     echo "Backend: HTTP ${backend_code:-none}"
     if [[ "${backend_code}" != "200" ]]; then
