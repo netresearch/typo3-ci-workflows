@@ -442,13 +442,13 @@ HTACCESS
         }
     wait_for apache-e2e-${SUFFIX} 80 20
 
+    # One place builds the address the instance is reached at; both checks below
+    # and TYPO3_BASE_URL take it from here.
+    local instance_url="http://apache-e2e-${SUFFIX}"
+
     # Assert the status, do not just print it. A 403 or a 500 here means the
     # instance is broken, and letting the suite run against it turns one setup
     # fault into a page of failing assertions that name the wrong thing.
-    # One place builds the address the instance is reached at; both checks and
-    # TYPO3_BASE_URL take it from here.
-    local instance_url="http://apache-e2e-${SUFFIX}"
-
     local code
     code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
         --name curl-check-${SUFFIX} \
