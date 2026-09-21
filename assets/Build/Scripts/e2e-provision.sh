@@ -461,6 +461,26 @@ HTACCESS
         return 1
     fi
 
+    # The frontend answering is not the whole instance. A suite that drives the
+    # backend meets it first at /typo3/login, and that request can fail on its
+    # own — observed once as Apache's "DNS lookup failure for: phpfpm" after
+    # this check had passed for `/`. Asking for both here turns such a state
+    # into one setup error instead of a page of assertions blaming whichever
+    # specification happened to run first.
+    local backend_code
+    backend_code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
+        --name curl-check-be-${SUFFIX} \
+        --network ${NETWORK} \
+        ${IMAGE_PHP} curl -sS -o /dev/null -w '%{http_code}' \
+        "http://apache-e2e-${SUFFIX}:80/typo3/login" 2>/dev/null)
+    echo "Backend: HTTP ${backend_code:-none}"
+    if [[ "${backend_code}" != "200" ]]; then
+        echo "e2e: the backend login page answered ${backend_code:-nothing}, not 200." >&2
+        echo "     The frontend is up, so this is the backend alone: a broken" >&2
+        echo "     install, or PHP-FPM not reachable from Apache." >&2
+        return 1
+    fi
+
     TYPO3_BASE_URL="http://apache-e2e-${SUFFIX}"
     export TYPO3_BASE_URL
 }
