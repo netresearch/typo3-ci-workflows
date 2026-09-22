@@ -442,6 +442,10 @@ HTACCESS
         }
     wait_for apache-e2e-${SUFFIX} 80 20
 
+    # One place builds the address the instance is reached at; both checks below
+    # and TYPO3_BASE_URL take it from here.
+    local instance_url="http://apache-e2e-${SUFFIX}"
+
     # Assert the status, do not just print it. A 403 or a 500 here means the
     # instance is broken, and letting the suite run against it turns one setup
     # fault into a page of failing assertions that name the wrong thing.
@@ -449,8 +453,8 @@ HTACCESS
     code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
         --name curl-check-${SUFFIX} \
         --network ${NETWORK} \
-        ${IMAGE_PHP} curl -sS -o /dev/null -w '%{http_code}' \
-        "http://apache-e2e-${SUFFIX}:80/" 2>/dev/null)
+        ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+        "${instance_url}:80/" 2>/dev/null)
     echo "Frontend: HTTP ${code:-none}"
     if [[ "${code}" != "200" ]]; then
         # 000 is curl's "no reply at all" — the container went away or never
@@ -461,7 +465,27 @@ HTACCESS
         return 1
     fi
 
-    TYPO3_BASE_URL="http://apache-e2e-${SUFFIX}"
+    # The frontend answering is not the whole instance. A suite that drives the
+    # backend meets it first at /typo3/login, and that request can fail on its
+    # own — observed once as Apache's "DNS lookup failure for: phpfpm" after
+    # this check had passed for `/`. Asking for both here turns such a state
+    # into one setup error instead of a page of assertions blaming whichever
+    # specification happened to run first.
+    local backend_code
+    backend_code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
+        --name curl-check-be-${SUFFIX} \
+        --network ${NETWORK} \
+        ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+        "${instance_url}:80/typo3/login" 2>/dev/null)
+    echo "Backend: HTTP ${backend_code:-none}"
+    if [[ "${backend_code}" != "200" ]]; then
+        echo "e2e: the backend login page answered ${backend_code:-nothing}, not 200." >&2
+        echo "     The frontend is up, so this is the backend alone: a broken" >&2
+        echo "     install, or PHP-FPM not reachable from Apache." >&2
+        return 1
+    fi
+
+    TYPO3_BASE_URL="${instance_url}"
     export TYPO3_BASE_URL
 }
 

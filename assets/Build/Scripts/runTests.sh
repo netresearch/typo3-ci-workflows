@@ -784,10 +784,16 @@ set -- "$@" ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}
 
 SUFFIX="$(date +%s)-${RANDOM}"
 NETWORK="${PROJECT_SLUG}-${SUFFIX}"
-if ! ${CONTAINER_BIN} network create ${NETWORK} >/dev/null 2>&1; then
-    echo "Failed to create container network '${NETWORK}'. Ensure ${CONTAINER_BIN} daemon is running." >&2
+# The daemon is only one reason this fails, and the message used to name it as
+# the reason. An exhausted address pool reads the same from here — networks left
+# behind by killed runs each hold a subnet — and sends the reader to a daemon
+# that is running fine. Print what the runtime said instead.
+NETWORK_CREATE_ERROR="$(${CONTAINER_BIN} network create ${NETWORK} 2>&1 >/dev/null)" || {
+    echo "Failed to create container network '${NETWORK}': ${NETWORK_CREATE_ERROR:-no error output}" >&2
+    echo "  A pool-exhaustion error here means leftover networks, not a stopped daemon:" >&2
+    echo "  ${CONTAINER_BIN} network ls, then remove the ones no container uses." >&2
     exit 1
-fi
+}
 
 if [[ ${CONTAINER_BIN} = "${DOCKER_BIN}" ]]; then
     CONTAINER_COMMON_PARAMS="${CONTAINER_INTERACTIVE} --rm --network ${NETWORK} --add-host "${CONTAINER_HOST}:host-gateway" ${USERSET} -e RUNTESTS_IN_CONTAINER=1 -v ${ROOT_DIR}:${ROOT_DIR} -w ${ROOT_DIR}"
