@@ -21,8 +21,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 FAILED=0
 
-fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; }
-pass() { printf '  ok: %s\n' "${1}"; }
+fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; return 0; }
+pass() { printf '  ok: %s\n' "${1}"; return 0; }
 
 printf 'Empty-suite gate (%s)\n' "${WORKFLOW}"
 

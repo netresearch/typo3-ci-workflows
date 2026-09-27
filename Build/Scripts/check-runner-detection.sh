@@ -29,8 +29,8 @@ trap 'rm -rf "${FIXTURES}"' EXIT
 
 FAILED=0
 
-fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; }
-pass() { printf '  ok: %s\n' "${1}"; }
+fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; return 0; }
+pass() { printf '  ok: %s\n' "${1}"; return 0; }
 
 # Builds an extension whose functional config lives at ${2} and declares two
 # testsuites, written multi-line (${3} = multi) or on one line (${3} = inline).
@@ -57,6 +57,7 @@ make_fixture() {
         printf '  </testsuites>\n</phpunit>\n'
     } > "${root}/${config}"
     printf '%s' "${root}"
+    return 0
 }
 
 # Sources the runner's detection block — everything above `# Option defaults`,
