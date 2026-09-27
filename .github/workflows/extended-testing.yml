@@ -452,7 +452,9 @@ jobs:
         # --ignore-scripts=false. The `npm install` fallback stays unlocked on
         # purpose: it serves repositories that do not commit package-lock.json.
         env:
-          IGNORE_SCRIPTS: ${{ !inputs.npm-install-scripts }}
+          # format() makes both a boolean true and the string 'true' compare
+          # as the string 'true', so no comparison crosses types.
+          IGNORE_SCRIPTS: ${{ format('{0}', inputs.npm-install-scripts) != 'true' }}
         run: npm ci --ignore-scripts="$IGNORE_SCRIPTS" || npm install --ignore-scripts="$IGNORE_SCRIPTS"
 
       - name: Run tests with coverage
