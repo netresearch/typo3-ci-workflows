@@ -824,7 +824,11 @@ someone moves them into fragments or into a release by hand.
 
 Publish extension to TYPO3 TER on tag push. Auto-resolves extension key from `composer.json` and validates the tag version against `ext_emconf.php`.
 
-If `composer.json` sets `extra.typo3/cms.version` or the top-level `version`, each of them that is set must equal the release version too (one leading `v` is ignored), or the run fails before anything is uploaded and the error names the field that differs. TYPO3 14.3 reads the version from `extra.typo3/cms.version`, falling back to `version`, instead of `ext_emconf.php` once `extra.typo3/cms.Package.providesPackages` is also set, so a release that bumps only `ext_emconf.php` would install from TER showing the old number. Without either field nothing is compared. `release-typo3-extension.yml` runs the same check in its first job, before archives are built and signed.
+If `composer.json` sets `extra.typo3/cms.version` or the top-level `version`, each of them that is set must equal the release version exactly, or the run fails before this workflow uploads anything to TER, and the error names the field that differs. `v1.2.3`, `1.2.3.0` and `1.2.3+meta` are refused for a `1.2.3` release. Without either field nothing is compared. If `composer.json`, its `extra` or its `extra.typo3/cms` is present but not a JSON object, the run fails with an error that names that path. Packagist and docs.typo3.org react to the tag push itself, not to this workflow, so the check does not hold them back.
+
+Why: TYPO3 14.3 takes the version from `extra.typo3/cms.version`, falling back to `version`, on every path. `ext_emconf.php` overrides only the top-level `version`, and it is not read at all once `extra.typo3/cms.Package.providesPackages` is set. So a stale `extra.typo3/cms.version` always wins, and a stale top-level `version` wins once `providesPackages` is set. A release that bumps only `ext_emconf.php` would then install from TER showing the old number. TYPO3 13.4 never reads `extra.typo3/cms.version`, so for 13.4 the check is stricter than needed. `release-typo3-extension.yml` runs the same check in its first job, before archives are built and signed.
+
+Republishing a tag with `republish.yml` or `force-republish` runs the same check. A historic tag whose `composer.json` was stale is refused, and the `tailor ter:update` metadata sync for it is skipped as well, because it runs in the same job. A pushed tag cannot be corrected, so the fix is a new release with matching fields. There is no input to skip the check.
 
 ### Minimal caller
 

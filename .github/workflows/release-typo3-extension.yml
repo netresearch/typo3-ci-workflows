@@ -180,24 +180,45 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check composer.json version matches the release
-        # TYPO3 14.3 stops reading ext_emconf.php for an extension whose
-        # composer.json sets extra.typo3/cms.Package.providesPackages plus a
-        # version, and takes the version from extra.typo3/cms.version, falling
-        # back to the top-level version (PackageManager::isComposerOnlyCapable()
-        # and Package.php at v14.3.7). A release that bumps only
-        # ext_emconf.php then installs from TER showing the old number. Refuse
-        # it here: each of the two fields that is set must equal the release
-        # version. When neither is set nothing is compared, so extensions
-        # without them are unaffected. The same block runs in
-        # release-typo3-extension.yml and publish-to-ter.yml;
-        # Build/Scripts/check-composer-version-guard.sh executes both and
-        # fails if they drift apart.
+        # TYPO3 14.3 takes an extension's version from extra.typo3/cms.version,
+        # falling back to the top-level version, on every path (Package.php
+        # line 158 at v14.3.7). ext_emconf.php overrides only the top-level
+        # version (PackageManager.php line 1010), and it is not read at all
+        # once extra.typo3/cms.Package.providesPackages is set (lines 941 and
+        # 966-973). So a stale extra.typo3/cms.version always wins over
+        # ext_emconf.php, and a stale top-level version wins once
+        # providesPackages is set. TYPO3 13.4 never reads
+        # extra.typo3/cms.version, so for 13.4 this check is stricter than
+        # needed. Each field that is set must equal the release version
+        # exactly: 13.4 displays the top-level version as written, so
+        # "v1.2.3" is refused as well. When neither field is set, nothing is
+        # compared. The same block runs in release-typo3-extension.yml and
+        # publish-to-ter.yml; Build/Scripts/check-composer-version-guard.sh
+        # executes both and fails if they drift apart.
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           if [[ ! -f composer.json ]]; then
             echo "No composer.json -- nothing to compare"
             exit 0
+          fi
+          if ! jq empty composer.json 2>/dev/null; then
+            echo "::error file=composer.json::composer.json is not valid JSON, so its version fields cannot be compared with the release version."
+            exit 1
+          fi
+          # A container that is present but not an object would read as "field
+          # not set" below and let a stale version through. null counts as
+          # absent, as it does for TYPO3. Both values printed below are
+          # constants or jq type names and need no escaping.
+          BAD_PATH=$(jq -r '
+            def bad: . != null and type != "object";
+            if type != "object" then "the document root\t\(type)"
+            elif (.extra | bad) then "extra\t\(.extra | type)"
+            elif (.extra["typo3/cms"] | bad) then "extra.typo3/cms\t\(.extra["typo3/cms"] | type)"
+            else empty end' composer.json)
+          if [[ -n "$BAD_PATH" ]]; then
+            printf '::error file=composer.json::In composer.json, %s must be a JSON object, found %s, so extra.typo3/cms.version cannot be read and compared with the release version.\n' "${BAD_PATH%%$'\t'*}" "${BAD_PATH#*$'\t'}"
+            exit 1
           fi
           STATUS=0
           CHECKED=0
@@ -213,9 +234,8 @@ jobs:
             fi
             CHECKED=1
             # Compared inside jq so the value is taken exactly as stored: a
-            # command substitution would drop trailing newlines. One leading
-            # "v" is stripped, as from the tag.
-            MATCHES=$(jq -r --arg v "$VERSION" "$FILTER | tostring | ltrimstr(\"v\") == \$v" composer.json)
+            # command substitution would drop trailing newlines.
+            MATCHES=$(jq -r --arg v "$VERSION" "$FILTER | tostring == \$v" composer.json)
             # The trailing "x" keeps a newline at the end of the value, which
             # the substitution would otherwise strip and the message would hide.
             VALUE=$(jq -j "$FILTER | tostring" composer.json; printf x)
@@ -228,7 +248,7 @@ jobs:
               SHOWN=${VALUE//%/%25}
               SHOWN=${SHOWN//$'\r'/%0D}
               SHOWN=${SHOWN//$'\n'/%0A}
-              printf '::error file=composer.json::%s is "%s" but the version being released is "%s". TYPO3 14.3 reads the version from extra.typo3/cms.version, falling back to version, instead of ext_emconf.php once extra.typo3/cms.Package.providesPackages is set, so the extension would report the wrong version. Set %s to "%s" or remove it.\n' "$FIELD" "$SHOWN" "$VERSION" "$FIELD" "$VERSION"
+              printf '::error file=composer.json::%s is "%s" but the version being released is "%s". TYPO3 14.3 takes the version from extra.typo3/cms.version, then from version, so it must equal the tag exactly. For a new release, set %s to "%s" or remove it, then tag. A tag that is already pushed cannot be corrected: republishing it is refused, and the fix is a new release.\n' "$FIELD" "$SHOWN" "$VERSION" "$FIELD" "$VERSION"
               STATUS=1
             else
               echo "composer.json $FIELD: $VALUE (matches)"
