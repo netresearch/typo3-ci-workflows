@@ -219,7 +219,7 @@ jobs:
 | `upload-test-results` | boolean | `false` | Upload per-test JUnit reports to [Codecov Test Analytics](https://docs.codecov.com/docs/test-analytics) (flaky-test detection, per-test durations). Custom `*-test-command` overrides must emit `junit-unit.xml` / `junit-functional.xml` themselves. |
 | `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (branch + path coverage, matches local `XDEBUG_MODE=coverage`) or `pcov` (line-only, ~3-10× faster) |
 | `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |
-| `lowest-deps` | boolean | `false` | Run one extra cell with the lowest resolvable dependencies (`composer update --prefer-lowest --prefer-stable`) on the lowest php/typo3 cell of the matrix. See [Lowest and pinned dependencies](#lowest-and-pinned-dependencies). |
+| `lowest-deps` | boolean | `false` | Run one extra cell with the lowest installable dependencies (`composer update --prefer-lowest --prefer-stable`; with `roave/security-advisories`, the lowest release without a known advisory) on the lowest php/typo3 cell of the matrix. See [Lowest and pinned dependencies](#lowest-and-pinned-dependencies). |
 | `pin-packages` | string | `''` | Space-separated `vendor/package:constraint` pairs applied in that extra cell only (e.g. `guzzlehttp/guzzle:^7.10`). Set alone, it runs the cell with the newest versions of everything else. |
 | `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |
 | `cgl-command` | string | auto-detect | Override CGL command |
@@ -308,7 +308,7 @@ Two inputs add one extra cell, reported as its own check, that runs the unit and
 
 ```yaml
     with:
-      lowest-deps: true                          # everything at its lower bound
+      lowest-deps: true                          # everything as low as composer can go
       # or, narrower and cheaper:
       pin-packages: 'guzzlehttp/guzzle:^7.10'    # newest everything, except these
 ```
@@ -319,12 +319,13 @@ Two inputs add one extra cell, reported as its own check, that runs the unit and
 | `pin-packages` only | `Pinned dependencies` | `composer install`, as in every other cell, after the pins |
 | both | `Lowest dependencies` | the pins, then `--prefer-lowest` within them |
 
-- **Cell:** the lowest PHP of `php-versions`, then the lowest TYPO3 line of `typo3-versions` within it, skipping `matrix-exclude`. The TYPO3 line is required first, as in every cell, so `--prefer-lowest` picks the oldest release of that line — not of your whole `typo3/cms-*` range.
-- **Pins** are applied with `composer require --no-update`, with `--dev` when the package is in `require-dev`. A constraint must not contain spaces: write `>=7.10,<8`, not `>=7.10 <8`.
+- **Cell:** the lowest PHP of `php-versions`, then the lowest TYPO3 line of `typo3-versions` within it, skipping `matrix-exclude` (a partial entry such as `{"typo3": "^12.4"}` excludes that whole column, as it does for the matrix). The TYPO3 line is required first, as in every cell, so `--prefer-lowest` picks the oldest release of that line — not of your whole `typo3/cms-*` range. Unlike the matrix cells, the line is ANDed with the constraint `composer.json` already declares: `^13.4` against a declared `^13.4.21 || ^14.3` resolves from 13.4.21, not 13.4.0.
+- **"Lowest" is the lowest installable release, not the constraint's lower bound.** With `roave/security-advisories` in `require-dev`, every release with a known advisory is a conflict, so the cell tests the lowest release *without* one — and that floor rises over time as advisories are published. In the first real run, `guzzlehttp/guzzle: ^7.10 || ^8.0` locked at 7.15.2 and `typo3/cms-core` at 13.4.35 for that reason.
+- **Pins** are applied with `composer require --no-update`, with `--dev` when the package is in `require-dev`. Each entry must match Composer's package-name pattern followed by `:constraint`, and a constraint must not contain spaces: write `>=7.10,<8`, not `>=7.10 <8`. A `pin-packages` that holds no entry, with `lowest-deps` off, fails the cell rather than passing it untested.
 - **`--prefer-lowest` lowers dev dependencies too** (PHPUnit, `typo3/testing-framework`, this package). If your `require-dev` lower bounds are older than your tests can run on, the cell fails on tooling — raise those bounds, or use `pin-packages` for the package that matters.
-- The cell uses the same `functional-test-db`, `remove-dev-deps` and `*-test-command` inputs as the matrix. It uploads no coverage and no JUnit report, and it uses a Composer cache namespace of its own.
+- The cell uses the same `functional-test-db`, `remove-dev-deps` and `*-test-command` inputs as the matrix, and the same coverage driver (`coverage-tool` when `upload-coverage` is on), so a custom command that writes or reads a coverage report behaves as it does in the matrix. It uploads no coverage and no JUnit report, and it uses a Composer cache namespace of its own.
 - With both test inputs off, the cell does not run: it would otherwise pass having tested nothing.
-- `All CI checks` includes it; when it is off it reports `skipped`, which passes.
+- `All CI checks` includes it; when it is off it reports `skipped` under the name `Lowest or pinned dependencies`, which passes.
 
 ### Path gating
 
