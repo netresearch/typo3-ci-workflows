@@ -22,6 +22,8 @@
 #   9. `"require": []` aborted the step with a raw jq error, and
 #      `"require-dev": []` printed one while pinning.
 #  10. An uppercase pin name was rejected, although Composer accepts it.
+#  11. A newline in a composer.json constraint ended the annotation that
+#      quoted it, and the runner read the next line as a command.
 #
 # Every block runs under the runner's own shell flags (`bash --noprofile --norc
 # -eo pipefail`), in a shell of its own; the composer stubs reach it as
@@ -44,13 +46,14 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 FAILED=0
 
-fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; }
-pass() { printf '  ok: %s\n' "${1}"; }
+fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; return; }
+pass() { printf '  ok: %s\n' "${1}"; return; }
 
 step_run() { # job, step id or name
     yq -o json '.jobs' "${WORKFLOW}" \
         | jq -r --arg j "${1}" --arg s "${2}" \
             '.[$j].steps[] | select(.id == $s or .name == $s) | .run'
+    return
 }
 
 # What GitHub runs a `run:` block with when the step names no shell.
@@ -93,6 +96,7 @@ expect_cell() { # label, expected, job, php, typo3, exclude
     else
         fail "${3}: ${1}: expected '${2}', got '${got}'"
     fi
+    return
 }
 
 P='["8.3","8.2"]'
@@ -278,6 +282,29 @@ else
     fail "unparsable constraint: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
 fi
 
+# A newline in a composer.json constraint must not end the annotation: the
+# runner would read the next line as a command of its own. The constraint
+# reaches the warning twice, as itself and inside the parser's reason.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana\n::error::INJECTED"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && ! grep -q '^::error::INJECTED' "${TMP}/case/out" \
+    && grep -qF "with typo3/cms-core '^13.4 || banana%0A::error::INJECTED': '^13.4 || banana%0A::error::INJECTED'" "${TMP}/case/out"; then
+    pass 'a newline in a composer.json constraint is escaped in the annotation'
+else
+    fail "newline in constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# composer/semver reads a newline as whitespace, so such a constraint can
+# parse and reach the error for a disjoint matrix line as well.
+status="$(run_install '{"require":{"typo3/cms-core":"^14.3 ||\n^15.0"}}' '^13.4' true '')"
+if [[ "${status}" -ne 0 ]] \
+    && ! grep -q '^\^15\.0' "${TMP}/case/out" \
+    && grep -qF "lies outside typo3/cms-core '^14.3 ||%0A^15.0' in composer.json" "${TMP}/case/out"; then
+    pass 'a newline in a disjoint composer.json constraint is escaped in the error'
+else
+    fail "newline in disjoint constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
 # --- Functional database --------------------------------------------------
 
 FUNCTIONAL="$(step_run lowest-deps 'Run functional tests')"
@@ -292,6 +319,7 @@ driver_for() { # functional-test-db
                 run-script) printf 'ci:test:php:functional\n' ;;
                 *) printf 'DRIVER=%s\n' "${typo3DatabaseDriver:-unset}" ;;
             esac
+            return
         }
         export -f composer
         FUNCTIONAL_TEST_COMMAND='' FUNCTIONAL_TEST_DB="${1}" \

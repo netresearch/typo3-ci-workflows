@@ -1845,8 +1845,18 @@ jobs:
           PIN_PACKAGES: ${{ inputs.pin-packages }}
         run: |
           set -f
+          # A value inserted into an ::error:: or ::warning:: line is escaped
+          # the way the runner unescapes command data (actions/runner,
+          # src/Runner.Common/ActionCommand.cs, _escapeDataMappings): "%" first,
+          # then CR and LF. Unescaped, a newline in composer.json would end the
+          # annotation and start a line the runner reads as a new command.
+          escape_data() { # value
+            local value="${1//%/%25}"
+            value="${value//$'\r'/%0D}"
+            printf '%s' "${value//$'\n'/%0A}"
+          }
           PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
-            echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
+            echo "::error::Failed to parse typo3-packages input: $(escape_data "$TYPO3_PACKAGES")"
             exit 1
           }
           # `require` and `require-dev` may be absent, or an empty JSON array
@@ -1890,14 +1900,13 @@ jobs:
               # nothing to install; say so instead of letting the solver fail.
               status=0
               reason=$(intersects "$TYPO3_VERSION" "$declared" 2>&1) || status=$?
-              reason="${reason//$'\n'/ }"
               if [[ "$status" -eq 1 ]]; then
-                echo "::error::The lowest TYPO3 line of typo3-versions, '$TYPO3_VERSION', lies outside $pkg '$declared' in composer.json, so this cell has nothing to install. Align typo3-versions with composer.json, or exclude that line with matrix-exclude."
+                echo "::error::The lowest TYPO3 line of typo3-versions, '$(escape_data "$TYPO3_VERSION")', lies outside $(escape_data "$pkg") '$(escape_data "$declared")' in composer.json, so this cell has nothing to install. Align typo3-versions with composer.json, or exclude that line with matrix-exclude."
                 exit 1
               elif [[ "$status" -eq 3 ]]; then
-                echo "::warning::Could not parse a constraint while comparing '$TYPO3_VERSION' with $pkg '$declared': $reason; resolving anyway."
+                echo "::warning::Could not parse a constraint while comparing '$(escape_data "$TYPO3_VERSION")' with $(escape_data "$pkg") '$(escape_data "$declared")': $(escape_data "$reason"); resolving anyway."
               elif [[ "$status" -ne 0 ]]; then
-                echo "::warning::Could not load composer/semver to compare '$TYPO3_VERSION' with $pkg '$declared' (exit $status: $reason); resolving anyway."
+                echo "::warning::Could not load composer/semver to compare '$(escape_data "$TYPO3_VERSION")' with $(escape_data "$pkg") '$(escape_data "$declared")' (exit $status: $(escape_data "$reason")); resolving anyway."
               fi
               # Composer has no parentheses: distribute the AND over every
               # disjunct of both sides.
@@ -1926,7 +1935,7 @@ jobs:
             name="${name,,}"
             [[ "$pin" == *:* ]] && pin="$name:${pin#*:}"
             if [[ ! "$pin" =~ $PIN_PATTERN ]]; then
-              echo "::error::pin-packages entry '$pin' is not vendor/package:constraint"
+              echo "::error::pin-packages entry '$(escape_data "$pin")' is not vendor/package:constraint"
               exit 1
             fi
             if jq -e --arg p "$name" '."require-dev" | type == "object" and has($p)' composer.json > /dev/null; then
