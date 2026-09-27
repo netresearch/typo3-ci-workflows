@@ -17,6 +17,15 @@
 #      13.4.0.
 #   6. `functional-test-db: ''` ran SQLite here and MySQL in the matrix.
 #   7. The cell ran without the coverage driver the matrix cells have.
+#   8. A matrix TYPO3 line outside composer.json's constraint became an
+#      unsatisfiable AND and died in the solver without saying why.
+#   9. `"require": []` aborted the step with a raw jq error, and
+#      `"require-dev": []` printed one while pinning.
+#  10. An uppercase pin name was rejected, although Composer accepts it.
+#
+# The blocks run under the runner's own shell flags (`bash --noprofile --norc
+# -eo pipefail`). The install block needs a real `php` and a `composer` phar on
+# PATH: it loads composer/semver from the phar to compare constraints.
 #
 # The blocks are executed, not grepped: a text probe would confirm a guard
 # that sits in a branch nothing reaches.
@@ -42,7 +51,18 @@ step_run() { # job, step id or name
             '.[$j].steps[] | select(.id == $s or .name == $s) | .run'
 }
 
+# What GitHub runs a `run:` block with when the step names no shell.
+RUNNER_SHELL=(bash --noprofile --norc -eo pipefail)
+
 printf 'Lowest-deps cell (%s)\n' "${WORKFLOW}"
+
+# The harness itself: a failure on the left of a pipe must fail the block, as
+# it does on the runner. Plain `bash -e` would report success here.
+if "${RUNNER_SHELL[@]}" -c 'false | true' > /dev/null 2>&1; then
+    fail 'the blocks do not run with pipefail, unlike on the runner'
+else
+    pass 'blocks run with the runner shell flags (pipefail included)'
+fi
 
 # --- Cell selection ---------------------------------------------------------
 
@@ -53,7 +73,7 @@ select_cell() { # job, php-versions, typo3-versions, matrix-exclude -> "php typo
     (
         cd "${TMP}" || exit 99
         PHP_VERSIONS="${2}" TYPO3_VERSIONS="${3}" MATRIX_EXCLUDE="${4}" GITHUB_OUTPUT="${out}" \
-            bash -e -c "$(step_run "${1}" cell)"
+            "${RUNNER_SHELL[@]}" -c "$(step_run "${1}" cell)"
     ) > /dev/null 2>&1
     status=$?
     if [[ "${status}" -ne 0 ]]; then
@@ -88,6 +108,11 @@ expect_cell 'partial exclude by php' '8.2 ^14.3' phpstan-unpinned "${P}" "${T}" 
 
 INSTALL="$(step_run lowest-deps install)"
 
+if ! command -v php > /dev/null || ! type -P composer > /dev/null; then
+    fail 'the install cases need php and a composer phar on PATH'
+    exit 1
+fi
+
 # Runs the install block in a fixture checkout with a composer that records its
 # arguments one call per line. Prints the exit status; the call log and the
 # output land in ${TMP}/case/.
@@ -100,7 +125,6 @@ run_install() { # composer.json, typo3-version, lowest-deps, pin-packages
     : > "${dir}/work/a/b:GLOBBED"
     {
         printf 'composer() { printf "%%s\\n" "$*" >> %q; }\n' "${dir}/calls"
-        printf 'php() { printf "8.2.0"; }\n'
         cat <<'EOF'
 COMPOSER_RETRY='composer_retry() { composer "$@"; }'
 EOF
@@ -111,7 +135,7 @@ EOF
         cd "${dir}/work" || exit 99
         TYPO3_VERSION="${2}" TYPO3_PACKAGES='["typo3/cms-core"]' LOWEST_DEPS="${3}" \
             PIN_PACKAGES="${4}" GITHUB_STEP_SUMMARY="${dir}/summary" \
-            bash -e "${dir}/script.sh"
+            "${RUNNER_SHELL[@]}" "${dir}/script.sh"
     ) > "${dir}/out" 2>&1
     printf '%s' "$?"
 }
@@ -167,6 +191,50 @@ if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- typo3/cms-core:^
     pass 'a package composer.json does not name gets the matrix line alone'
 else
     fail "TYPO3 without floor: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls")"
+fi
+
+# A matrix line composer.json rules out: an error naming both constraints,
+# before anything is required or resolved.
+status="$(run_install '{"require":{"typo3/cms-core":"^14.3"}}' '^13.4' true '')"
+if [[ "${status}" -ne 0 ]] \
+    && grep -qF "::error::The lowest TYPO3 line of typo3-versions, '^13.4', lies outside typo3/cms-core '^14.3'" "${TMP}/case/out" \
+    && ! grep -q '^require\|^update' "${TMP}/case/calls"; then
+    pass 'a matrix line outside composer.json fails with both constraints named'
+else
+    fail "disjoint TYPO3 line: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || ^14.3"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && ! grep -q '::error::\|::warning::' "${TMP}/case/out"; then
+    pass 'a matrix line inside composer.json passes the check silently'
+else
+    fail "overlapping TYPO3 line: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Empty arrays where composer.json would have an object.
+status="$(run_install '{"require":[],"require-dev":{"typo3/cms-core":"^13.4.21"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- typo3/cms-core:^13.4, ^13.4.21' "${TMP}/case/calls" \
+    && ! grep -q 'jq: error' "${TMP}/case/out"; then
+    pass '"require": [] is read as empty, the require-dev floor still applies'
+else
+    fail "require []: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4"},"require-dev":[]}' '^13.4' true 'guzzlehttp/guzzle:^7.10')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- guzzlehttp/guzzle:^7.10' "${TMP}/case/calls" \
+    && ! grep -q 'jq: error' "${TMP}/case/out"; then
+    pass '"require-dev": [] pins into require without a jq error'
+else
+    fail "require-dev []: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Uppercase names are lowercased, and then found in require-dev.
+status="$(run_install "${CJ}" '^13.4' false 'GuzzleHttp/Guzzle:^7.10 Mikey179/vfsStream:^1.6.11')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- guzzlehttp/guzzle:^7.10' "${TMP}/case/calls" \
+    && grep -qxF 'require --dev --no-update -- mikey179/vfsstream:^1.6.11' "${TMP}/case/calls"; then
+    pass 'uppercase pin names are lowercased and routed like their lowercase key'
+else
+    fail "uppercase pins: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
 fi
 
 # --- Functional database --------------------------------------------------

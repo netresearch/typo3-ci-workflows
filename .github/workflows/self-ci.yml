@@ -186,6 +186,16 @@ jobs:
       - name: Check the blank-line-before-comment fixer
         run: php -dzend.assertions=1 Build/Scripts/check-blank-line-before-comment.php
 
+      - name: Check the lowest-deps cell's selection and install
+        # Runs ci.yml's lowest-deps run blocks against a stubbed `composer`
+        # function and fixture inputs: pins that start with "-", are empty,
+        # glob or are uppercase; partial matrix-exclude entries; the
+        # composer.json TYPO3 floor, a matrix line outside it, and empty
+        # require arrays; the database and coverage settings the matrix cells
+        # use (#258). In this job because the install block loads
+        # composer/semver from the composer phar setup-php installs.
+        run: bash Build/Scripts/check-lowest-deps-cell.sh .github/workflows/ci.yml
+
       - name: Smoke test rector config factory
         run: |
           cat > /tmp/smoke-rector.php << 'PHPEOF'
@@ -382,13 +392,6 @@ jobs:
           bash Build/Scripts/check-composer-version-guard.sh
           .github/workflows/release-typo3-extension.yml
           .github/workflows/publish-to-ter.yml
-
-      - name: Check the lowest-deps cell's selection and install
-        # Runs the job's run blocks against a stubbed composer: pins that start
-        # with "-", whitespace-only or globbing pin lists, partial
-        # matrix-exclude entries, the composer.json TYPO3 floor, and the
-        # database and coverage settings the matrix cells use (#258).
-        run: bash Build/Scripts/check-lowest-deps-cell.sh .github/workflows/ci.yml
 
       - name: Check that no testsuite name is hardcoded in a workflow
         # extended-testing.yml carried `--testsuite="Unit Tests"` in seven
