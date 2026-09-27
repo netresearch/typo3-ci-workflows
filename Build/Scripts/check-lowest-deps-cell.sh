@@ -24,12 +24,14 @@
 #  10. An uppercase pin name was rejected, although Composer accepts it.
 #  11. A newline in a composer.json constraint ended the annotation that
 #      quoted it, and the runner read the next line as a command. Every
-#      annotation that quotes a value has a case that puts a line break into
-#      each value it quotes. The composer.json constraint: LF in the disjoint
-#      error, one case each for CR, LF and "%" in the parse warning, and all
-#      three together in one value in the load warning. The package name: CR
-#      in all three. The TYPO3 line: CR in both warnings, LF in the disjoint
-#      error, where it has to parse. The pin: CR. typo3-packages: LF.
+#      annotation has a case that puts a line break into each value it quotes
+#      from composer.json or the inputs; the load warning's reason, PHP's own
+#      message, is escaped too but not tested. The composer.json constraint:
+#      LF in the disjoint error, one case each for CR, LF and "%" in the
+#      parse warning, and all three together in one value in the load
+#      warning. The package name: CR in all three. The TYPO3 line: CR in both
+#      warnings, LF in the disjoint error, where it has to parse. The pin: CR.
+#      typo3-packages: LF.
 #
 # Every block runs under the runner's own shell flags (`bash --noprofile --norc
 # -eo pipefail`), in a shell of its own; the composer stubs reach it as
