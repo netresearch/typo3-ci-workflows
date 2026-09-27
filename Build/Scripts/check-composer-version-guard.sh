@@ -5,10 +5,11 @@
 # code and its ::error:: line.
 #
 # TYPO3 14.3 takes an extension's version from composer.json
-# extra.typo3/cms.version, not from ext_emconf.php, once
-# extra.typo3/cms.Package.providesPackages is also set. A release that bumps
-# only ext_emconf.php passed the old tag check and installed from TER showing
-# the previous number.
+# extra.typo3/cms.version, falling back to the top-level version, and no longer
+# from ext_emconf.php, once extra.typo3/cms.Package.providesPackages is also
+# set. A release that bumps only ext_emconf.php passed the old tag check and
+# installed from TER showing the previous number. Each of the two fields that
+# is set must therefore equal the release version.
 #
 # The step's own bash is executed, not grepped: a text probe would confirm an
 # `exit 1` that sits in a branch nothing reaches. It runs under `bash -e`,
@@ -54,6 +55,13 @@ fixture empty-string '{"extra":{"typo3/cms":{"extension-key":"demo","version":""
 fixture trailing-newline '{"extra":{"typo3/cms":{"extension-key":"demo","version":"1.2.3\n"}}}'
 fixture percent '{"extra":{"typo3/cms":{"extension-key":"demo","version":"1.2%3"}}}'
 fixture crlf '{"extra":{"typo3/cms":{"extension-key":"demo","version":"1.2\r\n::warning::x"}}}'
+fixture top-equal '{"version":"1.2.3","extra":{"typo3/cms":{"extension-key":"demo"}}}'
+fixture top-different '{"version":"1.2.4","extra":{"typo3/cms":{"extension-key":"demo"}}}'
+fixture top-null '{"version":null,"extra":{"typo3/cms":{"extension-key":"demo"}}}'
+fixture both-equal '{"version":"v1.2.3","extra":{"typo3/cms":{"extension-key":"demo","version":"1.2.3"}}}'
+fixture both-extra-different '{"version":"1.2.3","extra":{"typo3/cms":{"extension-key":"demo","version":"1.2.4"}}}'
+fixture both-top-different '{"version":"1.2.2","extra":{"typo3/cms":{"extension-key":"demo","version":"1.2.3"}}}'
+fixture both-different '{"version":"1.2.2","extra":{"typo3/cms":{"extension-key":"demo","version":"1.2.4"}}}'
 
 # run_case BODY FIXTURE: prints the step's output, returns its exit code.
 run_case() {
@@ -74,23 +82,29 @@ expect_pass() {
     fi
 }
 
-# expect_fail BODY FIXTURE NEEDLE...: exit non-zero, exactly one output line,
-# which is the ::error for composer.json and contains every needle.
+# expect_fail BODY FIXTURE ERRORS NEEDLE...: exit non-zero; exactly ERRORS
+# lines are an ::error for composer.json; every other line is a field's
+# "(matches)" report, so a value that broke the ::error across lines shows up
+# as a stray line; the output contains every needle.
 expect_fail() {
-    local body="${1}" name="${2}" out status needle ok=1
-    shift 2
+    local body="${1}" name="${2}" errors="${3}" out status needle line count=0 ok=1
+    shift 3
     out="$(run_case "${body}" "${name}")"
     status=$?
     if [[ "${status}" -eq 0 ]]; then
         fail "${name}: exit 0, expected a refusal"
         return
     fi
-    if [[ "${out}" != "::error file=composer.json::"* ]]; then
-        fail "${name}: exit ${status} without a leading ::error file=composer.json:: — ${out}"
-        return
-    fi
-    if [[ "$(printf '%s\n' "${out}" | wc -l)" -ne 1 ]]; then
-        fail "${name}: the ::error spans several lines, so the runner would cut it — ${out}"
+    while IFS= read -r line; do
+        if [[ "${line}" == "::error file=composer.json::"* ]]; then
+            count=$((count + 1))
+        elif [[ "${line}" != "composer.json "*" (matches)" ]]; then
+            fail "${name}: stray output line, so an ::error was cut or is missing — ${line}"
+            return
+        fi
+    done <<< "${out}"
+    if [[ "${count}" -ne "${errors}" ]]; then
+        fail "${name}: ${count} ::error line(s), expected ${errors} — ${out}"
         return
     fi
     for needle in "$@"; do
@@ -132,12 +146,19 @@ for WORKFLOW in "$@"; do
     expect_pass "${body}" equal
     expect_pass "${body}" v-prefix
     expect_pass "${body}" providing
-    expect_fail "${body}" different '"1.2.4"' '"1.2.3"'
-    expect_fail "${body}" dev '"1.2.3-dev"' '"1.2.3"'
-    expect_fail "${body}" empty-string 'is ""'
-    expect_fail "${body}" trailing-newline '"1.2.3%0A"'
-    expect_fail "${body}" percent '"1.2%253"'
-    expect_fail "${body}" crlf '"1.2%0D%0A::warning::x"'
+    expect_pass "${body}" top-equal
+    expect_pass "${body}" top-null
+    expect_pass "${body}" both-equal
+    expect_fail "${body}" different 1 '::extra.typo3/cms.version is "1.2.4"' 'released is "1.2.3"'
+    expect_fail "${body}" dev 1 '::extra.typo3/cms.version is "1.2.3-dev"' 'released is "1.2.3"'
+    expect_fail "${body}" empty-string 1 '::extra.typo3/cms.version is ""'
+    expect_fail "${body}" trailing-newline 1 '::extra.typo3/cms.version is "1.2.3%0A"'
+    expect_fail "${body}" percent 1 '::extra.typo3/cms.version is "1.2%253"'
+    expect_fail "${body}" crlf 1 '::extra.typo3/cms.version is "1.2%0D%0A::warning::x"'
+    expect_fail "${body}" top-different 1 '::version is "1.2.4"' 'released is "1.2.3"'
+    expect_fail "${body}" both-extra-different 1 '::extra.typo3/cms.version is "1.2.4"' 'composer.json version: 1.2.3 (matches)'
+    expect_fail "${body}" both-top-different 1 '::version is "1.2.2"' 'composer.json extra.typo3/cms.version: 1.2.3 (matches)'
+    expect_fail "${body}" both-different 2 '::extra.typo3/cms.version is "1.2.4"' '::version is "1.2.2"'
 done
 
 exit "${FAILED}"

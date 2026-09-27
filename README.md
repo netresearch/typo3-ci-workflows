@@ -824,7 +824,7 @@ someone moves them into fragments or into a release by hand.
 
 Publish extension to TYPO3 TER on tag push. Auto-resolves extension key from `composer.json` and validates the tag version against `ext_emconf.php`.
 
-If `composer.json` sets `extra.typo3/cms.version`, that value must equal the release version too (one leading `v` is ignored), or the run fails before anything is uploaded. TYPO3 14.3 reads the version from this field instead of `ext_emconf.php` once `extra.typo3/cms.Package.providesPackages` is also set, so a release that bumps only `ext_emconf.php` would install from TER showing the old number. Without the field nothing is compared. `release-typo3-extension.yml` runs the same check in its first job, before archives are built and signed.
+If `composer.json` sets `extra.typo3/cms.version` or the top-level `version`, each of them that is set must equal the release version too (one leading `v` is ignored), or the run fails before anything is uploaded and the error names the field that differs. TYPO3 14.3 reads the version from `extra.typo3/cms.version`, falling back to `version`, instead of `ext_emconf.php` once `extra.typo3/cms.Package.providesPackages` is also set, so a release that bumps only `ext_emconf.php` would install from TER showing the old number. Without either field nothing is compared. `release-typo3-extension.yml` runs the same check in its first job, before archives are built and signed.
 
 ### Minimal caller
 

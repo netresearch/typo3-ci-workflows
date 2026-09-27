@@ -364,8 +364,9 @@ jobs:
 
       - name: Check the release refuses a stale composer.json version
         # TYPO3 14.3 reads the version from composer.json
-        # extra.typo3/cms.version instead of ext_emconf.php once
-        # Package.providesPackages is set, and the release path compared the
+        # extra.typo3/cms.version, falling back to the top-level version,
+        # instead of ext_emconf.php once Package.providesPackages is set, and
+        # the release path compared the
         # tag with ext_emconf.php only. This runs the guard step of both
         # release entry points against fixture composer.json files and fails
         # if the two copies differ.
