@@ -13,6 +13,14 @@ on:
         required: false
         type: string
         default: '24'
+      npm-install-scripts:
+        description: >-
+          Run install scripts (dependencies' and the project's own postinstall,
+          prepare, ...) during npm ci / npm install in the JS job. Off by
+          default: an install script is arbitrary code run at install time.
+        required: false
+        type: boolean
+        default: false
       run-unit-tests:
         description: Run PHP unit tests with coverage
         required: false
@@ -439,10 +447,13 @@ jobs:
 
       - name: Install dependencies
         # --ignore-scripts: a dependency's install script is arbitrary code run
-        # at install time (SonarCloud S6505). The `npm install` fallback stays
-        # unlocked on purpose: it serves repositories that do not commit
-        # package-lock.json.
-        run: npm ci --ignore-scripts || npm install --ignore-scripts
+        # at install time (SonarCloud S6505). A caller that needs its install
+        # scripts sets `npm-install-scripts: true`, which passes
+        # --ignore-scripts=false. The `npm install` fallback stays unlocked on
+        # purpose: it serves repositories that do not commit package-lock.json.
+        env:
+          IGNORE_SCRIPTS: ${{ !inputs.npm-install-scripts }}
+        run: npm ci --ignore-scripts="$IGNORE_SCRIPTS" || npm install --ignore-scripts="$IGNORE_SCRIPTS"
 
       - name: Run tests with coverage
         # The project's own vitest, never `npx vitest`: npx downloads an

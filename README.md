@@ -363,6 +363,7 @@ jobs:
 |-------|------|---------|-------------|
 | `php-version` | string | `8.5` | PHP version for coverage runs |
 | `node-version` | string | `24` | Node.js version for JS testing |
+| `npm-install-scripts` | boolean | `false` | Run install scripts during `npm ci` / `npm install` in the JS job. See [npm install scripts](#npm-install-scripts). |
 | `run-unit-tests` | boolean | `true` | Run PHP unit tests with coverage |
 | `run-functional-tests` | boolean | `true` | Run PHP functional tests with coverage |
 | `run-integration-tests` | boolean | `false` | Run PHP integration tests with coverage |
@@ -393,6 +394,17 @@ jobs:
 | `mutation-testing` | on | unit-coverage | Infection mutation testing |
 | `js-coverage` | on | - | Vitest with coverage upload |
 | `fuzz-testing` | on | - | PHPUnit fuzz test group |
+
+### npm install scripts
+
+The JS job here and the default mode of [E2E Tests](#e2e-tests) install npm dependencies with `--ignore-scripts`. No install script runs: not a dependency's `preinstall`, `install` or `postinstall`, and not the project's own `postinstall` or `prepare`. An install script is arbitrary code that runs with the job's permissions at install time, so a compromised dependency could run it on the runner.
+
+Until this change both workflows ran install scripts. A project that builds assets or native modules in an install script sets `npm-install-scripts: true`; the step then passes `--ignore-scripts=false`, which is npm's default. Scripts run with `npm run` in the test command are not affected.
+
+```yaml
+    with:
+      npm-install-scripts: true
+```
 
 ---
 
@@ -430,6 +442,7 @@ jobs:
 |-------|------|---------|-------------|
 | `php-version` | string | `8.5` | PHP version |
 | `node-version` | string | `24` | Node.js version |
+| `npm-install-scripts` | boolean | `false` | Run install scripts during `npm ci` / `npm install` (default mode only). See [npm install scripts](#npm-install-scripts). |
 | `typo3-setup-extensions` | boolean | `true` | Run extension:setup after TYPO3 setup |
 | `playwright-browser` | string | `chromium` | Playwright browser to install |
 | `playwright-install-timeout-minutes` | number | `5` | Wall-clock bound for one `playwright install` attempt; the step retries once. Browsers are cached under `~/.cache/ms-playwright`, so most runs never download. |
@@ -445,6 +458,8 @@ jobs:
 | `typo3-packages` | string (JSON) | `'["typo3/cms-core"]'` | Packages whose constraints get bumped per `typo3-versions` matrix entry, applied via `composer require --no-update` (or `composer require --with-all-dependencies` when a `composer.lock` is committed) before install. |
 | `setup-variants` | string (JSON) | `'[""]'` | Matrix dimension: setup variant names (e.g. `'["bootstrap","core-only","fsc-set"]'`). Passed to `setup-script` and tests as `$E2E_VARIANT`. |
 | `setup-script` | string | `''` | Path to a custom setup script (relative to repo root). When set, replaces the entire built-in pipeline — the script must install deps, set up TYPO3, start any servers, and run tests. Receives `E2E_VARIANT`, `E2E_TYPO3_VERSION`, `E2E_TYPO3_PACKAGES` as env vars. Use this for extensions with comprehensive containerized setups (Apache+PHP-FPM, custom DB seeding, Content Blocks fixtures). |
+
+In the default mode, npm dependencies are installed without their install scripts, because an install script is arbitrary code run on the runner at install time. A project that needs them sets `npm-install-scripts: true`. See [npm install scripts](#npm-install-scripts).
 
 ### Matrix expansion across setup variants
 
