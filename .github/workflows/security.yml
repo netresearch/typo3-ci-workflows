@@ -265,7 +265,9 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           # Retry to ride out transient GitHub release-CDN errors (e.g. HTTP 504)
           # that otherwise fail the whole security job on a flaky download.
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
+          # --proto/--proto-redir: -L follows redirects, and without them a
+          # redirect to http would be followed too (SonarCloud S6506).
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
             -o "$HOME/.local/bin/opengrep" \
             "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/opengrep_manylinux_x86"
           echo "${OPENGREP_SHA256}  $HOME/.local/bin/opengrep" | sha256sum -c -
