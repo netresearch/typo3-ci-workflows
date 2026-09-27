@@ -174,8 +174,9 @@ fi
 FUNCTIONAL="$(step_run lowest-deps 'Run functional tests')"
 driver_for() { # functional-test-db
     # The block under test is eval'd, so shellcheck cannot see that it calls
-    # composer and reads these two variables.
-    # shellcheck disable=SC2034,SC2329
+    # composer and reads these two variables. Older shellcheck (the runner's)
+    # reports the stub as SC2317, newer as SC2329.
+    # shellcheck disable=SC2034,SC2317,SC2329
     (
         cd "${TMP}" || exit 99
         composer() {
