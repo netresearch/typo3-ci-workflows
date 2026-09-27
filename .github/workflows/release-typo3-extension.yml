@@ -191,9 +191,12 @@ jobs:
         # 13.4 never reads extra.typo3/cms.version, so for 13.4 this check is
         # stricter than needed. Each field that is set must equal the release
         # version exactly. That is a policy, not what 14.3 needs: 14.3
-        # normalises "v1.2.3" to "1.2.3". But 13.4 shows the top-level version
-        # as written, and an exact match keeps both fields unambiguous. When
-        # neither field is set, nothing is compared. The same block runs in release-typo3-extension.yml and
+        # normalises "v1.2.3" to "1.2.3". But 13.4, when it does not read
+        # ext_emconf.php, shows the top-level version as written (in classic
+        # mode PackageManager.php line 893 at v13.4.35 overwrites it with the
+        # ext_emconf.php value first), and an exact match keeps both fields
+        # unambiguous. When neither field is set, nothing is compared. The
+        # same block runs in release-typo3-extension.yml and
         # publish-to-ter.yml; Build/Scripts/check-composer-version-guard.sh
         # executes both and fails if they drift apart.
         env:
@@ -252,7 +255,7 @@ jobs:
               SHOWN=${VALUE//%/%25}
               SHOWN=${SHOWN//$'\r'/%0D}
               SHOWN=${SHOWN//$'\n'/%0A}
-              printf '::error file=composer.json::%s is "%s" but the version being released is "%s". Each version field must equal the tag exactly: TYPO3 14.3 takes the version from extra.typo3/cms.version, then from version, 13.4 shows the top-level version as written, and an exact match keeps both fields unambiguous. For a new release, set %s to "%s" or remove it, then tag. A tag that is already pushed cannot be corrected: republishing it is refused, and the fix is a new release.\n' "$FIELD" "$SHOWN" "$VERSION" "$FIELD" "$VERSION"
+              printf '::error file=composer.json::%s is "%s" but the version being released is "%s". Each version field must equal the tag exactly: TYPO3 14.3 takes the version from extra.typo3/cms.version, then from version, 13.4 shows the top-level version as written when it does not read ext_emconf.php, and an exact match keeps both fields unambiguous. For a new release, set %s to "%s" or remove it, then tag. A tag that is already pushed cannot be corrected: republishing it is refused, and the fix is a new release.\n' "$FIELD" "$SHOWN" "$VERSION" "$FIELD" "$VERSION"
               STATUS=1
             else
               echo "composer.json $FIELD: $VALUE (matches)"

@@ -13,7 +13,8 @@
 # release that bumped only ext_emconf.php passed the old tag check and could
 # install from TER showing the previous number. Each of the two fields that is
 # set must therefore equal the release version, and exactly, as a policy: 14.3
-# normalises "v1.2.3", but 13.4 shows the top-level version as written. TYPO3
+# normalises "v1.2.3", but 13.4 shows the top-level version as written when it
+# does not read ext_emconf.php (in classic mode it takes that value). TYPO3
 # 13.4 never reads extra.typo3/cms.version, so for 13.4 that half of the check
 # is stricter than needed.
 #

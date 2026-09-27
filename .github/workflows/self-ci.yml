@@ -367,10 +367,9 @@ jobs:
         # extra.typo3/cms.version, falling back to the top-level version, on
         # every path; ext_emconf.php overrides only the top-level version and
         # is skipped once Package.providesPackages is set together with a
-        # version field. The release path
-        # compared the tag with ext_emconf.php only. This runs the guard step
-        # of both release entry points against fixture composer.json files and
-        # fails if the two copies differ.
+        # version field. The release path compared the tag with ext_emconf.php
+        # only. This runs the guard step of both release entry points against
+        # fixture composer.json files and fails if the two copies differ.
         run: >-
           bash Build/Scripts/check-composer-version-guard.sh
           .github/workflows/release-typo3-extension.yml
