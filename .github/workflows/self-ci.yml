@@ -333,6 +333,7 @@ jobs:
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
+          shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
@@ -381,6 +382,13 @@ jobs:
           bash Build/Scripts/check-composer-version-guard.sh
           .github/workflows/release-typo3-extension.yml
           .github/workflows/publish-to-ter.yml
+
+      - name: Check the lowest-deps cell's selection and install
+        # Runs the job's run blocks against a stubbed composer: pins that start
+        # with "-", whitespace-only or globbing pin lists, partial
+        # matrix-exclude entries, the composer.json TYPO3 floor, and the
+        # database and coverage settings the matrix cells use (#258).
+        run: bash Build/Scripts/check-lowest-deps-cell.sh .github/workflows/ci.yml
 
       - name: Check that no testsuite name is hardcoded in a workflow
         # extended-testing.yml carried `--testsuite="Unit Tests"` in seven
