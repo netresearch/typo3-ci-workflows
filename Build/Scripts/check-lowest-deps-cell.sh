@@ -23,7 +23,8 @@
 #      `"require-dev": []` printed one while pinning.
 #  10. An uppercase pin name was rejected, although Composer accepts it.
 #  11. A newline in a composer.json constraint ended the annotation that
-#      quoted it, and the runner read the next line as a command.
+#      quoted it, and the runner read the next line as a command. The
+#      cases cover CR, LF and "%" in every annotation of the install block.
 #
 # Every block runs under the runner's own shell flags (`bash --noprofile --norc
 # -eo pipefail`), in a shell of its own; the composer stubs reach it as
@@ -122,7 +123,7 @@ fi
 # Runs the install block in a fixture checkout with a composer that records its
 # arguments one call per line. Prints the exit status; the call log and the
 # output land in ${TMP}/case/.
-run_install() { # composer.json, typo3-version, lowest-deps, pin-packages, [PATH]
+run_install() { # composer.json, typo3-version, lowest-deps, pin-packages, [PATH], [typo3-packages]
     local dir="${TMP}/case"
     rm -rf "${dir}"
     mkdir -p "${dir}/work/a"
@@ -139,7 +140,7 @@ EOF
     : > "${dir}/calls"
     (
         cd "${dir}/work" || exit 99
-        PATH="${5:-${PATH}}" TYPO3_VERSION="${2}" TYPO3_PACKAGES='["typo3/cms-core"]' LOWEST_DEPS="${3}" \
+        PATH="${5:-${PATH}}" TYPO3_VERSION="${2}" TYPO3_PACKAGES="${6:-[\"typo3/cms-core\"]}" LOWEST_DEPS="${3}" \
             PIN_PACKAGES="${4}" GITHUB_STEP_SUMMARY="${dir}/summary" \
             "${RUNNER_SHELL[@]}" "${dir}/script.sh"
     ) > "${dir}/out" 2>&1
@@ -303,6 +304,58 @@ if [[ "${status}" -ne 0 ]] \
     pass 'a newline in a disjoint composer.json constraint is escaped in the error'
 else
     fail "newline in disjoint constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# A bare CR ends a line for the runner as well. The output goes through
+# `tr '\r' '\n'` so that grep sees the line the runner would see.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana\r::error::INJECTED"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::INJECTED' \
+    && grep -qF 'banana%0D::error::INJECTED' "${TMP}/case/out"; then
+    pass 'a CR in a composer.json constraint is escaped in the annotation'
+else
+    fail "CR in constraint: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# A literal "%0A" in a constraint must not reach the runner as one: it would
+# unescape it into a newline.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana%0Ax"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && grep -qF "with typo3/cms-core '^13.4 || banana%250Ax'" "${TMP}/case/out"; then
+    pass 'a literal %0A in a composer.json constraint is escaped as %250A'
+else
+    fail "percent in constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# The load warning quotes the constraint too.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana\n::error::INJECTED"}}' '^13.4' true '' "${NOCOMPOSER}")"
+if [[ "${status}" -eq 0 ]] \
+    && ! grep -q '^::error::INJECTED' "${TMP}/case/out" \
+    && grep -qF "::warning::Could not load composer/semver to compare '^13.4' with typo3/cms-core '^13.4 || banana%0A::error::INJECTED' (exit 2: " "${TMP}/case/out"; then
+    pass 'a newline in a composer.json constraint is escaped in the load warning'
+else
+    fail "newline in constraint, load warning: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# A pin is split on spaces, tabs and newlines, so a CR is how a line break
+# reaches the pin error. The injected text is lowercase, as a pin name would
+# be after the step lowercases it.
+status="$(run_install '{"require":{}}' '^13.4' false $'vendor/pkg:^1.0\r::error::injected')"
+if [[ "${status}" -ne 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::injected' \
+    && grep -qF "::error::pin-packages entry 'vendor/pkg:^1.0%0D::error::injected' is not vendor/package:constraint" "${TMP}/case/out"; then
+    pass 'a CR in a pin is escaped in the pin error'
+else
+    fail "CR in pin: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# typo3-packages that is not JSON is quoted in its error.
+status="$(run_install '{"require":{}}' '^13.4' true '' '' $'["typo3/cms-core",\n::error::INJECTED')"
+if [[ "${status}" -ne 0 ]] \
+    && ! grep -q '^::error::INJECTED' "${TMP}/case/out" \
+    && grep -qF '::error::Failed to parse typo3-packages input: ["typo3/cms-core",%0A::error::INJECTED' "${TMP}/case/out"; then
+    pass 'a newline in typo3-packages is escaped in its error'
+else
+    fail "newline in typo3-packages: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
 fi
 
 # --- Functional database --------------------------------------------------
