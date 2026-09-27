@@ -232,13 +232,18 @@ on:
       # Lower bound of the dependency constraints
       lowest-deps:
         description: >-
-          Run one extra cell that resolves every dependency to the LOWEST
-          version its constraint allows (composer update --prefer-lowest
+          Run one extra cell that resolves every dependency to the lowest
+          version composer can install (composer update --prefer-lowest
           --prefer-stable), on the lowest non-excluded php/typo3 combination
           of the matrix, and run the unit and functional tests there. Every
           other cell resolves the newest allowed versions, so a defect that
           exists only under an older major the constraints still admit is
-          otherwise never tested. No coverage or JUnit upload from this cell.
+          otherwise never tested. With roave/security-advisories in
+          require-dev, "lowest" means the lowest release without a known
+          advisory, not the constraint's lower bound, and that floor rises
+          as advisories are published. The matrix TYPO3 line is ANDed with
+          composer.json's own constraint, so a declared floor such as
+          ^13.4.21 holds. No coverage or JUnit upload from this cell.
         type: boolean
         default: false
       pin-packages:
@@ -771,11 +776,17 @@ jobs:
 
           php_versions = sorted(load('PHP_VERSIONS'), key=rank, reverse=True)
           typo3_versions = sorted(load('TYPO3_VERSIONS'), key=rank, reverse=True)
-          excluded = {(entry.get('php'), entry.get('typo3')) for entry in load('MATRIX_EXCLUDE', of_objects=True)}
+          # GitHub excludes a cell when every key of an entry matches it, so
+          # a partial entry such as {'typo3': '^12.4'} drops a whole column.
+          excludes = load('MATRIX_EXCLUDE', of_objects=True)
+
+          def is_excluded(php, typo3):
+              cell = {'php': php, 'typo3': typo3}
+              return any(all(cell.get(key) == value for key, value in entry.items()) for entry in excludes)
 
           for php in php_versions:
               for typo3 in typo3_versions:
-                  if (php, typo3) in excluded:
+                  if is_excluded(php, typo3):
                       continue
                   with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
                       handle.write(f'php={php}\ntypo3={typo3}\n')
@@ -1659,7 +1670,9 @@ jobs:
   # tests as steps against one resolution.
   lowest-deps:
     needs: preflight
-    name: ${{ inputs.lowest-deps && 'Lowest dependencies' || 'Pinned dependencies' }}
+    # Neither input set: the job is skipped, and its check shows a name that
+    # claims no mode.
+    name: ${{ inputs.lowest-deps && 'Lowest dependencies' || (inputs.pin-packages != '' && 'Pinned dependencies' || 'Lowest or pinned dependencies') }}
     # Both suites off would leave a job that installs and then reports success
     # having tested nothing (#188), so it does not run at all then.
     if: >-
@@ -1736,11 +1749,17 @@ jobs:
 
           php_versions = sorted(load('PHP_VERSIONS'), key=rank)
           typo3_versions = sorted(load('TYPO3_VERSIONS'), key=rank)
-          excluded = {(entry.get('php'), entry.get('typo3')) for entry in load('MATRIX_EXCLUDE', of_objects=True)}
+          # GitHub excludes a cell when every key of an entry matches it, so
+          # a partial entry such as {'typo3': '^12.4'} drops a whole column.
+          excludes = load('MATRIX_EXCLUDE', of_objects=True)
+
+          def is_excluded(php, typo3):
+              cell = {'php': php, 'typo3': typo3}
+              return any(all(cell.get(key) == value for key, value in entry.items()) for entry in excludes)
 
           for php in php_versions:
               for typo3 in typo3_versions:
-                  if (php, typo3) in excluded:
+                  if is_excluded(php, typo3):
                       continue
                   with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
                       handle.write(f'php={php}\ntypo3={typo3}\n')
@@ -1758,7 +1777,10 @@ jobs:
           extensions: ${{ inputs.php-extensions }}, pdo_mysql, pdo_sqlite, pdo_pgsql
           tools: composer:v2
           ini-values: zend.assertions=1
-          coverage: none
+          # The matrix cells' driver, so a custom *-test-command that writes
+          # or reads a coverage report runs here as it does there. The
+          # built-in commands below still pass --no-coverage.
+          coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -1806,7 +1828,13 @@ jobs:
 
       # The TYPO3 line is required first, as in every cell: without it
       # --prefer-lowest would take the lowest release of composer.json's whole
-      # TYPO3 range rather than of this cell's line.
+      # TYPO3 range rather than of this cell's line. Unlike the matrix cells,
+      # the line is ANDed with composer.json's own constraint instead of
+      # replacing it: `^13.4` must not undercut a declared `^13.4.21`, and
+      # under --prefer-lowest it otherwise would.
+      #
+      # Word splitting is intended for both lists, globbing is not (`a/b:*`
+      # would match files in the checkout): hence `set -f`.
       - name: Install dependencies
         id: install
         env:
@@ -1815,28 +1843,51 @@ jobs:
           LOWEST_DEPS: ${{ inputs.lowest-deps }}
           PIN_PACKAGES: ${{ inputs.pin-packages }}
         run: |
+          set -f
           PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
             echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
             exit 1
           }
           for pkg in $PACKAGES; do
-            composer require --no-update "$pkg:${TYPO3_VERSION}"
+            declared=$(jq -r --arg p "$pkg" '.require[$p] // ."require-dev"[$p] // empty' composer.json)
+            if [[ -n "$declared" ]]; then
+              # Composer has no parentheses: distribute the AND over every
+              # disjunct of both sides.
+              constraint=$(python3 -c '
+          import re, sys
+          split = lambda c: [d for d in re.split(r"\s*\|\|?\s*", c.strip()) if d]
+          print(" || ".join(f"{a}, {b}" for a in split(sys.argv[1]) for b in split(sys.argv[2])))
+          ' "$TYPO3_VERSION" "$declared")
+            else
+              constraint="$TYPO3_VERSION"
+            fi
+            composer require --no-update -- "$pkg:$constraint"
           done
 
-          # A package that sits in require-dev is pinned there: composer
-          # require without --dev would silently move it into require.
+          # Composer's own package-name pattern, so no entry can start with
+          # "-" and reach composer as an option. A package that sits in
+          # require-dev is pinned there: composer require without --dev would
+          # silently move it into require.
+          PIN_PATTERN='^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*:[^[:space:]]+$'
+          PINNED=0
           for pin in $PIN_PACKAGES; do
-            if [[ ! "$pin" =~ ^[^:/[:space:]]+/[^:/[:space:]]+:.+$ ]]; then
+            if [[ ! "$pin" =~ $PIN_PATTERN ]]; then
               echo "::error::pin-packages entry '$pin' is not vendor/package:constraint"
               exit 1
             fi
             name="${pin%%:*}"
             if jq -e --arg p "$name" '(."require-dev" // {}) | has($p)' composer.json > /dev/null; then
-              composer require --dev --no-update "$pin"
+              composer require --dev --no-update -- "$pin"
             else
-              composer require --no-update "$pin"
+              composer require --no-update -- "$pin"
             fi
+            PINNED=$((PINNED + 1))
           done
+          set +f
+          if [[ "$LOWEST_DEPS" != "true" && "$PINNED" -eq 0 ]]; then
+            echo "::error::pin-packages contains no pins, and lowest-deps is off: this cell would test nothing the matrix does not."
+            exit 1
+          fi
 
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
@@ -1894,7 +1945,9 @@ jobs:
         run: |
           # The same database settings as the functional-tests and
           # functional-tests-sqlite jobs; SQLite gets only the driver there too.
-          case "${FUNCTIONAL_TEST_DB:-sqlite}" in
+          # Anything but sqlite or postgres is MySQL, an empty value included,
+          # because the matrix routes every non-sqlite value to functional-tests.
+          case "${FUNCTIONAL_TEST_DB:-}" in
             sqlite)
               export typo3DatabaseDriver=pdo_sqlite
               ;;
