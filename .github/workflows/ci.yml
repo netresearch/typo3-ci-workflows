@@ -243,7 +243,8 @@ on:
           advisory, not the constraint's lower bound, and that floor rises
           as advisories are published. The matrix TYPO3 line is ANDed with
           composer.json's own constraint, so a declared floor such as
-          ^13.4.21 holds. No coverage or JUnit upload from this cell.
+          ^13.4.21 holds; a line composer.json rules out fails the cell with
+          an error naming both. No coverage or JUnit upload from this cell.
         type: boolean
         default: false
       pin-packages:
@@ -1848,9 +1849,42 @@ jobs:
             echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
             exit 1
           }
+          # `require` and `require-dev` may be absent, or an empty JSON array
+          # (what some tools write for an empty map): neither may abort the step.
+          declared_in() { # key, package
+            jq -r --arg k "$1" --arg p "$2" '.[$k] | if type == "object" then .[$p] // empty else empty end' composer.json
+          }
+          # Composer's own constraint matching, from the composer phar that
+          # setup-php installed: exit 0 when the two constraints intersect, 1
+          # when they cannot, 2 when composer/semver could not be loaded.
+          intersects() { # constraint, constraint
+            # shellcheck disable=SC2016 # the $ belong to PHP, not to the shell
+            php -r '
+              try {
+                  Phar::loadPhar($argv[1], "composer.phar");
+                  require "phar://composer.phar/vendor/autoload.php";
+                  $parser = new Composer\Semver\VersionParser();
+                  exit($parser->parseConstraints($argv[2])->matches($parser->parseConstraints($argv[3])) ? 0 : 1);
+              } catch (Throwable $error) {
+                  fwrite(STDERR, $error->getMessage() . PHP_EOL);
+                  exit(2);
+              }
+            ' -- "$(type -P composer)" "$1" "$2"
+          }
           for pkg in $PACKAGES; do
-            declared=$(jq -r --arg p "$pkg" '.require[$p] // ."require-dev"[$p] // empty' composer.json)
+            declared=$(declared_in require "$pkg")
+            [[ -n "$declared" ]] || declared=$(declared_in require-dev "$pkg")
             if [[ -n "$declared" ]]; then
+              # A matrix line outside the extension's own constraint leaves
+              # nothing to install; say so instead of letting the solver fail.
+              status=0
+              intersects "$TYPO3_VERSION" "$declared" || status=$?
+              if [[ "$status" -eq 1 ]]; then
+                echo "::error::The lowest TYPO3 line of typo3-versions, '$TYPO3_VERSION', lies outside $pkg '$declared' in composer.json, so this cell has nothing to install. Align typo3-versions with composer.json, or exclude that line with matrix-exclude."
+                exit 1
+              elif [[ "$status" -ne 0 ]]; then
+                echo "::warning::Could not load composer/semver to compare '$TYPO3_VERSION' with $pkg '$declared'; resolving anyway."
+              fi
               # Composer has no parentheses: distribute the AND over every
               # disjunct of both sides.
               constraint=$(python3 -c '
@@ -1865,18 +1899,23 @@ jobs:
           done
 
           # Composer's own package-name pattern, so no entry can start with
-          # "-" and reach composer as an option. A package that sits in
-          # require-dev is pinned there: composer require without --dev would
-          # silently move it into require.
+          # "-" and reach composer as an option. Names are lowercased first:
+          # Composer treats them case-insensitively, but writes them into
+          # composer.json as given, and the require-dev lookup below compares
+          # exact keys. A package that sits in require-dev is pinned there:
+          # composer require without --dev would silently move it into
+          # require.
           PIN_PATTERN='^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*:[^[:space:]]+$'
           PINNED=0
           for pin in $PIN_PACKAGES; do
+            name="${pin%%:*}"
+            name="${name,,}"
+            [[ "$pin" == *:* ]] && pin="$name:${pin#*:}"
             if [[ ! "$pin" =~ $PIN_PATTERN ]]; then
               echo "::error::pin-packages entry '$pin' is not vendor/package:constraint"
               exit 1
             fi
-            name="${pin%%:*}"
-            if jq -e --arg p "$name" '(."require-dev" // {}) | has($p)' composer.json > /dev/null; then
+            if jq -e --arg p "$name" '."require-dev" | type == "object" and has($p)' composer.json > /dev/null; then
               composer require --dev --no-update -- "$pin"
             else
               composer require --no-update -- "$pin"
