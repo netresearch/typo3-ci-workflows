@@ -24,9 +24,12 @@
 #  10. An uppercase pin name was rejected, although Composer accepts it.
 #  11. A newline in a composer.json constraint ended the annotation that
 #      quoted it, and the runner read the next line as a command. Every
-#      annotation of the install block has a case whose value carries a line
-#      break: LF in the disjoint error and the typo3-packages error, CR in the
-#      pin error, and CR, LF and "%" in the parse and load warnings.
+#      annotation that quotes a value has a case that puts a line break into
+#      each value it quotes. The composer.json constraint: LF in the disjoint
+#      error, one case each for CR, LF and "%" in the parse warning, and all
+#      three together in one value in the load warning. The package name: CR
+#      in all three. The TYPO3 line: CR in both warnings, LF in the disjoint
+#      error, where it has to parse. The pin: CR. typo3-packages: LF.
 #
 # Every block runs under the runner's own shell flags (`bash --noprofile --norc
 # -eo pipefail`), in a shell of its own; the composer stubs reach it as
@@ -361,6 +364,40 @@ if [[ "${status}" -ne 0 ]] \
     pass 'a newline in typo3-packages is escaped in its error'
 else
     fail "newline in typo3-packages: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# The TYPO3 line and the package name are quoted in all three annotations of
+# the overlap check. A package name is split on spaces, tabs and newlines, so
+# it carries a CR; composer.json declares it under the same key.
+PKG_CR='["typo3/cms-core\r::error::P"]'
+CJ_CR='{"require":{"typo3/cms-core\r::error::P":"^13.4"}}'
+status="$(run_install "${CJ_CR}" $'^13.4\r::error::X' true '' "${NOCOMPOSER}" "${PKG_CR}")"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::' \
+    && grep -qF "::warning::Could not load composer/semver to compare '^13.4%0D::error::X' with typo3/cms-core%0D::error::P '^13.4' (exit 2: " "${TMP}/case/out"; then
+    pass 'a CR in the TYPO3 line and in the package name is escaped in the load warning'
+else
+    fail "CR in TYPO3 line and package, load warning: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+status="$(run_install "${CJ_CR}" $'^13.4\r::error::X' true '' '' "${PKG_CR}")"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::' \
+    && grep -qF "::warning::Could not parse a constraint while comparing '^13.4%0D::error::X' with typo3/cms-core%0D::error::P '^13.4': '^13.4%0D::error::X': " "${TMP}/case/out"; then
+    pass 'a CR in the TYPO3 line and in the package name is escaped in the parse warning'
+else
+    fail "CR in TYPO3 line and package, parse warning: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# The disjoint error needs a TYPO3 line that parses; composer/semver reads an
+# LF inside it as whitespace.
+status="$(run_install '{"require":{"typo3/cms-core\r::error::P":"^14.3"}}' $'^13.4 ||\n^13.5' true '' '' "${PKG_CR}")"
+if [[ "${status}" -ne 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::P\|^\^13\.5' \
+    && grep -qF "::error::The lowest TYPO3 line of typo3-versions, '^13.4 ||%0A^13.5', lies outside typo3/cms-core%0D::error::P '^14.3' in composer.json" "${TMP}/case/out"; then
+    pass 'a line break in the TYPO3 line and in the package name is escaped in the disjoint error'
+else
+    fail "line break in TYPO3 line and package, disjoint error: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
 fi
 
 # --- Functional database --------------------------------------------------
