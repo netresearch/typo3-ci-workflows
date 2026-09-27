@@ -236,6 +236,51 @@ jobs:
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Check composer.json version matches the release
+        # TYPO3 14.3 stops reading ext_emconf.php for an extension whose
+        # composer.json sets extra.typo3/cms.Package.providesPackages plus a
+        # version, and takes the version from extra.typo3/cms.version
+        # (PackageManager::isComposerOnlyCapable(), Package.php at v14.3.7).
+        # A release that bumps only ext_emconf.php then installs from TER
+        # showing the old number. Refuse it here. The field is optional: when
+        # it is absent nothing is compared, so extensions without it are
+        # unaffected. The same block runs in release-typo3-extension.yml and
+        # publish-to-ter.yml; Build/Scripts/check-composer-version-guard.sh
+        # executes both and fails if they drift apart.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ ! -f composer.json ]]; then
+            echo "No composer.json -- nothing to compare"
+            exit 0
+          fi
+          HAS_FIELD=$(jq -r '.extra["typo3/cms"].version != null' composer.json)
+          if [[ "$HAS_FIELD" != "true" ]]; then
+            echo "composer.json sets no extra.typo3/cms.version -- nothing to compare"
+            exit 0
+          fi
+          # Compared inside jq so the value is taken exactly as stored: a
+          # command substitution would drop trailing newlines. One leading
+          # "v" is stripped, as from the tag.
+          MATCHES=$(jq -r --arg v "$VERSION" '.extra["typo3/cms"].version | tostring | ltrimstr("v") == $v' composer.json)
+          # The trailing "x" keeps a newline at the end of the value, which the
+          # substitution would otherwise strip and the message would hide.
+          COMPOSER_VERSION=$(jq -j '.extra["typo3/cms"].version | tostring' composer.json; printf x)
+          COMPOSER_VERSION=${COMPOSER_VERSION%x}
+          if [[ "$MATCHES" != "true" ]]; then
+            # Workflow-command data escaping, as actions/runner unescapes it
+            # (_escapeDataMappings in ActionCommand.cs): "%" first, then CR
+            # and LF.
+            # VERSION needs none: the previous step allows only digits
+            # and dots.
+            SHOWN=${COMPOSER_VERSION//%/%25}
+            SHOWN=${SHOWN//$'\r'/%0D}
+            SHOWN=${SHOWN//$'\n'/%0A}
+            printf '::error file=composer.json::extra.typo3/cms.version is "%s" but the version being released is "%s". TYPO3 14.3 reads the version from this field instead of ext_emconf.php once extra.typo3/cms.Package.providesPackages is set, so the extension would report the wrong version. Set it to "%s" or remove it.\n' "$SHOWN" "$VERSION" "$VERSION"
+            exit 1
+          fi
+          echo "composer.json extra.typo3/cms.version: $COMPOSER_VERSION (matches)"
+
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:

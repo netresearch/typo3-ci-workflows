@@ -328,6 +328,7 @@ jobs:
           shellcheck -x --severity=error assets/Build/Scripts/runTests.sh
           shellcheck -x assets/Build/Scripts/runTests.stub.sh
           shellcheck -x Build/Scripts/check-runner-variables.sh
+          shellcheck -x Build/Scripts/check-composer-version-guard.sh
           shellcheck -x Build/Scripts/check-runner-detection.sh
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
@@ -360,6 +361,18 @@ jobs:
         # bash with an empty script list and asserts a non-zero exit, rather
         # than grepping for `exit 1` — text can sit in a branch nothing reaches.
         run: bash Build/Scripts/check-empty-suite-fails.sh .github/workflows/ci.yml
+
+      - name: Check the release refuses a stale composer.json version
+        # TYPO3 14.3 reads the version from composer.json
+        # extra.typo3/cms.version instead of ext_emconf.php once
+        # Package.providesPackages is set, and the release path compared the
+        # tag with ext_emconf.php only. This runs the guard step of both
+        # release entry points against fixture composer.json files and fails
+        # if the two copies differ.
+        run: >-
+          bash Build/Scripts/check-composer-version-guard.sh
+          .github/workflows/release-typo3-extension.yml
+          .github/workflows/publish-to-ter.yml
 
       - name: Check that no testsuite name is hardcoded in a workflow
         # extended-testing.yml carried `--testsuite="Unit Tests"` in seven
