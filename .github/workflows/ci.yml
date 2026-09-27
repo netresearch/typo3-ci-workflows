@@ -1856,7 +1856,9 @@ jobs:
           }
           # Composer's own constraint matching, from the composer phar that
           # setup-php installed: exit 0 when the two constraints intersect, 1
-          # when they cannot, 2 when composer/semver could not be loaded.
+          # when they cannot, 2 when composer/semver could not be loaded, 3
+          # when a constraint could not be parsed. On 2 and 3, stderr carries
+          # the reason; on 3 it starts with the constraint that failed.
           intersects() { # constraint, constraint
             # shellcheck disable=SC2016 # the $ belong to PHP, not to the shell
             php -r '
@@ -1864,11 +1866,20 @@ jobs:
                   Phar::loadPhar($argv[1], "composer.phar");
                   require "phar://composer.phar/vendor/autoload.php";
                   $parser = new Composer\Semver\VersionParser();
-                  exit($parser->parseConstraints($argv[2])->matches($parser->parseConstraints($argv[3])) ? 0 : 1);
               } catch (Throwable $error) {
                   fwrite(STDERR, $error->getMessage() . PHP_EOL);
                   exit(2);
               }
+              $parsed = [];
+              foreach ([$argv[2], $argv[3]] as $constraint) {
+                  try {
+                      $parsed[] = $parser->parseConstraints($constraint);
+                  } catch (Throwable $error) {
+                      fwrite(STDERR, "\x27" . $constraint . "\x27: " . $error->getMessage() . PHP_EOL);
+                      exit(3);
+                  }
+              }
+              exit($parsed[0]->matches($parsed[1]) ? 0 : 1);
             ' -- "$(type -P composer)" "$1" "$2"
           }
           for pkg in $PACKAGES; do
@@ -1878,12 +1889,15 @@ jobs:
               # A matrix line outside the extension's own constraint leaves
               # nothing to install; say so instead of letting the solver fail.
               status=0
-              intersects "$TYPO3_VERSION" "$declared" || status=$?
+              reason=$(intersects "$TYPO3_VERSION" "$declared" 2>&1) || status=$?
+              reason="${reason//$'\n'/ }"
               if [[ "$status" -eq 1 ]]; then
                 echo "::error::The lowest TYPO3 line of typo3-versions, '$TYPO3_VERSION', lies outside $pkg '$declared' in composer.json, so this cell has nothing to install. Align typo3-versions with composer.json, or exclude that line with matrix-exclude."
                 exit 1
+              elif [[ "$status" -eq 3 ]]; then
+                echo "::warning::Could not parse a constraint while comparing '$TYPO3_VERSION' with $pkg '$declared': $reason; resolving anyway."
               elif [[ "$status" -ne 0 ]]; then
-                echo "::warning::Could not load composer/semver to compare '$TYPO3_VERSION' with $pkg '$declared'; resolving anyway."
+                echo "::warning::Could not load composer/semver to compare '$TYPO3_VERSION' with $pkg '$declared' (exit $status: $reason); resolving anyway."
               fi
               # Composer has no parentheses: distribute the AND over every
               # disjunct of both sides.

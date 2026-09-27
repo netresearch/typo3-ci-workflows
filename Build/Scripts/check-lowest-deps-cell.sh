@@ -23,9 +23,11 @@
 #      `"require-dev": []` printed one while pinning.
 #  10. An uppercase pin name was rejected, although Composer accepts it.
 #
-# The blocks run under the runner's own shell flags (`bash --noprofile --norc
-# -eo pipefail`). The install block needs a real `php` and a `composer` phar on
-# PATH: it loads composer/semver from the phar to compare constraints.
+# Every block runs under the runner's own shell flags (`bash --noprofile --norc
+# -eo pipefail`), in a shell of its own; the composer stubs reach it as
+# functions (`export -f`) or through a sourced prelude. The install block needs
+# a real `php` and a `composer` phar on PATH: it loads composer/semver from the
+# phar to compare constraints.
 #
 # The blocks are executed, not grepped: a text probe would confirm a guard
 # that sits in a branch nothing reaches.
@@ -116,7 +118,7 @@ fi
 # Runs the install block in a fixture checkout with a composer that records its
 # arguments one call per line. Prints the exit status; the call log and the
 # output land in ${TMP}/case/.
-run_install() { # composer.json, typo3-version, lowest-deps, pin-packages
+run_install() { # composer.json, typo3-version, lowest-deps, pin-packages, [PATH]
     local dir="${TMP}/case"
     rm -rf "${dir}"
     mkdir -p "${dir}/work/a"
@@ -133,7 +135,7 @@ EOF
     : > "${dir}/calls"
     (
         cd "${dir}/work" || exit 99
-        TYPO3_VERSION="${2}" TYPO3_PACKAGES='["typo3/cms-core"]' LOWEST_DEPS="${3}" \
+        PATH="${5:-${PATH}}" TYPO3_VERSION="${2}" TYPO3_PACKAGES='["typo3/cms-core"]' LOWEST_DEPS="${3}" \
             PIN_PACKAGES="${4}" GITHUB_STEP_SUMMARY="${dir}/summary" \
             "${RUNNER_SHELL[@]}" "${dir}/script.sh"
     ) > "${dir}/out" 2>&1
@@ -142,8 +144,11 @@ EOF
 
 CJ='{"require":{"typo3/cms-core":"^13.4 || ^14.3","guzzlehttp/guzzle":"^7.10 || ^8.0"},"require-dev":{"mikey179/vfsstream":"^1.6"}}'
 
-status="$(run_install "${CJ}" '^13.4' false '-dother/x:y')"
-if [[ "${status}" -ne 0 ]] && ! grep -q -- 'other/x' "${TMP}/case/calls" && grep -q '::error::' "${TMP}/case/out"; then
+# No TYPO3 package in composer.json, so the overlap check is not consulted and
+# cannot be the error that stops the step.
+status="$(run_install '{"require":{}}' '^13.4' false '-dother/x:y')"
+if [[ "${status}" -ne 0 ]] && ! grep -q -- 'other/x' "${TMP}/case/calls" \
+    && grep -qF "::error::pin-packages entry '-dother/x:y' is not vendor/package:constraint" "${TMP}/case/out"; then
     pass 'a pin starting with "-" is rejected before composer sees it'
 else
     fail "a pin starting with \"-\" reached composer (exit ${status}): $(tr '\n' '|' < "${TMP}/case/calls")"
@@ -237,14 +242,49 @@ else
     fail "uppercase pins: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
 fi
 
+# Only the name is lowercased: a branch constraint keeps its case, since
+# `dev-Feature` and `dev-feature` are different branches.
+status="$(run_install "${CJ}" '^13.4' false 'Vendor/Pkg:dev-Feature')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- vendor/pkg:dev-Feature' "${TMP}/case/calls"; then
+    pass 'a pin keeps the case of its constraint while its name is lowercased'
+else
+    fail "mixed-case pin: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Without the composer phar the overlap cannot be checked: a warning, and the
+# cell resolves anyway. PATH keeps the tools the block needs, and no composer.
+NOCOMPOSER="${TMP}/nocomposer-bin"
+mkdir -p "${NOCOMPOSER}"
+for tool in bash php jq python3 env; do
+    ln -s "$(type -P "${tool}")" "${NOCOMPOSER}/${tool}"
+done
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || ^14.3"}}' '^13.4' true '' "${NOCOMPOSER}")"
+if [[ "${status}" -eq 0 ]] && grep -qF '::warning::Could not load composer/semver' "${TMP}/case/out" \
+    && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls"; then
+    pass 'without composer/semver the overlap check warns and the cell resolves anyway'
+else
+    fail "semver unavailable: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# A constraint composer/semver cannot parse: its own warning, naming the
+# constraint, and the cell resolves anyway.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qF "::warning::Could not parse a constraint while comparing '^13.4' with typo3/cms-core '^13.4 || banana': '^13.4 || banana': Could not parse version constraint banana" "${TMP}/case/out" \
+    && ! grep -qF 'Could not load composer/semver' "${TMP}/case/out" \
+    && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls"; then
+    pass 'an unparsable constraint gets the parse warning and the cell resolves anyway'
+else
+    fail "unparsable constraint: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
 # --- Functional database --------------------------------------------------
 
 FUNCTIONAL="$(step_run lowest-deps 'Run functional tests')"
 driver_for() { # functional-test-db
-    # The block under test is eval'd, so shellcheck cannot see that it calls
-    # composer and reads these two variables. Older shellcheck (the runner's)
-    # reports the stub as SC2317, newer as SC2329.
-    # shellcheck disable=SC2034,SC2317,SC2329
+    # The stub runs in the block's own shell, which shellcheck cannot see.
+    # Older shellcheck (the runner's) reports it as SC2317, newer as SC2329.
+    # shellcheck disable=SC2317,SC2329
     (
         cd "${TMP}" || exit 99
         composer() {
@@ -253,8 +293,9 @@ driver_for() { # functional-test-db
                 *) printf 'DRIVER=%s\n' "${typo3DatabaseDriver:-unset}" ;;
             esac
         }
-        FUNCTIONAL_TEST_COMMAND='' FUNCTIONAL_TEST_DB="${1}"
-        eval "${FUNCTIONAL}"
+        export -f composer
+        FUNCTIONAL_TEST_COMMAND='' FUNCTIONAL_TEST_DB="${1}" \
+            "${RUNNER_SHELL[@]}" -c "${FUNCTIONAL}"
     ) 2>/dev/null | sed -n 's/^DRIVER=//p'
 }
 for pair in 'sqlite pdo_sqlite' 'postgres pdo_pgsql' 'mysql mysqli' 'mariadb mysqli' "'' mysqli"; do
