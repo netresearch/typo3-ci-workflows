@@ -445,7 +445,9 @@ jobs:
         run: npm ci --ignore-scripts || npm install --ignore-scripts
 
       - name: Run tests with coverage
-        run: npx vitest run --coverage
+        # The project's own vitest, never `npx vitest`: npx downloads an
+        # unpinned vitest when the project does not declare one.
+        run: ./node_modules/.bin/vitest run --coverage
 
       - name: Upload JS coverage to Codecov
         if: always()
