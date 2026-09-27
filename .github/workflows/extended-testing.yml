@@ -438,7 +438,11 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - name: Install dependencies
-        run: npm ci || npm install
+        # --ignore-scripts: a dependency's install script is arbitrary code run
+        # at install time (SonarCloud S6505). The `npm install` fallback stays
+        # unlocked on purpose: it serves repositories that do not commit
+        # package-lock.json.
+        run: npm ci --ignore-scripts || npm install --ignore-scripts
 
       - name: Run tests with coverage
         run: npx vitest run --coverage

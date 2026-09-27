@@ -621,11 +621,16 @@ jobs:
 
       - name: Install npm dependencies
         if: inputs.setup-script == ''
+        # --ignore-scripts: a dependency's install script is arbitrary code run
+        # at install time (SonarCloud S6505). Playwright's browsers come from
+        # `playwright install` below, not from a postinstall. The `npm install`
+        # branch stays unlocked on purpose: it exists for repositories that do
+        # not commit package-lock.json.
         run: |
           if [[ "${{ steps.npm-lockfile.outputs.present }}" == "true" ]]; then
-            npm ci
+            npm ci --ignore-scripts
           else
-            npm install --no-audit --no-fund
+            npm install --ignore-scripts --no-audit --no-fund
           fi
 
       # The browser bundle is the one download this workflow never cached, and
