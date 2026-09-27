@@ -32,6 +32,16 @@ use SplFileInfo;
  */
 final class BlankLineBeforeCommentFixer extends AbstractWhitespaceAwareFixer
 {
+    private const CLOSERS = [')', ']', '}'];
+
+    private const OPENERS = ['(', '[', '{'];
+
+    /** The openers that start a list: an array, an argument list. */
+    private const LIST_OPENERS = ['(', '['];
+
+    /** What ends the search at depth zero: a block edge or a statement end. */
+    private const LIST_BOUNDARIES = ['{', ';'];
+
     public function getName(): string
     {
         return 'Netresearch/blank_line_before_comment';
@@ -132,33 +142,28 @@ final class BlankLineBeforeCommentFixer extends AbstractWhitespaceAwareFixer
             // A closing brace of any kind opens a balanced region going
             // backwards — a closure inside an array entry, for one. Skipping it
             // is what keeps the search from stopping short of the list.
-            if ($content === ')' || $content === ']' || $content === '}') {
+            if (in_array($content, self::CLOSERS, true)) {
                 ++$depth;
 
                 continue;
             }
 
-            if ($content === '(' || $content === '[') {
-                if ($depth === 0) {
-                    return true;
-                }
-
-                --$depth;
-
-                continue;
-            }
-
+            // Inside a skipped region only its opening edge matters.
             if ($depth > 0) {
-                if ($content === '{') {
+                if (in_array($content, self::OPENERS, true)) {
                     --$depth;
                 }
 
                 continue;
             }
 
+            if (in_array($content, self::LIST_OPENERS, true)) {
+                return true;
+            }
+
             // At depth zero a block edge or a statement end means the comment
             // is not in a list: an opening bracket further up cannot enclose it.
-            if ($content === '{' || $content === ';') {
+            if (in_array($content, self::LIST_BOUNDARIES, true)) {
                 return false;
             }
         }
