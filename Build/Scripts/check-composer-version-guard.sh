@@ -8,11 +8,14 @@
 # extra.typo3/cms.version, falling back to the top-level version, on every path
 # (Package.php line 158 at v14.3.7). ext_emconf.php overrides only the
 # top-level version (PackageManager.php line 1010) and is not read at all once
-# extra.typo3/cms.Package.providesPackages is set (lines 941, 966-973). A
+# extra.typo3/cms.Package.providesPackages is set together with version or
+# extra.typo3/cms.version (lines 941, 966-973). A
 # release that bumped only ext_emconf.php passed the old tag check and could
 # install from TER showing the previous number. Each of the two fields that is
-# set must therefore equal the release version exactly. TYPO3 13.4 never reads
-# extra.typo3/cms.version, so for 13.4 the check is stricter than needed.
+# set must therefore equal the release version, and exactly, as a policy: 14.3
+# normalises "v1.2.3", but 13.4 shows the top-level version as written. TYPO3
+# 13.4 never reads extra.typo3/cms.version, so for 13.4 that half of the check
+# is stricter than needed.
 #
 # The step's own bash is executed, not grepped: a text probe would confirm an
 # `exit 1` that sits in a branch nothing reaches. It runs under `bash -e`,
@@ -39,12 +42,16 @@ fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; return 0; }
 pass() { printf '  ok: %s\n' "${1}"; PASSED=$((PASSED + 1)); return 0; }
 
 # fixture NAME JSON: a checkout holding only that composer.json. An empty JSON
-# argument means no composer.json at all.
+# argument means no composer.json at all; EMPTY writes a zero-byte file and
+# WHITESPACE one holding only blanks.
 fixture() {
     mkdir -p "${TMP}/fx/${1}"
-    if [[ -n "${2}" ]]; then
-        printf '%s\n' "${2}" > "${TMP}/fx/${1}/composer.json"
-    fi
+    case "${2}" in
+        '') ;;
+        EMPTY) : > "${TMP}/fx/${1}/composer.json" ;;
+        WHITESPACE) printf ' \n\t\n' > "${TMP}/fx/${1}/composer.json" ;;
+        *) printf '%s\n' "${2}" > "${TMP}/fx/${1}/composer.json" ;;
+    esac
     return 0
 }
 
@@ -89,6 +96,9 @@ fixture extra-array '{"extra":[{"typo3/cms":{"version":"1.2.4"}}]}'
 fixture typo3cms-string '{"extra":{"typo3/cms":"1.2.4"}}'
 fixture typo3cms-array '{"extra":{"typo3/cms":[]}}'
 fixture invalid-json '{"extra":'
+fixture empty-file "EMPTY"
+fixture whitespace-file "WHITESPACE"
+fixture two-documents "$(printf '%s\n%s' '{"version":"1.2.4"}' '{}')"
 
 # run_case BODY FIXTURE: prints the step's output, returns its exit code.
 run_case() {
@@ -206,7 +216,10 @@ for WORKFLOW in "$@"; do
     expect_fail "${body}" extra-array 1 ', extra must be a JSON object, found array'
     expect_fail "${body}" typo3cms-string 1 'extra.typo3/cms must be a JSON object, found string'
     expect_fail "${body}" typo3cms-array 1 'extra.typo3/cms must be a JSON object, found array'
-    expect_fail "${body}" invalid-json 1 'composer.json is not valid JSON'
+    expect_fail "${body}" invalid-json 1 'composer.json is not a single valid JSON document'
+    expect_fail "${body}" empty-file 1 'composer.json is not a single valid JSON document'
+    expect_fail "${body}" whitespace-file 1 'composer.json is not a single valid JSON document'
+    expect_fail "${body}" two-documents 1 'composer.json is not a single valid JSON document'
 done
 
 printf '%d cases, %d ok\n' "${CASES}" "${PASSED}"

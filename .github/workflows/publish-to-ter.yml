@@ -241,15 +241,16 @@ jobs:
         # falling back to the top-level version, on every path (Package.php
         # line 158 at v14.3.7). ext_emconf.php overrides only the top-level
         # version (PackageManager.php line 1010), and it is not read at all
-        # once extra.typo3/cms.Package.providesPackages is set (lines 941 and
-        # 966-973). So a stale extra.typo3/cms.version always wins over
-        # ext_emconf.php, and a stale top-level version wins once
-        # providesPackages is set. TYPO3 13.4 never reads
-        # extra.typo3/cms.version, so for 13.4 this check is stricter than
-        # needed. Each field that is set must equal the release version
-        # exactly: 13.4 displays the top-level version as written, so
-        # "v1.2.3" is refused as well. When neither field is set, nothing is
-        # compared. The same block runs in release-typo3-extension.yml and
+        # once extra.typo3/cms.Package.providesPackages is set together with
+        # version or extra.typo3/cms.version (lines 941 and 966-973). So a
+        # stale extra.typo3/cms.version always wins over ext_emconf.php, and a
+        # stale top-level version wins once providesPackages is set. TYPO3
+        # 13.4 never reads extra.typo3/cms.version, so for 13.4 this check is
+        # stricter than needed. Each field that is set must equal the release
+        # version exactly. That is a policy, not what 14.3 needs: 14.3
+        # normalises "v1.2.3" to "1.2.3". But 13.4 shows the top-level version
+        # as written, and an exact match keeps both fields unambiguous. When
+        # neither field is set, nothing is compared. The same block runs in release-typo3-extension.yml and
         # publish-to-ter.yml; Build/Scripts/check-composer-version-guard.sh
         # executes both and fails if they drift apart.
         env:
@@ -259,8 +260,11 @@ jobs:
             echo "No composer.json -- nothing to compare"
             exit 0
           fi
-          if ! jq empty composer.json 2>/dev/null; then
-            echo "::error file=composer.json::composer.json is not valid JSON, so its version fields cannot be compared with the release version."
+          # Exactly one JSON document. `jq empty` also accepts an empty file
+          # and several concatenated documents, and the checks below would
+          # then read only some of them.
+          if ! jq -e -s 'length == 1' composer.json >/dev/null 2>&1; then
+            echo "::error file=composer.json::composer.json is not a single valid JSON document, so its version fields cannot be compared with the release version."
             exit 1
           fi
           # A container that is present but not an object would read as "field
@@ -305,7 +309,7 @@ jobs:
               SHOWN=${VALUE//%/%25}
               SHOWN=${SHOWN//$'\r'/%0D}
               SHOWN=${SHOWN//$'\n'/%0A}
-              printf '::error file=composer.json::%s is "%s" but the version being released is "%s". TYPO3 14.3 takes the version from extra.typo3/cms.version, then from version, so it must equal the tag exactly. For a new release, set %s to "%s" or remove it, then tag. A tag that is already pushed cannot be corrected: republishing it is refused, and the fix is a new release.\n' "$FIELD" "$SHOWN" "$VERSION" "$FIELD" "$VERSION"
+              printf '::error file=composer.json::%s is "%s" but the version being released is "%s". Each version field must equal the tag exactly: TYPO3 14.3 takes the version from extra.typo3/cms.version, then from version, 13.4 shows the top-level version as written, and an exact match keeps both fields unambiguous. For a new release, set %s to "%s" or remove it, then tag. A tag that is already pushed cannot be corrected: republishing it is refused, and the fix is a new release.\n' "$FIELD" "$SHOWN" "$VERSION" "$FIELD" "$VERSION"
               STATUS=1
             else
               echo "composer.json $FIELD: $VALUE (matches)"
