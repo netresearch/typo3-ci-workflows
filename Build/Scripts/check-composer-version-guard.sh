@@ -161,6 +161,9 @@ expect_fail() {
     return 0
 }
 
+# The ::error the step prints for a file that is not exactly one JSON document.
+NOT_ONE_DOCUMENT='composer.json is not a single valid JSON document'
+
 FIRST_BODY=""
 for WORKFLOW in "$@"; do
     printf 'composer.json version guard (%s)\n' "${WORKFLOW}"
@@ -216,10 +219,10 @@ for WORKFLOW in "$@"; do
     expect_fail "${body}" extra-array 1 ', extra must be a JSON object, found array'
     expect_fail "${body}" typo3cms-string 1 'extra.typo3/cms must be a JSON object, found string'
     expect_fail "${body}" typo3cms-array 1 'extra.typo3/cms must be a JSON object, found array'
-    expect_fail "${body}" invalid-json 1 'composer.json is not a single valid JSON document'
-    expect_fail "${body}" empty-file 1 'composer.json is not a single valid JSON document'
-    expect_fail "${body}" whitespace-file 1 'composer.json is not a single valid JSON document'
-    expect_fail "${body}" two-documents 1 'composer.json is not a single valid JSON document'
+    expect_fail "${body}" invalid-json 1 "${NOT_ONE_DOCUMENT}"
+    expect_fail "${body}" empty-file 1 "${NOT_ONE_DOCUMENT}"
+    expect_fail "${body}" whitespace-file 1 "${NOT_ONE_DOCUMENT}"
+    expect_fail "${body}" two-documents 1 "${NOT_ONE_DOCUMENT}"
 done
 
 printf '%d cases, %d ok\n' "${CASES}" "${PASSED}"
