@@ -739,8 +739,9 @@ jobs:
           # A core file is written for a crash; "Report PHP server status"
           # prints its backtrace. RLIMIT_CORE is raised for php alone, so no
           # other process in the job starts writing cores.
+          # php runs as the user that creates the directory, so it can write
+          # its core there; no world-writable mode is needed.
           mkdir -p /tmp/php-cores
-          chmod 1777 /tmp/php-cores
           sudo sysctl -q -w kernel.core_pattern=/tmp/php-cores/core.%e.%p.%s || true
           echo "PHP modules loaded by the server: $(php -m | tr '\n' ' ')"
 
