@@ -732,8 +732,32 @@ jobs:
           require $docRoot . '/index.php';
           ROUTER
 
-          php -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php > /tmp/php-server.log 2>&1 &
-          echo $! > /tmp/php-server.pid
+          # The server runs in the background, so nothing reported how it ended:
+          # a crash mid-suite left only connection errors in the test output and
+          # a log that stops mid-request. The wrapper below waits for php and
+          # appends its exit status to the server log (128 + N means signal N).
+          # A core file is written for a crash; "Report PHP server status"
+          # prints its backtrace. RLIMIT_CORE is raised for php alone, so no
+          # other process in the job starts writing cores.
+          mkdir -p /tmp/php-cores
+          chmod 1777 /tmp/php-cores
+          sudo sysctl -q -w kernel.core_pattern=/tmp/php-cores/core.%e.%p.%s || true
+          echo "PHP modules loaded by the server: $(php -m | tr '\n' ' ')"
+
+          : > /tmp/php-server.log
+          (
+            ulimit -c unlimited 2>/dev/null || true
+            php -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php >> /tmp/php-server.log 2>&1 &
+            pid=$!
+            echo "$pid" > /tmp/php-server.pid
+            status=0
+            wait "$pid" || status=$?
+            reason=""
+            if (( status > 128 )); then
+              reason=" (signal $(kill -l $((status - 128)) 2>/dev/null || echo $((status - 128))))"
+            fi
+            echo "[$(date -u '+%a %b %d %H:%M:%S %Y')] php -S (pid ${pid}) exited with status ${status}${reason}"
+          ) < /dev/null >> /tmp/php-server.log 2>&1 &
 
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/typo3/login > /dev/null 2>&1; then
@@ -757,6 +781,48 @@ jobs:
           E2E_TYPO3_VERSION: ${{ matrix.typo3 }}
           TEST_COMMAND: ${{ inputs.test-command }}
         run: bash -c "$TEST_COMMAND"
+
+      # Runs before "Stop PHP server", so a server that is gone here died on
+      # its own and was not stopped by this workflow. It never changes the job
+      # result; it only reports what the kernel and the core file say.
+      - name: Report PHP server status
+        if: inputs.setup-script == '' && always()
+        run: |
+          pid=$(cat /tmp/php-server.pid 2>/dev/null || true)
+          if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "PHP server (pid ${pid}) is still running."
+            exit 0
+          fi
+
+          echo "::error::The PHP built-in server (pid ${pid:-unknown}) stopped during the run; the test failures after that point are connection errors, not test results."
+          echo "::group::Last 40 lines of /tmp/php-server.log"
+          tail -n 40 /tmp/php-server.log 2>/dev/null || true
+          echo "::endgroup::"
+
+          echo "::group::Kernel messages about php, segfaults, OOM and killed processes"
+          if kernel_log=$(sudo dmesg -T 2>&1); then
+            grep -iE 'php|segfault|general protection|out of memory|oom|killed process' <<< "$kernel_log" || echo "(no matching kernel messages)"
+          else
+            echo "dmesg not readable: ${kernel_log}"
+          fi
+          echo "::endgroup::"
+
+          shopt -s nullglob
+          cores=(/tmp/php-cores/core.*)
+          if (( ${#cores[@]} == 0 )); then
+            echo "No core file in /tmp/php-cores."
+            exit 0
+          fi
+          echo "::group::Backtrace from ${cores[0]}"
+          if ! command -v gdb > /dev/null; then
+            sudo timeout 300 apt-get install -y -qq gdb > /dev/null 2>&1 || true
+          fi
+          if command -v gdb > /dev/null; then
+            timeout 120 gdb -batch -ex 'info sharedlibrary' -ex 'bt' "$(command -v php)" "${cores[0]}" 2>&1 | tail -n 80 || true
+          else
+            echo "gdb could not be installed; core file left at ${cores[0]}."
+          fi
+          echo "::endgroup::"
 
       # ─── Common: compute artifact name suffix ──────────────────────
       # Sanitize matrix values for safe artifact names. GitHub allows
