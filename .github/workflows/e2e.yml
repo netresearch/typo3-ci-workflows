@@ -744,10 +744,22 @@ jobs:
           sudo sysctl -q -w kernel.core_pattern=/tmp/php-cores/core.%e.%p.%s || true
           echo "PHP modules loaded by the server: $(php -m | tr '\n' ' ')"
 
+          # No OPcache JIT for the server. setup-php appends `opcache.enable=1`,
+          # `opcache.jit=1235` and `opcache.jit_buffer_size=256M` to php.ini, and
+          # the built-in server is governed by `opcache.enable`, not
+          # `opcache.enable_cli`, so `php -S` ran TYPO3 under the tracing JIT.
+          # In t3x-nr-mcp-agent that crashed the server with SIGSEGV partway
+          # through the suite (backtrace: zend_hash_find <- zend_std_get_method
+          # <- opcache.so <- JIT code), after which every test failed with
+          # connection errors. OPcache itself stays on.
+          server_ini=(-d opcache.jit=disable)
+          echo "OPcache settings of the server:"
+          php "${server_ini[@]}" -i | grep -E '^opcache\.(enable|jit|jit_buffer_size) ' || true
+
           : > /tmp/php-server.log
           (
             ulimit -c unlimited 2>/dev/null || true
-            php -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php >> /tmp/php-server.log 2>&1 &
+            php "${server_ini[@]}" -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php >> /tmp/php-server.log 2>&1 &
             pid=$!
             echo "$pid" > /tmp/php-server.pid
             status=0
@@ -801,7 +813,9 @@ jobs:
 
           echo "::group::Kernel messages about php, segfaults, OOM and killed processes"
           if kernel_log=$(sudo dmesg -T 2>&1); then
-            grep -iE 'php|segfault|general protection|out of memory|oom|killed process' <<< "$kernel_log" || echo "(no matching kernel messages)"
+            # `php[0-9.]*\[` is the process-name form of a kernel line
+            # (`php8.3[1234]: segfault at …`); a bare `php` also matches acpiphp.
+            grep -iE 'php[0-9.]*\[[0-9]+\]|segfault|general protection|out of memory|oom|killed process' <<< "$kernel_log" || echo "(no matching kernel messages)"
           else
             echo "dmesg not readable: ${kernel_log}"
           fi
