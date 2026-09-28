@@ -480,6 +480,10 @@ jobs:
 
 This produces 6 jobs (2 TYPO3 versions × 3 variants), each isolated. The setup script branches on `$E2E_VARIANT` to install the right neighborhood (e.g. with/without `bk2k/bootstrap-package`, with/without `typo3/cms-fluid-styled-content`).
 
+### The PHP built-in server (default mode)
+
+The server runs with OPcache but without the OPcache JIT (`-d opcache.jit=disable`): setup-php enables the tracing JIT, and under it `php -S` crashed with SIGSEGV partway through a suite. The server's exit status is appended to `/tmp/php-server.log` (uploaded as `php-server-logs-*` on failure). If the server is gone when the tests end, the step "Report PHP server status" prints the log tail, kernel messages about segfaults, OOM and killed processes, and a gdb backtrace of the core file.
+
 ---
 
 ## Security
