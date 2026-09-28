@@ -737,8 +737,8 @@ jobs:
           # a log that stops mid-request. The wrapper below waits for php and
           # appends its exit status to the server log (128 + N means signal N).
           # A core file is written for a crash; "Report PHP server status"
-          # prints its backtrace. RLIMIT_CORE is raised for php alone, so no
-          # other process in the job starts writing cores.
+          # prints its backtrace. RLIMIT_CORE is raised only for php and its
+          # child processes, so the rest of the job does not start writing cores.
           # php runs as the user that creates the directory, so it can write
           # its core there; no world-writable mode is needed.
           mkdir -p /tmp/php-cores
@@ -750,9 +750,11 @@ jobs:
           # the built-in server is governed by `opcache.enable`, not
           # `opcache.enable_cli`, so `php -S` ran TYPO3 under the tracing JIT.
           # In t3x-nr-mcp-agent that crashed the server with SIGSEGV partway
-          # through the suite (backtrace: zend_hash_find <- zend_std_get_method
-          # <- opcache.so <- JIT code), after which every test failed with
-          # connection errors. OPcache itself stays on.
+          # through the suite, after which every test failed with connection
+          # errors. The backtrace (zend_hash_find <- zend_std_get_method <-
+          # opcache.so <- an address in no loaded library) is consistent with
+          # JIT-compiled code; the core has no symbols to prove it. Without the
+          # JIT, 20 of 20 runs passed. OPcache itself stays on.
           server_ini=(-d opcache.jit=disable)
           echo "OPcache settings of the server:"
           php "${server_ini[@]}" -i | grep -E '^opcache\.(enable|jit|jit_buffer_size) ' || true
@@ -797,17 +799,45 @@ jobs:
 
       # Runs before "Stop PHP server", so a server that is gone here died on
       # its own and was not stopped by this workflow. It never changes the job
-      # result; it only reports what the kernel and the core file say.
+      # result; it only reports what the kernel and the core files say.
       - name: Report PHP server status
         if: inputs.setup-script == '' && always()
+        env:
+          PHP_CLI_SERVER_WORKERS: ${{ inputs.php-server-workers }}
         run: |
           pid=$(cat /tmp/php-server.pid 2>/dev/null || true)
-          if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+          if [[ -z "$pid" ]]; then
+            # An earlier step (composer, TYPO3 setup, npm, Playwright) failed
+            # before "Start PHP server" ran.
+            echo "PHP server was not started."
+            exit 0
+          fi
+
+          shopt -s nullglob
+          cores=(/tmp/php-cores/core.*)
+          alive=false
+          dead_workers=0
+          if kill -0 "$pid" 2>/dev/null; then
+            alive=true
+            # With PHP_CLI_SERVER_WORKERS > 1 the master forks the workers and
+            # reaps them only at shutdown, so a worker that crashed stays a
+            # zombie child of the master while the master keeps running.
+            if [[ "$PHP_CLI_SERVER_WORKERS" =~ ^[0-9]+$ ]] && (( PHP_CLI_SERVER_WORKERS > 1 )); then
+              dead_workers=$(ps -o stat= --ppid "$pid" | awk '/^Z/ { n++ } END { print n + 0 }')
+            fi
+          fi
+
+          if [[ "$alive" == true ]] && (( dead_workers == 0 && ${#cores[@]} == 0 )); then
             echo "PHP server (pid ${pid}) is still running."
             exit 0
           fi
 
-          echo "::error::The PHP built-in server (pid ${pid:-unknown}) stopped during the run; the test failures after that point are connection errors, not test results."
+          if [[ "$alive" == true ]]; then
+            echo "PHP server (pid ${pid}) is still running."
+            echo "::error::PHP built-in server: ${dead_workers} worker process(es) died, ${#cores[@]} core file(s) written; the requests being handled there failed."
+          else
+            echo "::error::The PHP built-in server (pid ${pid}) stopped during the run; the test failures after that point are connection errors, not test results."
+          fi
           echo "::group::Last 40 lines of /tmp/php-server.log"
           tail -n 40 /tmp/php-server.log 2>/dev/null || true
           echo "::endgroup::"
@@ -822,22 +852,22 @@ jobs:
           fi
           echo "::endgroup::"
 
-          shopt -s nullglob
-          cores=(/tmp/php-cores/core.*)
           if (( ${#cores[@]} == 0 )); then
             echo "No core file in /tmp/php-cores."
             exit 0
           fi
-          echo "::group::Backtrace from ${cores[0]}"
           if ! command -v gdb > /dev/null; then
             sudo timeout 300 apt-get install -y -qq gdb > /dev/null 2>&1 || true
           fi
-          if command -v gdb > /dev/null; then
-            timeout 120 gdb -batch -ex 'info sharedlibrary' -ex 'bt' "$(command -v php)" "${cores[0]}" 2>&1 | tail -n 80 || true
-          else
-            echo "gdb could not be installed; core file left at ${cores[0]}."
-          fi
-          echo "::endgroup::"
+          for core in "${cores[@]}"; do
+            echo "::group::Backtrace from ${core}"
+            if command -v gdb > /dev/null; then
+              timeout 120 gdb -batch -ex 'bt' "$(command -v php)" "$core" 2>&1 | grep -E '^#[0-9]+ ' | head -n 40 || true
+            else
+              echo "gdb could not be installed; core file left at ${core}."
+            fi
+            echo "::endgroup::"
+          done
 
       # ─── Common: compute artifact name suffix ──────────────────────
       # Sanitize matrix values for safe artifact names. GitHub allows
