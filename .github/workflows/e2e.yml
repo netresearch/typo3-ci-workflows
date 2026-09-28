@@ -759,6 +759,7 @@ jobs:
           echo "OPcache settings of the server:"
           php "${server_ini[@]}" -i | grep -E '^opcache\.(enable|jit|jit_buffer_size) ' || true
 
+          rm -f /tmp/php-server.up
           : > /tmp/php-server.log
           (
             ulimit -c unlimited 2>/dev/null || true
@@ -787,6 +788,9 @@ jobs:
             cat /tmp/php-server.log
             exit 1
           fi
+          # Tells "Report PHP server status" that the server answered once, so
+          # a server that is gone later died during the tests.
+          touch /tmp/php-server.up
 
       - name: Run E2E tests
         if: inputs.setup-script == ''
@@ -814,7 +818,15 @@ jobs:
           fi
 
           shopt -s nullglob
-          cores=(/tmp/php-cores/core.*)
+          # The core pattern applies to every process in the job, so only
+          # `core.php*` belongs to the server; any other core is listed by name.
+          cores=(/tmp/php-cores/core.php*)
+          other_cores=()
+          for f in /tmp/php-cores/core.*; do
+            [[ "$f" == /tmp/php-cores/core.php* ]] || other_cores+=("$f")
+          done
+          up=false
+          [[ -f /tmp/php-server.up ]] && up=true
           alive=false
           dead_workers=0
           if kill -0 "$pid" 2>/dev/null; then
@@ -823,16 +835,25 @@ jobs:
             # reaps them only at shutdown, so a worker that crashed stays a
             # zombie child of the master while the master keeps running.
             if [[ "$PHP_CLI_SERVER_WORKERS" =~ ^[0-9]+$ ]] && (( PHP_CLI_SERVER_WORKERS > 1 )); then
-              dead_workers=$(ps -o stat= --ppid "$pid" | awk '/^Z/ { n++ } END { print n + 0 }')
+              # Only php children count: a request may spawn other programs.
+              dead_workers=$(ps -o stat=,comm= --ppid "$pid" | awk '$1 ~ /^Z/ && $2 ~ /^php/ { n++ } END { print n + 0 }')
             fi
           fi
 
-          if [[ "$alive" == true ]] && (( dead_workers == 0 && ${#cores[@]} == 0 )); then
+          if (( ${#other_cores[@]} > 0 )); then
+            echo "Core files from other programs (not examined): ${other_cores[*]}"
+          fi
+
+          if [[ "$up" == true && "$alive" == true ]] && (( dead_workers == 0 && ${#cores[@]} == 0 )); then
             echo "PHP server (pid ${pid}) is still running."
             exit 0
           fi
 
-          if [[ "$alive" == true ]]; then
+          if [[ "$up" != true ]]; then
+            # "Start PHP server" already failed the job; this only adds the
+            # kernel messages and backtraces below.
+            echo "PHP server (pid ${pid}) did not come up; see the \"Start PHP server\" step."
+          elif [[ "$alive" == true ]]; then
             echo "PHP server (pid ${pid}) is still running."
             echo "::error::PHP built-in server: ${dead_workers} worker process(es) died, ${#cores[@]} core file(s) written; the requests being handled there failed."
           else
@@ -853,7 +874,7 @@ jobs:
           echo "::endgroup::"
 
           if (( ${#cores[@]} == 0 )); then
-            echo "No core file in /tmp/php-cores."
+            echo "No php core file in /tmp/php-cores."
             exit 0
           fi
           if ! command -v gdb > /dev/null; then
