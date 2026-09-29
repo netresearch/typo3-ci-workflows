@@ -32,6 +32,10 @@
 #      warning. The package name: CR in all three. The TYPO3 line: CR in both
 #      warnings, LF in the disjoint error, where it has to parse. The pin: CR.
 #      typo3-packages: LF.
+#  12. With a committed composer.lock, `composer install` after the pins
+#      refused the lock they had put out of date (#259). A partial update of
+#      the changed packages was no fix: it could not resolve a pin on a
+#      dependency of a package outside that list.
 #
 # Every block runs under the runner's own shell flags (`bash --noprofile --norc
 # -eo pipefail`), in a shell of its own; the composer stubs reach it as
@@ -130,11 +134,12 @@ fi
 # Runs the install block in a fixture checkout with a composer that records its
 # arguments one call per line. Prints the exit status; the call log and the
 # output land in ${TMP}/case/.
-run_install() { # composer.json, typo3-version, lowest-deps, pin-packages, [PATH], [typo3-packages]
+run_install() { # composer.json, typo3-version, lowest-deps, pin-packages, [PATH], [typo3-packages], [composer.lock]
     local dir="${TMP}/case"
     rm -rf "${dir}"
     mkdir -p "${dir}/work/a"
     printf '%s\n' "${1}" > "${dir}/work/composer.json"
+    [[ -z "${7:-}" ]] || printf '%s\n' "${7}" > "${dir}/work/composer.lock"
     # A file the glob `a/b:*` would match, were it expanded.
     : > "${dir}/work/a/b:GLOBBED"
     {
@@ -192,6 +197,30 @@ if [[ "${status}" -eq 0 ]] \
     pass 'pins reach composer after --, unglobbed, require-dev ones with --dev'
 else
     fail "pins: exit ${status}, calls $(tr '\n' '|' < "${calls}")"
+fi
+
+# With a committed composer.lock, install would refuse the lock the pins just
+# put out of date: the cell re-resolves in full instead, with no package list,
+# so a pin on a dependency of a locked package can resolve as it does without
+# a lock.
+status="$(run_install "${CJ}" '^13.4' false 'GuzzleHttp/Guzzle:^7.10 mikey179/vfsstream:^1.6.12' '' '' '{}')"
+calls="${TMP}/case/calls"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qxF 'update --with-all-dependencies --prefer-dist --no-progress' "${calls}" \
+    && ! grep -q '^install' "${calls}"; then
+    pass 'with a composer.lock, pins re-resolve everything instead of installing'
+else
+    fail "pins with composer.lock: exit ${status}, calls $(tr '\n' '|' < "${calls}")"
+fi
+
+# lowest-deps resolves everything anew, lock or not.
+status="$(run_install "${CJ}" '^13.4' true 'guzzlehttp/guzzle:^7.10' '' '' '{}')"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls" \
+    && ! grep -q '^install\|with-all-dependencies' "${TMP}/case/calls"; then
+    pass 'lowest-deps with a composer.lock still updates everything'
+else
+    fail "lowest-deps with composer.lock: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls")"
 fi
 
 # The extension's own floor survives: every disjunct of composer.json's

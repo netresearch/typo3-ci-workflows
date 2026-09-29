@@ -316,7 +316,7 @@ Two inputs add one extra cell, reported as its own check, that runs the unit and
 | Inputs | Check name | Resolution |
 |--------|------------|------------|
 | `lowest-deps: true` | `Lowest dependencies` | `composer update --prefer-lowest --prefer-stable` |
-| `pin-packages` only | `Pinned dependencies` | `composer install`, as in every other cell, after the pins |
+| `pin-packages` only | `Pinned dependencies` | `composer install`, as in every other cell, after the pins; with a committed `composer.lock`, a full `composer update --with-all-dependencies` instead, since install refuses a lock the pins put out of date |
 | both | `Lowest dependencies` | the pins, then `--prefer-lowest` within them |
 
 - **Cell:** the lowest PHP of `php-versions`, then the lowest TYPO3 line of `typo3-versions` within it, skipping `matrix-exclude` (a partial entry such as `{"typo3": "^12.4"}` excludes that whole column, as it does for the matrix). The TYPO3 line is required first, as in every cell, so `--prefer-lowest` picks the oldest release of that line — not of your whole `typo3/cms-*` range. Unlike the matrix cells, the line is ANDed with the constraint `composer.json` already declares: `^13.4` against a declared `^13.4.21 || ^14.3` resolves from 13.4.21, not 13.4.0. **The lowest line of `typo3-versions` must therefore overlap that constraint**: a matrix line `composer.json` rules out (`^13.4` against `^14.3`) leaves nothing to install, and the cell fails with an error naming both constraints rather than a solver error. Align `typo3-versions` with `composer.json`, or exclude the line with `matrix-exclude`.

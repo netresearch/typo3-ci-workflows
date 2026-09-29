@@ -252,7 +252,8 @@ on:
           Space-separated "vendor/package:constraint" pairs (e.g.
           "guzzlehttp/guzzle:^7.10") applied with composer require --no-update
           in that extra cell only. Setting this alone also runs the cell, with
-          the newest versions of everything else — the narrower, cheaper choice
+          the newest versions of everything else (a committed composer.lock is
+          re-resolved in full) — the narrower, cheaper choice
           when one package's older major matters more than the rest. Combined
           with lowest-deps, the pins narrow the lowest resolution further.
         type: string
@@ -1953,8 +1954,18 @@ jobs:
 
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
+          # A committed composer.lock no longer matches the constraints just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside them. With a lock, the cell therefore resolves
+          # everything anew, as install does without one: the pins hold, and
+          # every other package gets its newest allowed version. A partial
+          # update would not do: -W on the TYPO3 packages moves their whole
+          # tree anyway, and a pin on a dependency of a locked package outside
+          # that list cannot resolve.
           if [[ "$LOWEST_DEPS" == "true" ]]; then
             composer_retry update --prefer-lowest --prefer-stable --prefer-dist --no-progress
+          elif [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
           else
             composer_retry install --prefer-dist --no-progress
           fi
