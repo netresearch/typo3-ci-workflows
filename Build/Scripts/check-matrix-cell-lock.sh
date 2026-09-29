@@ -110,13 +110,19 @@ EOF
 
 calls="${TMP}/case/calls"
 out="${TMP}/case/out"
-show() { printf 'exit %s, calls %s, out %s' "${1}" "$(tr '\n' '|' < "${calls}" 2>/dev/null)" "$(tr '\r\n' '||' < "${out}" 2>/dev/null)"; }
+show() {
+    printf 'exit %s, calls %s, out %s' "${1}" "$(tr '\n' '|' < "${calls}" 2>/dev/null)" "$(tr '\r\n' '||' < "${out}" 2>/dev/null)"
+    return
+}
+
+# The composer call a real install is logged as.
+INSTALL_CALL='install --prefer-dist --no-progress'
 
 for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" no 0 0)"
     if [[ "${status}" == 0 ]] \
         && grep -qxF 'require --no-update typo3/cms-core:^13.4' "${calls}" \
-        && grep -qxF 'install --prefer-dist --no-progress' "${calls}" \
+        && grep -qxF "${INSTALL_CALL}" "${calls}" \
         && ! grep -q '^update\|--dry-run' "${calls}"; then
         pass "${job}: without a composer.lock, the cell installs"
     else
@@ -126,7 +132,7 @@ for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" yes 0 0)"
     if [[ "${status}" == 0 ]] \
         && grep -qxF 'install --dry-run --no-progress' "${calls}" \
-        && grep -qxF 'install --prefer-dist --no-progress' "${calls}" \
+        && grep -qxF "${INSTALL_CALL}" "${calls}" \
         && ! grep -q '^update' "${calls}" \
         && ! grep -q '::notice::\|::error::' "${out}"; then
         pass "${job}: a composer.lock that fits the cell is installed, not updated"
@@ -137,7 +143,7 @@ for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" yes 4 0)"
     if [[ "${status}" == 0 ]] \
         && grep -qxF 'update --with-all-dependencies --prefer-dist --no-progress' "${calls}" \
-        && ! grep -qxF 'install --prefer-dist --no-progress' "${calls}" \
+        && ! grep -qxF "${INSTALL_CALL}" "${calls}" \
         && grep -q "^::notice::composer.lock does not satisfy the constraints of this cell (${job}, PHP [^,]*, TYPO3 ^13.4): composer install exits 4" "${out}" \
         && grep -qxF 'dry-run output' "${out}" \
         && ! grep -q '::error::' "${out}"; then
@@ -148,7 +154,7 @@ for job in "${JOBS[@]}"; do
 
     status="$(run_install "${job}" yes 2 2)"
     if [[ "${status}" == 2 ]] \
-        && grep -qxF 'install --prefer-dist --no-progress' "${calls}" \
+        && grep -qxF "${INSTALL_CALL}" "${calls}" \
         && ! grep -q '^update' "${calls}" \
         && ! grep -q '::notice::' "${out}"; then
         pass "${job}: any other install failure fails the step, without an update"
@@ -161,7 +167,7 @@ done
 # is no reason to update.
 status="$(run_install unit-tests yes 100 0 '^13.4' yes)"
 if [[ "${status}" == 0 ]] \
-    && [[ "$(grep -cxF 'install --prefer-dist --no-progress' "${calls}")" == 2 ]] \
+    && [[ "$(grep -cxF "${INSTALL_CALL}" "${calls}")" == 2 ]] \
     && ! grep -q '^update' "${calls}"; then
     pass 'a network error in the install is retried through composer_retry, not updated'
 else
