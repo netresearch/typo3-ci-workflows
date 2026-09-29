@@ -883,7 +883,10 @@ jobs:
           for core in "${cores[@]}"; do
             echo "::group::Backtrace from ${core}"
             if command -v gdb > /dev/null; then
-              timeout 120 gdb -batch -ex 'bt' "$(command -v php)" "$core" 2>&1 | grep -E '^#[0-9]+ ' | head -n 40 || true
+              # gdb prints frame #0 once when it loads the core and again as the
+              # first line of `bt`; the marker keeps only the output of `bt`.
+              timeout 120 gdb -batch -ex 'echo --- bt ---\n' -ex 'bt' "$(command -v php)" "$core" 2>&1 \
+                | awk '$0 == "--- bt ---" { on = 1; next } on && /^#[0-9]+ / { print; if (++n == 40) exit }' || true
             else
               echo "gdb could not be installed; core file left at ${core}."
             fi
