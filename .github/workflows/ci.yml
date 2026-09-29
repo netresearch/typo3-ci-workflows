@@ -318,6 +318,111 @@ env:
         sleep $((attempt * 5))
       done
     }
+  # The matrix cells require their TYPO3 line with `composer require
+  # --no-update` and then install. A committed composer.lock is installed as
+  # it is wherever it can serve the cell. It cannot in two cases, and only in
+  # those does the cell resolve everything anew, with a notice, as it would
+  # without a lock (see the lowest-deps job for why not a partial update):
+  #   - `composer install` exits 4 (Installer::ERROR_LOCK_FILE_INVALID): the
+  #     lock lies outside the cell's constraints, e.g. a lock at 14.3 in the
+  #     ^13.4 cell;
+  #   - it exits 2 (a solver problem) and `composer check-platform-reqs --lock`
+  #     names `php` as the only failing requirement: the lock was built on a
+  #     newer PHP than the cell's, e.g. PHPUnit 12 locked on 8.3 in the 8.2
+  #     cell. A missing or failing `ext-*` is a real platform problem and
+  #     still fails, with or without a PHP mismatch beside it.
+  # Neither fallback runs when config.platform.php is set: the update would
+  # resolve for that value, not for the PHP the cell runs (an override of
+  # 8.3.0 in the 8.2 cell installed PHPUnit 12 on PHP 8.2), so the cell fails
+  # on composer's own message, as it did before. `composer config
+  # platform.php` answers from composer.json and from the global config in
+  # COMPOSER_HOME alike, and either one steers the update.
+  # Both fallbacks need a lock that was in sync with the committed
+  # composer.json, before this job's own `composer remove`/`require
+  # --no-update` changed it: the lock's content-hash must equal Composer's
+  # Locker::getContentHash() of `git show HEAD:./composer.json`, and both
+  # must be 32 hex digits (a PHP notice printed before the hash, as Composer
+  # 2.2 does on PHP 8.4 with display_errors on, is "could not check", not
+  # "stale"). A stale lock that would have taken a fallback is not
+  # re-resolved: the cell fails with an ::error:: that says so. A stale lock
+  # the cell can install still installs, with Composer's warning, as before.
+  # The probe is a dry run, outside composer_retry: that would annotate the
+  # expected exit as an error. Its output is shown only when the cell falls
+  # back or the lock is stale, without the workflow commands Composer adds on
+  # GitHub Actions. On any other result the real install runs through
+  # composer_retry, so a network error is retried and every other failure
+  # fails the step with composer's own message.
+  COMPOSER_INSTALL_CELL: |
+    composer_lock_hash_of_head() {
+      # shellcheck disable=SC2016 # the $ belong to PHP, not to the shell
+      git show HEAD:./composer.json | php -d display_errors=stderr -r '
+        Phar::loadPhar($argv[1], "composer.phar");
+        require "phar://composer.phar/vendor/autoload.php";
+        echo Composer\Package\Locker::getContentHash(stream_get_contents(STDIN));
+      ' -- "$(type -P composer)"
+    }
+    composer_install_cell() {
+      local status=0 out reason="" platform failing required cell message locked expected
+      if [[ ! -f composer.lock ]]; then
+        composer_retry install --prefer-dist --no-progress
+        return
+      fi
+      out=$(composer install --dry-run --no-progress 2>&1) || status=$?
+      if [[ "$status" == 4 || "$status" == 2 ]] \
+        && composer config platform.php > /dev/null 2>&1; then
+        message="composer.json sets config.platform.php, so this cell does not"
+        echo "::notice::$message re-resolve a composer.lock that does not install."
+      elif [[ "$status" == 4 ]]; then
+        reason="composer install exits 4: the lock does not satisfy the constraints of this cell"
+      elif [[ "$status" == 2 ]]; then
+        # check-platform-reqs exits 1 for a failing and 2 for a missing
+        # requirement; the JSON lists both, so its exit status is not needed.
+        platform=$(composer check-platform-reqs --lock --format=json 2>/dev/null) || true
+        failing=$(jq -r '[.[] | select(.status != "success") | .name] | unique | join(" ")' \
+          <<< "$platform" 2>/dev/null) || failing=""
+        if [[ "$failing" == php ]]; then
+          required=$(jq -r '[.[] | select(.status != "success") | .failed_requirement
+            | "\(.source) requires php \(.constraint)"] | first' <<< "$platform")
+          reason="composer install exits 2: the locked packages need another PHP"
+          reason+=" version ($required)"
+        fi
+      fi
+      if [[ -z "$reason" ]]; then
+        composer_retry install --prefer-dist --no-progress
+        return
+      fi
+      # Composer's own `::error ::` line would annotate a cell that passes.
+      printf '%s\n' "$out" | sed '/^::/d'
+      cell="${GITHUB_JOB:-this job}, PHP $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo '?')"
+      cell+=", TYPO3 ${TYPO3_VERSION:-?}"
+      locked=$(jq -r '."content-hash" // empty' composer.lock 2>/dev/null) || locked=""
+      expected=$(composer_lock_hash_of_head 2>/dev/null) || expected=""
+      if [[ ! "$locked" =~ ^[0-9a-f]{32}$ || ! "$expected" =~ ^[0-9a-f]{32}$ ]]; then
+        message="Could not check composer.lock against the committed composer.json"
+        message+=" (lock content-hash '$locked', composer.json '$expected'), so this"
+        message+=" cell ($cell) does not re-resolve it: $reason."
+        status=1
+      elif [[ "$locked" != "$expected" ]]; then
+        message="composer.lock is out of sync with the committed composer.json"
+        message+=" (content-hash $locked, composer.json gives $expected). Run composer"
+        message+=" update and commit composer.lock. In this cell ($cell): $reason."
+        status=1
+      else
+        message="composer.lock cannot be installed in this cell ($cell). $reason. The"
+        message+=" cell resolves everything anew with composer update --with-all-dependencies"
+        message+=" instead of installing the locked versions."
+        status=0
+      fi
+      message=${message//%/%25}
+      message=${message//$'\r'/%0D}
+      message=${message//$'\n'/%0A}
+      if [[ "$status" != 0 ]]; then
+        echo "::error::$message"
+        return 1
+      fi
+      echo "::notice::$message"
+      composer_retry update --with-all-dependencies --prefer-dist --no-progress
+    }
 
 jobs:
   preflight:
@@ -684,7 +789,8 @@ jobs:
           composer require --dev --no-update "phpunit/phpunit:<13"
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          eval "$COMPOSER_INSTALL_CELL"
+          composer_install_cell
 
       - name: Run PHPStan
         env:
@@ -867,7 +973,8 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          eval "$COMPOSER_INSTALL_CELL"
+          composer_install_cell
 
           RESOLVED=$(composer show phpunit/phpunit --format=json 2>/dev/null | jq -r '.versions[0] // empty') || RESOLVED=""
           echo "RESOLVED_PHPUNIT=${RESOLVED:-not installed}" >> "$GITHUB_ENV"
@@ -1175,7 +1282,8 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          eval "$COMPOSER_INSTALL_CELL"
+          composer_install_cell
 
       - name: Run unit tests
         env:
@@ -1322,7 +1430,8 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          eval "$COMPOSER_INSTALL_CELL"
+          composer_install_cell
 
       - name: Run acceptance tests
         env:
@@ -1460,7 +1569,8 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          eval "$COMPOSER_INSTALL_CELL"
+          composer_install_cell
 
       - name: Run functional tests
         env:
@@ -1605,7 +1715,8 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          eval "$COMPOSER_INSTALL_CELL"
+          composer_install_cell
 
       - name: Run functional tests
         env:

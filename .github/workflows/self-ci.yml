@@ -196,6 +196,20 @@ jobs:
         # composer/semver from the composer phar setup-php installs.
         run: bash Build/Scripts/check-lowest-deps-cell.sh .github/workflows/ci.yml
 
+      - name: Check the matrix cells handle a committed composer.lock
+        # `composer install` after the cell's `composer require --no-update`
+        # refused a lock outside the cell's TYPO3 line (exit 4, #264). This
+        # runs the six jobs' own install blocks with ci.yml's COMPOSER_RETRY
+        # and COMPOSER_INSTALL_CELL against a stubbed composer: a fitting lock
+        # installs; exit 4, or exit 2 with `php` the only failing platform
+        # requirement, falls back to update -W with a notice, but only for a
+        # lock in sync with the committed composer.json and without
+        # config.platform.php; a stale lock, a missing ext-* and any other
+        # failure fail; a network error is retried; no lock installs. In this
+        # job because the freshness check computes Composer's content-hash
+        # with the composer phar setup-php installs.
+        run: bash Build/Scripts/check-matrix-cell-lock.sh .github/workflows/ci.yml
+
       - name: Smoke test rector config factory
         run: |
           cat > /tmp/smoke-rector.php << 'PHPEOF'
@@ -344,6 +358,7 @@ jobs:
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
+          shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
