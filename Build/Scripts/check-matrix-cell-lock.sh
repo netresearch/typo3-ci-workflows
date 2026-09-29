@@ -18,7 +18,8 @@
 #   - with a missing ext-*, alone or beside a PHP mismatch: fail, no update;
 #   - with config.platform.php set: no fallback at all, the install fails;
 #   - with a lock out of sync with the committed composer.json (content-hash),
-#     or one that cannot be checked: no fallback, an ::error:: naming it;
+#     or one that cannot be checked (also: anything but 32 hex digits from
+#     the hash computation): no fallback, an ::error:: naming it;
 #   - on any other install failure: fail, without falling back to update;
 #   - on a network error: retry the install through composer_retry.
 #
@@ -146,6 +147,14 @@ composer() {
     return 0
 }
 sleep() { return 0; }
+# PHP_NOISE: the content-hash computation prints a notice to stdout first, as
+# Composer 2.2 does on PHP 8.4 with display_errors on.
+php() {
+    if [[ -n "${PHP_NOISE:-}" && "$*" == *getContentHash* ]]; then
+        printf 'Deprecated: Return type of Composer\\Repository\\ArrayRepository::count() should be compatible\n'
+    fi
+    command php "$@"
+}
 EOF
         printf '%s\n' "${block}"
     } > "${dir}/script.sh"
@@ -155,6 +164,7 @@ EOF
         COMPOSER_RETRY="${COMPOSER_RETRY_SNIPPET}" COMPOSER_INSTALL_CELL="${INSTALL_CELL_SNIPPET}" \
             DRY_STATUS="${3}" INSTALL_STATUS="${4}" INSTALL_FLAKY="${6:-}" GITHUB_JOB="${1}" \
             PLATFORM_JSON="${7:-[]}" PLATFORM_STATUS="${8:-0}" PLATFORM_PHP="${CASE_PLATFORM_PHP:-}" \
+            PHP_NOISE="${CASE_PHP_NOISE:-}" \
             TYPO3_VERSION="${5:-^13.4}" TYPO3_PACKAGES='["typo3/cms-core"]' GITHUB_ENV="${dir}/env" \
             "${RUNNER_SHELL[@]}" "${dir}/script.sh"
     ) > "${dir}/out" 2>&1
@@ -297,6 +307,18 @@ if [[ "${status}" == 1 ]] \
     pass 'a lock that cannot be checked against the committed composer.json fails, without an update'
 else
     fail "unverifiable lock: $(show "${status}")"
+fi
+
+# Output around the hash is "could not check", never "stale": a notice before
+# a correct hash must not be read as a different hash.
+status="$(CASE_PHP_NOISE=yes run_install unit-tests yes 4 0)"
+if [[ "${status}" == 1 ]] \
+    && ! grep -q "${ANY_UPDATE}" "${calls}" \
+    && ! grep -qF 'out of sync' "${out}" \
+    && grep -qF "::error::Could not check composer.lock against the committed composer.json (lock content-hash '${FRESH_HASH}', composer.json 'Deprecated: " "${out}"; then
+    pass 'a notice printed before the content-hash is reported as unverifiable, not as stale'
+else
+    fail "notice before the content-hash: $(show "${status}")"
 fi
 
 # A network error in the install is retried by composer_retry, as before, and
