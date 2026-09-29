@@ -684,7 +684,16 @@ jobs:
           composer require --dev --no-update "phpunit/phpunit:<13"
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          # A committed composer.lock no longer matches the TYPO3 line just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside it. With a lock, the cell therefore resolves
+          # everything anew, as install does without one (see the
+          # lowest-deps job for why not a partial update).
+          if [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
 
       - name: Run PHPStan
         env:
@@ -867,7 +876,16 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          # A committed composer.lock no longer matches the TYPO3 line just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside it. With a lock, the cell therefore resolves
+          # everything anew, as install does without one (see the
+          # lowest-deps job for why not a partial update).
+          if [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
 
           RESOLVED=$(composer show phpunit/phpunit --format=json 2>/dev/null | jq -r '.versions[0] // empty') || RESOLVED=""
           echo "RESOLVED_PHPUNIT=${RESOLVED:-not installed}" >> "$GITHUB_ENV"
@@ -1175,7 +1193,16 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          # A committed composer.lock no longer matches the TYPO3 line just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside it. With a lock, the cell therefore resolves
+          # everything anew, as install does without one (see the
+          # lowest-deps job for why not a partial update).
+          if [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
 
       - name: Run unit tests
         env:
@@ -1322,7 +1349,16 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          # A committed composer.lock no longer matches the TYPO3 line just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside it. With a lock, the cell therefore resolves
+          # everything anew, as install does without one (see the
+          # lowest-deps job for why not a partial update).
+          if [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
 
       - name: Run acceptance tests
         env:
@@ -1460,7 +1496,16 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          # A committed composer.lock no longer matches the TYPO3 line just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside it. With a lock, the cell therefore resolves
+          # everything anew, as install does without one (see the
+          # lowest-deps job for why not a partial update).
+          if [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
 
       - name: Run functional tests
         env:
@@ -1605,7 +1650,16 @@ jobs:
           done
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
-          composer_retry install --prefer-dist --no-progress
+          # A committed composer.lock no longer matches the TYPO3 line just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside it. With a lock, the cell therefore resolves
+          # everything anew, as install does without one (see the
+          # lowest-deps job for why not a partial update).
+          if [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
 
       - name: Run functional tests
         env:

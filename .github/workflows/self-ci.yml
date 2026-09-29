@@ -344,6 +344,7 @@ jobs:
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
+          shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
@@ -373,6 +374,13 @@ jobs:
         # bash with an empty script list and asserts a non-zero exit, rather
         # than grepping for `exit 1` — text can sit in a branch nothing reaches.
         run: bash Build/Scripts/check-empty-suite-fails.sh .github/workflows/ci.yml
+
+      - name: Check the matrix cells resolve anew with a committed composer.lock
+        # `composer install` after the cell's `composer require --no-update`
+        # refused a lock outside the cell's TYPO3 line (exit 4). This runs the
+        # six jobs' own install blocks against a stubbed composer, with and
+        # without a lock, and asserts update -W with one and install without.
+        run: bash Build/Scripts/check-matrix-cell-lock.sh .github/workflows/ci.yml
 
       - name: Check the PHP server backtrace prints each frame once
         # gdb prints frame #0 when it loads a core and again as the first line

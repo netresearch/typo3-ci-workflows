@@ -200,7 +200,7 @@ jobs:
 | `matrix-exclude` | string | `'[]'` | JSON array of `{php, typo3}` combinations to exclude |
 | `rector-php-version` | string | `''` | PHP version for the Rector job; empty falls back to `php-versions[0]`. Set it when `php-versions` varies by event — see below |
 | `cgl-php-version` | string | `''` | PHP version for the Code Style job; empty falls back to `php-versions[0]`. Set it when the code style toolchain needs a newer PHP than the repo's support floor (the dev meta-package requires `php ^8.2`) |
-| `typo3-packages` | string | `'["typo3/cms-core"]'` | JSON array of TYPO3 packages to require |
+| `typo3-packages` | string | `'["typo3/cms-core"]'` | JSON array of TYPO3 packages to require, per `typo3-versions` line, with `composer require --no-update` before `composer install`. With a committed `composer.lock`, the cell runs a full `composer update --with-all-dependencies` instead, since install refuses a lock the TYPO3 line puts out of date. |
 | `php-extensions` | string | `intl, mbstring, xml` | PHP extensions to install |
 | `run-lint` | boolean | `true` | Run PHP syntax lint |
 | `run-cgl` | boolean | `true` | Run code style check (PHP-CS-Fixer) |
@@ -316,7 +316,7 @@ Two inputs add one extra cell, reported as its own check, that runs the unit and
 | Inputs | Check name | Resolution |
 |--------|------------|------------|
 | `lowest-deps: true` | `Lowest dependencies` | `composer update --prefer-lowest --prefer-stable` |
-| `pin-packages` only | `Pinned dependencies` | `composer install`, as in every other cell, after the pins; with a committed `composer.lock`, a full `composer update --with-all-dependencies` instead, since install refuses a lock the pins put out of date |
+| `pin-packages` only | `Pinned dependencies` | as in every other cell, after the pins: `composer install`, or with a committed `composer.lock` a full `composer update --with-all-dependencies`, since install refuses a lock the pins put out of date |
 | both | `Lowest dependencies` | the pins, then `--prefer-lowest` within them |
 
 - **Cell:** the lowest PHP of `php-versions`, then the lowest TYPO3 line of `typo3-versions` within it, skipping `matrix-exclude` (a partial entry such as `{"typo3": "^12.4"}` excludes that whole column, as it does for the matrix). The TYPO3 line is required first, as in every cell, so `--prefer-lowest` picks the oldest release of that line — not of your whole `typo3/cms-*` range. Unlike the matrix cells, the line is ANDed with the constraint `composer.json` already declares: `^13.4` against a declared `^13.4.21 || ^14.3` resolves from 13.4.21, not 13.4.0. **The lowest line of `typo3-versions` must therefore overlap that constraint**: a matrix line `composer.json` rules out (`^13.4` against `^14.3`) leaves nothing to install, and the cell fails with an error naming both constraints rather than a solver error. Align `typo3-versions` with `composer.json`, or exclude the line with `matrix-exclude`.
