@@ -97,14 +97,12 @@ run_install() { # job, with-lock (yes|no), dry-run status, install status, [typo
     printf '%s\n' "${FIXTURE_JSON}" > "${dir}/work/composer.json"
     [[ "${2}" == yes ]] \
         && printf '{"content-hash":"%s"}\n' "${CASE_LOCK_HASH:-${FRESH_HASH}}" > "${dir}/work/composer.lock"
-    if [[ -z "${CASE_NO_GIT:-}" ]]; then
-        if ! { git -C "${dir}/work" init -q \
-            && git -C "${dir}/work" add composer.json \
-            && git -C "${dir}/work" -c user.name=check -c user.email=check@example.invalid \
-                -c commit.gpgsign=false commit -q -m fixture; }; then
-            printf 'gitfail'
-            return
-        fi
+    if [[ -z "${CASE_NO_GIT:-}" ]] && ! { git -C "${dir}/work" init -q \
+        && git -C "${dir}/work" add composer.json \
+        && git -C "${dir}/work" -c user.name=check -c user.email=check@example.invalid \
+            -c commit.gpgsign=false commit -q -m fixture; }; then
+        printf 'gitfail'
+        return
     fi
     block="$(step_run "${1}" 'Install TYPO3')"
     if [[ -z "${block}" || "${block}" == null ]]; then
@@ -175,6 +173,8 @@ INSTALL_CALL='install --prefer-dist --no-progress'
 UPDATE_CALL='update --with-all-dependencies --prefer-dist --no-progress'
 # Any composer update, partial or full.
 ANY_UPDATE='^update'
+# A notice annotation, anywhere in the output.
+NOTICE='::notice::'
 
 # check-platform-reqs --lock --format=json as Composer 2.10.3 prints it, one
 # passing entry plus the failing ones.
@@ -220,7 +220,7 @@ for job in "${JOBS[@]}"; do
     if [[ "${status}" == 2 ]] \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
         && ! grep -q "${ANY_UPDATE}" "${calls}" \
-        && ! grep -q '::notice::' "${out}"; then
+        && ! grep -q "${NOTICE}" "${out}"; then
         pass "${job}: any other install failure fails the step, without an update"
     else
         fail "${job} with another install failure: $(show "${status}")"
@@ -244,7 +244,7 @@ for job in "${JOBS[@]}"; do
     if [[ "${status}" == 2 ]] \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
         && ! grep -q "${ANY_UPDATE}" "${calls}" \
-        && ! grep -q '::notice::' "${out}"; then
+        && ! grep -q "${NOTICE}" "${out}"; then
         pass "${job}: a missing ext-* fails the step, without an update"
     else
         fail "${job} with a missing extension: $(show "${status}")"
@@ -254,7 +254,7 @@ for job in "${JOBS[@]}"; do
     if [[ "${status}" == 2 ]] \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
         && ! grep -q "${ANY_UPDATE}" "${calls}" \
-        && ! grep -q '::notice::' "${out}"; then
+        && ! grep -q "${NOTICE}" "${out}"; then
         pass "${job}: a missing ext-* beside a PHP mismatch fails the step, without an update"
     else
         fail "${job} with a missing extension and a PHP mismatch: $(show "${status}")"
@@ -267,7 +267,7 @@ for job in "${JOBS[@]}"; do
             && grep -qxF "${INSTALL_CALL}" "${calls}" \
             && ! grep -q "${ANY_UPDATE}" "${calls}" \
             && grep -qxF '::notice::composer.json sets config.platform.php, so this cell does not re-resolve a composer.lock that does not install.' "${out}" \
-            && [[ "$(grep -c '::notice::' "${out}")" == 1 ]]; then
+            && [[ "$(grep -c "${NOTICE}" "${out}")" == 1 ]]; then
             pass "${job}: with config.platform.php set, dry run exit ${dry} fails the step, without an update"
         else
             fail "${job} with config.platform.php, dry run exit ${dry}: $(show "${status}")"
@@ -279,7 +279,7 @@ for job in "${JOBS[@]}"; do
         if [[ "${status}" == 1 ]] \
             && ! grep -q "${ANY_UPDATE}" "${calls}" \
             && ! grep -qxF "${INSTALL_CALL}" "${calls}" \
-            && ! grep -q '::notice::' "${out}" \
+            && ! grep -q "${NOTICE}" "${out}" \
             && grep -qF "::error::composer.lock is out of sync with the committed composer.json (content-hash 0123456789abcdef0123456789abcdef, composer.json gives ${FRESH_HASH}). Run composer update and commit composer.lock. In this cell (${job}, PHP " "${out}"; then
             pass "${job}: a stale composer.lock (dry run exit ${dry}) fails with an error naming it, without an update"
         else
