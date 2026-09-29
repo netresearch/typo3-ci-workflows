@@ -11,6 +11,13 @@ on:
         description: Node.js version
         type: string
         default: '24'
+      npm-install-scripts:
+        description: >-
+          Run install scripts (dependencies' and the project's own postinstall,
+          prepare, ...) during npm ci / npm install. Off by default: an install
+          script is arbitrary code run at install time. Default mode only.
+        type: boolean
+        default: false
       typo3-setup-extensions:
         description: Run extension:setup after TYPO3 setup (default mode only)
         type: boolean
@@ -621,11 +628,23 @@ jobs:
 
       - name: Install npm dependencies
         if: inputs.setup-script == ''
+        # --ignore-scripts: a dependency's install script is arbitrary code run
+        # at install time (SonarCloud S6505). Playwright's browsers come from
+        # `playwright install` below, not from a postinstall. A caller that
+        # needs its install scripts sets `npm-install-scripts: true`, which
+        # passes --ignore-scripts=false. The `npm install` branch stays
+        # unlocked on purpose: it exists for repositories that do not commit
+        # package-lock.json.
+        env:
+          LOCKFILE_PRESENT: ${{ steps.npm-lockfile.outputs.present }}
+          # format() makes both a boolean true and the string 'true' compare
+          # as the string 'true', so no comparison crosses types.
+          IGNORE_SCRIPTS: ${{ format('{0}', inputs.npm-install-scripts) != 'true' }}
         run: |
-          if [[ "${{ steps.npm-lockfile.outputs.present }}" == "true" ]]; then
-            npm ci
+          if [[ "$LOCKFILE_PRESENT" == "true" ]]; then
+            npm ci --ignore-scripts="$IGNORE_SCRIPTS"
           else
-            npm install --no-audit --no-fund
+            npm install --ignore-scripts="$IGNORE_SCRIPTS" --no-audit --no-fund
           fi
 
       # The browser bundle is the one download this workflow never cached, and

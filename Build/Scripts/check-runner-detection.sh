@@ -29,8 +29,8 @@ trap 'rm -rf "${FIXTURES}"' EXIT
 
 FAILED=0
 
-fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; }
-pass() { printf '  ok: %s\n' "${1}"; }
+fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; return 0; }
+pass() { printf '  ok: %s\n' "${1}"; return 0; }
 
 # Builds an extension whose functional config lives at ${2} and declares two
 # testsuites, written multi-line (${3} = multi) or on one line (${3} = inline).
@@ -57,6 +57,13 @@ make_fixture() {
         printf '  </testsuites>\n</phpunit>\n'
     } > "${root}/${config}"
     printf '%s' "${root}"
+    return 0
+}
+
+# Writes a PHP file that holds nothing but an open tag.
+write_php_stub() {
+    printf '<?php\n' > "${1}"
+    return 0
 }
 
 # Sources the runner's detection block — everything above `# Option defaults`,
@@ -139,7 +146,7 @@ printf '<phpunit><testsuites><testsuite name="unit"><directory>../Tests/Unit</di
     > "${root}/Build/phpunit.xml"
 mkdir -p "${root}/Build/phpstan" "${root}/Build/rector"
 printf 'parameters:\n' > "${root}/Build/phpstan/phpstan.neon"
-printf '<?php\n' > "${root}/Build/rector/rector.php"
+write_php_stub "${root}/Build/rector/rector.php"
 notices="$(derive_stderr "${root}")"
 if [[ -z "${notices}" ]]; then
     pass "the reference layout produces no notice"
@@ -268,7 +275,7 @@ for layout in "${CGL_LAYOUTS[@]}"; do
     mkdir -p "${root}/$(dirname "${layout}")"
     printf '{"name":"netresearch/fixture-cgl","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
         > "${root}/composer.json"
-    printf '<?php\n' > "${root}/${layout}"
+    write_php_stub "${root}/${layout}"
     got="$(derive "${root}" CGL_CONFIG)"
     if [[ "${got}" == "${layout}" ]]; then
         pass "${layout} is found"
@@ -282,7 +289,7 @@ cgl_root_alt="${FIXTURES}/cgl-root-nondist"
 mkdir -p "${cgl_root_alt}"
 printf '{"name":"netresearch/fixture-cgl2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
     > "${cgl_root_alt}/composer.json"
-printf '<?php\n' > "${cgl_root_alt}/.php-cs-fixer.php"
+write_php_stub "${cgl_root_alt}/.php-cs-fixer.php"
 said="$(derive_stderr "${cgl_root_alt}" | grep 'cgl config' || true)"
 if [[ "${said}" == *"not the standard location"* ]]; then
     fail ".php-cs-fixer.php reported as non-standard: ${said}"
@@ -422,7 +429,7 @@ fr_std="${FIXTURES}/fractor-standard"
 mkdir -p "${fr_std}/Build/fractor"
 printf '{"name":"netresearch/fixture-fr","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
     > "${fr_std}/composer.json"
-printf '<?php\n' > "${fr_std}/Build/fractor/fractor.php"
+write_php_stub "${fr_std}/Build/fractor/fractor.php"
 got="$(derive "${fr_std}" FRACTOR_CONFIG)"
 if [[ "${got}" == "Build/fractor/fractor.php" ]]; then
     pass "the standard location is found (${got})"
@@ -434,7 +441,7 @@ fr_flat="${FIXTURES}/fractor-flat"
 mkdir -p "${fr_flat}/Build"
 printf '{"name":"netresearch/fixture-fr2","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
     > "${fr_flat}/composer.json"
-printf '<?php\n' > "${fr_flat}/Build/fractor.php"
+write_php_stub "${fr_flat}/Build/fractor.php"
 got="$(derive "${fr_flat}" FRACTOR_CONFIG)"
 if [[ "${got}" == "Build/fractor.php" ]]; then
     pass "the flat location is found too (${got})"

@@ -104,7 +104,32 @@ $cases['two blank lines are left to the rule that owns them'] = [
     'out' => inBody("        \$a = 1;\n\n\n        // still separated\n        \$b = 2;\n"),
 ];
 
-$status = runFixtures($cases, 'applyFixer', 12);
+$cases['a nested array in an entry above does not end the search'] = [
+    // The inner `[` has to close the region its `]` opened. If it did not, the
+    // scan would run past the list's own `[` and write into the list.
+    'in'  => inBody("        \$a = [\n            'a' => [1, 2],\n            // why b\n            'b' => 2,\n        ];\n"),
+    'out' => inBody("        \$a = [\n            'a' => [1, 2],\n            // why b\n            'b' => 2,\n        ];\n"),
+];
+
+$cases['a scan that reaches the open tag finds no list'] = [
+    // Characterization: nothing between the comment and `<?php` is a bracket,
+    // a block edge or a statement end. This pins what the fixer does there
+    // today; it is not a judgement that a comment inside an expression should
+    // be separated.
+    'in'  => "<?php\n\$a = 1 +\n    // why two\n    2;\n",
+    'out' => "<?php\n\$a = 1 +\n\n    // why two\n    2;\n",
+];
+
+$cases['a statement end stops the search before an enclosing parenthesis'] = [
+    // Characterization: a `for` header is the one place where a `;` sits
+    // between a comment and a bracket that encloses it without a `{` in
+    // between, so it is the only case that shows the `;` boundary at work.
+    // This pins what the fixer does there today, not what it should do.
+    'in'  => inBody("        for (\$i = 0;\n            // why three\n            \$i < 3; ++\$i) {\n        }\n"),
+    'out' => inBody("        for (\$i = 0;\n\n            // why three\n            \$i < 3; ++\$i) {\n        }\n"),
+];
+
+$status = runFixtures($cases, 'applyFixer', 15);
 
 // Tabs must reach the output, otherwise the rule fights the project's own
 // indentation on every run.
