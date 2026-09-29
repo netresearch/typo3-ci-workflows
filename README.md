@@ -302,7 +302,7 @@ Set `run-phpstan-unpinned: false` to skip the extra job (one job per run).
 
 ### Lowest and pinned dependencies
 
-Every matrix cell resolves the newest version each constraint allows. A `composer.json` that still admits an older major — `guzzlehttp/guzzle: ^7.10 || ^8.0`, say — is then never tested against it, and a defect that exists only there reaches installations unseen.
+Every matrix cell resolves the newest version each constraint allows, or installs a committed `composer.lock` that fits the cell. A `composer.json` that still admits an older major — `guzzlehttp/guzzle: ^7.10 || ^8.0`, say — is then never tested against it, and a defect that exists only there reaches installations unseen.
 
 Two inputs add one extra cell, reported as its own check, that runs the unit and functional tests (whichever of `run-unit-tests` / `run-functional-tests` is on) against a different resolution:
 

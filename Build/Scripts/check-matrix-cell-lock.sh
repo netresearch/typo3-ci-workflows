@@ -85,6 +85,8 @@ composer() {
     case "$*" in
         'install --dry-run'*)
             printf 'dry-run output\n'
+            # What Composer adds for a solver problem when GITHUB_ACTIONS is set.
+            [[ "$DRY_STATUS" != 2 ]] || printf '::error ::Your lock file does not contain a compatible set of packages. Please run composer update.%%0A%%0A  Problem 1\n'
             return "$DRY_STATUS" ;;
         'check-platform-reqs --lock --format=json')
             printf '%s\n' "$PLATFORM_JSON"
@@ -163,7 +165,7 @@ for job in "${JOBS[@]}"; do
         && ! grep -qxF "${INSTALL_CALL}" "${calls}" \
         && grep -q "^::notice::composer.lock cannot be installed in this cell (${job}, PHP [^,]*, TYPO3 ^13.4)\. composer install exits 4: the lock does not satisfy the constraints of this cell\. " "${out}" \
         && grep -qxF 'dry-run output' "${out}" \
-        && ! grep -q '::error::' "${out}"; then
+        && ! grep -q '^::error' "${out}"; then
         pass "${job}: a composer.lock composer refuses (exit 4) falls back to update, with a notice"
     else
         fail "${job} with a refused composer.lock: $(show "${status}")"
@@ -187,7 +189,7 @@ for job in "${JOBS[@]}"; do
         && grep -qF "::notice::composer.lock cannot be installed in this cell (${job}, PHP " "${out}" \
         && grep -qF 'composer install exits 2: the locked packages need another PHP version (phpunit/php-code-coverage requires php >=8.3).' "${out}" \
         && grep -qxF 'dry-run output' "${out}" \
-        && ! grep -q '::error::' "${out}"; then
+        && ! grep -q '^::error' "${out}"; then
         pass "${job}: a composer.lock built on a newer PHP falls back to update, with a notice"
     else
         fail "${job} with a PHP-only platform mismatch: $(show "${status}")"

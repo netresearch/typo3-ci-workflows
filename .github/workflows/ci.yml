@@ -333,7 +333,7 @@ env:
   #     still fails, with or without a PHP mismatch beside it.
   # The probe is a dry run, outside composer_retry: that would annotate the
   # expected exit as an error. Its output is shown only when the cell falls
-  # back; on any other result the real install runs through composer_retry,
+  # back, without the workflow commands Composer adds on GitHub Actions; on any other result the real install runs through composer_retry,
   # so a network error is retried and every other failure fails the step
   # with composer's own message.
   COMPOSER_INSTALL_CELL: |
@@ -359,7 +359,8 @@ env:
         composer_retry install --prefer-dist --no-progress
         return
       fi
-      printf '%s\n' "$out"
+      # Composer's own `::error ::` line would annotate a cell that passes.
+      printf '%s\n' "$out" | sed '/^::/d'
       cell="${GITHUB_JOB:-this job}, PHP $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo '?'), TYPO3 ${TYPO3_VERSION:-?}"
       message="composer.lock cannot be installed in this cell ($cell). $reason. The cell resolves everything anew with composer update --with-all-dependencies instead of installing the locked versions."
       message=${message//%/%25}
