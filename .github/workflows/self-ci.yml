@@ -186,6 +186,16 @@ jobs:
       - name: Check the blank-line-before-comment fixer
         run: php -dzend.assertions=1 Build/Scripts/check-blank-line-before-comment.php
 
+      - name: Check the lowest-deps cell's selection and install
+        # Runs ci.yml's lowest-deps run blocks against a stubbed `composer`
+        # function and fixture inputs: pins that start with "-", are empty,
+        # glob or are uppercase; partial matrix-exclude entries; the
+        # composer.json TYPO3 floor, a matrix line outside it, and empty
+        # require arrays; the database and coverage settings the matrix cells
+        # use (#258). In this job because the install block loads
+        # composer/semver from the composer phar setup-php installs.
+        run: bash Build/Scripts/check-lowest-deps-cell.sh .github/workflows/ci.yml
+
       - name: Smoke test rector config factory
         run: |
           cat > /tmp/smoke-rector.php << 'PHPEOF'
@@ -333,6 +343,7 @@ jobs:
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
+          shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses

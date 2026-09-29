@@ -1,0 +1,476 @@
+#!/usr/bin/env bash
+#
+# Runs the `run:` blocks of ci.yml's lowest-deps job (and the cell selection
+# of phpstan-unpinned, which shares its shape) against stubbed composer and
+# fixture inputs, and checks what they do. Each case below was a review finding
+# on the pull request that introduced the job (#258):
+#
+#   1. A pin whose name starts with "-" reached `composer require` as an
+#      option: `-dother/x:y` became --working-dir, exited 0, pinned nothing.
+#   2. A whitespace-only pin-packages ran a green cell that pinned nothing.
+#   3. `for pin in $PIN_PACKAGES` glob-expanded `a/b:*` against the checkout.
+#   4. matrix-exclude was compared as whole {php, typo3} tuples, so a partial
+#      entry such as {"typo3": "^13.4"} excluded nothing. GitHub excludes on a
+#      partial match.
+#   5. The matrix TYPO3 string replaced the extension's own floor, so
+#      `^13.4` against a composer.json `^13.4.21` let --prefer-lowest take
+#      13.4.0.
+#   6. `functional-test-db: ''` ran SQLite here and MySQL in the matrix.
+#   7. The cell ran without the coverage driver the matrix cells have.
+#   8. A matrix TYPO3 line outside composer.json's constraint became an
+#      unsatisfiable AND and died in the solver without saying why.
+#   9. `"require": []` aborted the step with a raw jq error, and
+#      `"require-dev": []` printed one while pinning.
+#  10. An uppercase pin name was rejected, although Composer accepts it.
+#  11. A newline in a composer.json constraint ended the annotation that
+#      quoted it, and the runner read the next line as a command. Every
+#      annotation has a case that puts a line break into each value it quotes
+#      from composer.json or the inputs; the load warning's reason, PHP's own
+#      message, is escaped too but not tested. The composer.json constraint:
+#      LF in the disjoint error, one case each for CR, LF and "%" in the
+#      parse warning, and all three together in one value in the load
+#      warning. The package name: CR in all three. The TYPO3 line: CR in both
+#      warnings, LF in the disjoint error, where it has to parse. The pin: CR.
+#      typo3-packages: LF.
+#  12. With a committed composer.lock, `composer install` after the pins
+#      refused the lock they had put out of date (#259). A partial update of
+#      the changed packages was no fix: it could not resolve a pin on a
+#      dependency of a package outside that list.
+#
+# Every block runs under the runner's own shell flags (`bash --noprofile --norc
+# -eo pipefail`), in a shell of its own; the composer stubs reach it as
+# functions (`export -f`) or through a sourced prelude. The install block needs
+# a real `php` and a `composer` phar on PATH: it loads composer/semver from the
+# phar to compare constraints.
+#
+# The blocks are executed, not grepped: a text probe would confirm a guard
+# that sits in a branch nothing reaches.
+#
+# Usage: check-lowest-deps-cell.sh [path/to/ci.yml]
+
+set -uo pipefail
+
+WORKFLOW="${1:-.github/workflows/ci.yml}"
+[[ -f "${WORKFLOW}" ]] || { printf 'not found: %s\n' "${WORKFLOW}" >&2; exit 2; }
+WORKFLOW="$(cd "$(dirname "${WORKFLOW}")" && pwd)/$(basename "${WORKFLOW}")"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
+FAILED=0
+
+fail() { printf '  FAIL: %s\n' "${1}" >&2; FAILED=1; return; }
+pass() { printf '  ok: %s\n' "${1}"; return; }
+
+step_run() { # job, step id or name
+    yq -o json '.jobs' "${WORKFLOW}" \
+        | jq -r --arg j "${1}" --arg s "${2}" \
+            '.[$j].steps[] | select(.id == $s or .name == $s) | .run'
+    return
+}
+
+# What GitHub runs a `run:` block with when the step names no shell.
+RUNNER_SHELL=(bash --noprofile --norc -eo pipefail)
+
+printf 'Lowest-deps cell (%s)\n' "${WORKFLOW}"
+
+# The harness itself: a failure on the left of a pipe must fail the block, as
+# it does on the runner. Plain `bash -e` would report success here.
+if "${RUNNER_SHELL[@]}" -c 'false | true' > /dev/null 2>&1; then
+    fail 'the blocks do not run with pipefail, unlike on the runner'
+else
+    pass 'blocks run with the runner shell flags (pipefail included)'
+fi
+
+# --- Cell selection ---------------------------------------------------------
+
+select_cell() { # job, php-versions, typo3-versions, matrix-exclude -> "php typo3" or "exit N"
+    local out status
+    out="${TMP}/select.out"
+    : > "${out}"
+    (
+        cd "${TMP}" || exit 99
+        PHP_VERSIONS="${2}" TYPO3_VERSIONS="${3}" MATRIX_EXCLUDE="${4}" GITHUB_OUTPUT="${out}" \
+            "${RUNNER_SHELL[@]}" -c "$(step_run "${1}" cell)"
+    ) > /dev/null 2>&1
+    status=$?
+    if [[ "${status}" -ne 0 ]]; then
+        printf 'exit %s' "${status}"
+        return
+    fi
+    printf '%s %s' "$(sed -n 's/^php=//p' "${out}")" "$(sed -n 's/^typo3=//p' "${out}")"
+}
+
+expect_cell() { # label, expected, job, php, typo3, exclude
+    local got
+    got="$(select_cell "${3}" "${4}" "${5}" "${6}")"
+    if [[ "${got}" == "${2}" ]]; then
+        pass "${3}: ${1} -> ${got}"
+    else
+        fail "${3}: ${1}: expected '${2}', got '${got}'"
+    fi
+    return
+}
+
+P='["8.3","8.2"]'
+T='["^14.3","^13.4"]'
+expect_cell 'no exclude' '8.2 ^13.4' lowest-deps "${P}" "${T}" '[]'
+expect_cell 'full exclude' '8.2 ^14.3' lowest-deps "${P}" "${T}" '[{"php":"8.2","typo3":"^13.4"}]'
+expect_cell 'partial exclude by typo3' '8.2 ^14.3' lowest-deps "${P}" "${T}" '[{"typo3":"^13.4"}]'
+expect_cell 'partial exclude by php' '8.3 ^13.4' lowest-deps "${P}" "${T}" '[{"php":"8.2"}]'
+expect_cell 'everything excluded' 'exit 1' lowest-deps "${P}" "${T}" '[{"php":"8.2"},{"php":"8.3"}]'
+expect_cell 'no exclude' '8.3 ^14.3' phpstan-unpinned "${P}" "${T}" '[]'
+expect_cell 'partial exclude by typo3' '8.3 ^13.4' phpstan-unpinned "${P}" "${T}" '[{"typo3":"^14.3"}]'
+expect_cell 'partial exclude by php' '8.2 ^14.3' phpstan-unpinned "${P}" "${T}" '[{"php":"8.3"}]'
+
+# --- Install --------------------------------------------------------------
+
+INSTALL="$(step_run lowest-deps install)"
+
+if ! command -v php > /dev/null || ! type -P composer > /dev/null; then
+    fail 'the install cases need php and a composer phar on PATH'
+    exit 1
+fi
+
+# Runs the install block in a fixture checkout with a composer that records its
+# arguments one call per line. Prints the exit status; the call log and the
+# output land in ${TMP}/case/.
+run_install() { # composer.json, typo3-version, lowest-deps, pin-packages, [PATH], [typo3-packages], [composer.lock]
+    local dir="${TMP}/case"
+    rm -rf "${dir}"
+    mkdir -p "${dir}/work/a"
+    printf '%s\n' "${1}" > "${dir}/work/composer.json"
+    [[ -z "${7:-}" ]] || printf '%s\n' "${7}" > "${dir}/work/composer.lock"
+    # A file the glob `a/b:*` would match, were it expanded.
+    : > "${dir}/work/a/b:GLOBBED"
+    {
+        printf 'composer() { printf "%%s\\n" "$*" >> %q; }\n' "${dir}/calls"
+        cat <<'EOF'
+COMPOSER_RETRY='composer_retry() { composer "$@"; }'
+EOF
+        printf '%s\n' "${INSTALL}"
+    } > "${dir}/script.sh"
+    : > "${dir}/calls"
+    (
+        cd "${dir}/work" || exit 99
+        PATH="${5:-${PATH}}" TYPO3_VERSION="${2}" TYPO3_PACKAGES="${6:-[\"typo3/cms-core\"]}" LOWEST_DEPS="${3}" \
+            PIN_PACKAGES="${4}" GITHUB_STEP_SUMMARY="${dir}/summary" \
+            "${RUNNER_SHELL[@]}" "${dir}/script.sh"
+    ) > "${dir}/out" 2>&1
+    printf '%s' "$?"
+}
+
+CJ='{"require":{"typo3/cms-core":"^13.4 || ^14.3","guzzlehttp/guzzle":"^7.10 || ^8.0"},"require-dev":{"mikey179/vfsstream":"^1.6"}}'
+
+# No TYPO3 package in composer.json, so the overlap check is not consulted and
+# cannot be the error that stops the step.
+status="$(run_install '{"require":{}}' '^13.4' false '-dother/x:y')"
+if [[ "${status}" -ne 0 ]] && ! grep -q -- 'other/x' "${TMP}/case/calls" \
+    && grep -qF "::error::pin-packages entry '-dother/x:y' is not vendor/package:constraint" "${TMP}/case/out"; then
+    pass 'a pin starting with "-" is rejected before composer sees it'
+else
+    fail "a pin starting with \"-\" reached composer (exit ${status}): $(tr '\n' '|' < "${TMP}/case/calls")"
+fi
+
+status="$(run_install "${CJ}" '^13.4' false '   ')"
+if [[ "${status}" -ne 0 ]] && grep -q 'pin-packages contains no pins' "${TMP}/case/out"; then
+    pass 'whitespace-only pin-packages without lowest-deps fails'
+else
+    fail "whitespace-only pin-packages exited ${status} without the no-pins error"
+fi
+
+status="$(run_install "${CJ}" '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls"; then
+    pass 'lowest-deps without pins resolves with --prefer-lowest'
+else
+    fail "lowest-deps without pins: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls")"
+fi
+
+status="$(run_install "${CJ}" '^13.4' false 'guzzlehttp/guzzle:^7.10 typo3/cms-dashboard:>=13.4,<14 a/b:* mikey179/vfsstream:^1.6.12')"
+calls="${TMP}/case/calls"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qx 'require --no-update -- guzzlehttp/guzzle:^7.10' "${calls}" \
+    && grep -qx 'require --no-update -- typo3/cms-dashboard:>=13.4,<14' "${calls}" \
+    && grep -qxF 'require --no-update -- a/b:*' "${calls}" \
+    && grep -qx 'require --dev --no-update -- mikey179/vfsstream:^1.6.12' "${calls}" \
+    && ! grep -q 'GLOBBED' "${calls}" \
+    && grep -qx 'install --prefer-dist --no-progress' "${calls}"; then
+    pass 'pins reach composer after --, unglobbed, require-dev ones with --dev'
+else
+    fail "pins: exit ${status}, calls $(tr '\n' '|' < "${calls}")"
+fi
+
+# With a committed composer.lock, install would refuse the lock the pins just
+# put out of date: the cell re-resolves in full instead, with no package list,
+# so a pin on a dependency of a locked package can resolve as it does without
+# a lock.
+status="$(run_install "${CJ}" '^13.4' false 'GuzzleHttp/Guzzle:^7.10 mikey179/vfsstream:^1.6.12' '' '' '{}')"
+calls="${TMP}/case/calls"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qxF 'update --with-all-dependencies --prefer-dist --no-progress' "${calls}" \
+    && ! grep -q '^install' "${calls}"; then
+    pass 'with a composer.lock, pins re-resolve everything instead of installing'
+else
+    fail "pins with composer.lock: exit ${status}, calls $(tr '\n' '|' < "${calls}")"
+fi
+
+# lowest-deps resolves everything anew, lock or not.
+status="$(run_install "${CJ}" '^13.4' true 'guzzlehttp/guzzle:^7.10' '' '' '{}')"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls" \
+    && ! grep -q '^install\|with-all-dependencies' "${TMP}/case/calls"; then
+    pass 'lowest-deps with a composer.lock still updates everything'
+else
+    fail "lowest-deps with composer.lock: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls")"
+fi
+
+# The extension's own floor survives: every disjunct of composer.json's
+# constraint is ANDed with the matrix line, so ^13.4 cannot undercut ^13.4.21.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4.21 || ^14.3"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- typo3/cms-core:^13.4, ^13.4.21 || ^13.4, ^14.3' "${TMP}/case/calls"; then
+    pass 'the matrix line is intersected with the composer.json floor'
+else
+    fail "TYPO3 floor: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls")"
+fi
+
+status="$(run_install '{"require":{}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- typo3/cms-core:^13.4' "${TMP}/case/calls"; then
+    pass 'a package composer.json does not name gets the matrix line alone'
+else
+    fail "TYPO3 without floor: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls")"
+fi
+
+# A matrix line composer.json rules out: an error naming both constraints,
+# before anything is required or resolved.
+status="$(run_install '{"require":{"typo3/cms-core":"^14.3"}}' '^13.4' true '')"
+if [[ "${status}" -ne 0 ]] \
+    && grep -qF "::error::The lowest TYPO3 line of typo3-versions, '^13.4', lies outside typo3/cms-core '^14.3'" "${TMP}/case/out" \
+    && ! grep -q '^require\|^update' "${TMP}/case/calls"; then
+    pass 'a matrix line outside composer.json fails with both constraints named'
+else
+    fail "disjoint TYPO3 line: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || ^14.3"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && ! grep -q '::error::\|::warning::' "${TMP}/case/out"; then
+    pass 'a matrix line inside composer.json passes the check silently'
+else
+    fail "overlapping TYPO3 line: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Empty arrays where composer.json would have an object.
+status="$(run_install '{"require":[],"require-dev":{"typo3/cms-core":"^13.4.21"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- typo3/cms-core:^13.4, ^13.4.21' "${TMP}/case/calls" \
+    && ! grep -q 'jq: error' "${TMP}/case/out"; then
+    pass '"require": [] is read as empty, the require-dev floor still applies'
+else
+    fail "require []: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4"},"require-dev":[]}' '^13.4' true 'guzzlehttp/guzzle:^7.10')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- guzzlehttp/guzzle:^7.10' "${TMP}/case/calls" \
+    && ! grep -q 'jq: error' "${TMP}/case/out"; then
+    pass '"require-dev": [] pins into require without a jq error'
+else
+    fail "require-dev []: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Uppercase names are lowercased, and then found in require-dev.
+status="$(run_install "${CJ}" '^13.4' false 'GuzzleHttp/Guzzle:^7.10 Mikey179/vfsStream:^1.6.11')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- guzzlehttp/guzzle:^7.10' "${TMP}/case/calls" \
+    && grep -qxF 'require --dev --no-update -- mikey179/vfsstream:^1.6.11' "${TMP}/case/calls"; then
+    pass 'uppercase pin names are lowercased and routed like their lowercase key'
+else
+    fail "uppercase pins: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Only the name is lowercased: a branch constraint keeps its case, since
+# `dev-Feature` and `dev-feature` are different branches.
+status="$(run_install "${CJ}" '^13.4' false 'Vendor/Pkg:dev-Feature')"
+if [[ "${status}" -eq 0 ]] && grep -qxF 'require --no-update -- vendor/pkg:dev-Feature' "${TMP}/case/calls"; then
+    pass 'a pin keeps the case of its constraint while its name is lowercased'
+else
+    fail "mixed-case pin: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# Without the composer phar the overlap cannot be checked: a warning, and the
+# cell resolves anyway. PATH keeps the tools the block needs, and no composer.
+NOCOMPOSER="${TMP}/nocomposer-bin"
+mkdir -p "${NOCOMPOSER}"
+for tool in bash php jq python3 env; do
+    ln -s "$(type -P "${tool}")" "${NOCOMPOSER}/${tool}"
+done
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || ^14.3"}}' '^13.4' true '' "${NOCOMPOSER}")"
+if [[ "${status}" -eq 0 ]] && grep -qF '::warning::Could not load composer/semver' "${TMP}/case/out" \
+    && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls"; then
+    pass 'without composer/semver the overlap check warns and the cell resolves anyway'
+else
+    fail "semver unavailable: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# A constraint composer/semver cannot parse: its own warning, naming the
+# constraint, and the cell resolves anyway.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && grep -qF "::warning::Could not parse a constraint while comparing '^13.4' with typo3/cms-core '^13.4 || banana': '^13.4 || banana': Could not parse version constraint banana" "${TMP}/case/out" \
+    && ! grep -qF 'Could not load composer/semver' "${TMP}/case/out" \
+    && grep -qx 'update --prefer-lowest --prefer-stable --prefer-dist --no-progress' "${TMP}/case/calls"; then
+    pass 'an unparsable constraint gets the parse warning and the cell resolves anyway'
+else
+    fail "unparsable constraint: exit ${status}, calls $(tr '\n' '|' < "${TMP}/case/calls"), out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# A newline in a composer.json constraint must not end the annotation: the
+# runner would read the next line as a command of its own. The constraint
+# reaches the warning twice, as itself and inside the parser's reason.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana\n::error::INJECTED"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && ! grep -q '^::error::INJECTED' "${TMP}/case/out" \
+    && grep -qF "with typo3/cms-core '^13.4 || banana%0A::error::INJECTED': '^13.4 || banana%0A::error::INJECTED'" "${TMP}/case/out"; then
+    pass 'a newline in a composer.json constraint is escaped in the annotation'
+else
+    fail "newline in constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# composer/semver reads a newline as whitespace, so such a constraint can
+# parse and reach the error for a disjoint matrix line as well.
+status="$(run_install '{"require":{"typo3/cms-core":"^14.3 ||\n^15.0"}}' '^13.4' true '')"
+if [[ "${status}" -ne 0 ]] \
+    && ! grep -q '^\^15\.0' "${TMP}/case/out" \
+    && grep -qF "lies outside typo3/cms-core '^14.3 ||%0A^15.0' in composer.json" "${TMP}/case/out"; then
+    pass 'a newline in a disjoint composer.json constraint is escaped in the error'
+else
+    fail "newline in disjoint constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# A bare CR ends a line for the runner as well. The output goes through
+# `tr '\r' '\n'` so that grep sees the line the runner would see.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana\r::error::INJECTED"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::INJECTED' \
+    && ! grep -qF 'Could not load composer/semver' "${TMP}/case/out" \
+    && grep -qF 'banana%0D::error::INJECTED' "${TMP}/case/out"; then
+    pass 'a CR in a composer.json constraint is escaped in the annotation'
+else
+    fail "CR in constraint: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# A literal "%0A" in a constraint must not reach the runner as one: it would
+# unescape it into a newline.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || banana%0Ax"}}' '^13.4' true '')"
+if [[ "${status}" -eq 0 ]] \
+    && ! grep -qF 'Could not load composer/semver' "${TMP}/case/out" \
+    && grep -qF "with typo3/cms-core '^13.4 || banana%250Ax'" "${TMP}/case/out"; then
+    pass 'a literal %0A in a composer.json constraint is escaped as %250A'
+else
+    fail "percent in constraint: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# The load warning quotes the constraint too: CR, LF and "%" in one value.
+status="$(run_install '{"require":{"typo3/cms-core":"^13.4 || ba%0Ana\r::error::CR\n::error::INJECTED"}}' '^13.4' true '' "${NOCOMPOSER}")"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::' \
+    && grep -qF "::warning::Could not load composer/semver to compare '^13.4' with typo3/cms-core '^13.4 || ba%250Ana%0D::error::CR%0A::error::INJECTED' (exit 2: " "${TMP}/case/out"; then
+    pass 'CR, LF and % in a composer.json constraint are escaped in the load warning'
+else
+    fail "CR, LF and % in constraint, load warning: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# A pin is split on spaces, tabs and newlines, so a CR is how a line break
+# reaches the pin error. The injected text is lowercase so that a change to how
+# the step lowercases pins cannot redden this case: it tests the escape alone.
+status="$(run_install '{"require":{}}' '^13.4' false $'vendor/pkg:^1.0\r::error::injected')"
+if [[ "${status}" -ne 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::injected' \
+    && grep -qF "::error::pin-packages entry 'vendor/pkg:^1.0%0D::error::injected' is not vendor/package:constraint" "${TMP}/case/out"; then
+    pass 'a CR in a pin is escaped in the pin error'
+else
+    fail "CR in pin: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# typo3-packages that is not JSON is quoted in its error.
+status="$(run_install '{"require":{}}' '^13.4' true '' '' $'["typo3/cms-core",\n::error::INJECTED')"
+if [[ "${status}" -ne 0 ]] \
+    && ! grep -q '^::error::INJECTED' "${TMP}/case/out" \
+    && grep -qF '::error::Failed to parse typo3-packages input: ["typo3/cms-core",%0A::error::INJECTED' "${TMP}/case/out"; then
+    pass 'a newline in typo3-packages is escaped in its error'
+else
+    fail "newline in typo3-packages: exit ${status}, out $(tr '\n' '|' < "${TMP}/case/out")"
+fi
+
+# The TYPO3 line and the package name are quoted in all three annotations of
+# the overlap check. A package name is split on spaces, tabs and newlines, so
+# it carries a CR; composer.json declares it under the same key.
+PKG_CR='["typo3/cms-core\r::error::P"]'
+CJ_CR='{"require":{"typo3/cms-core\r::error::P":"^13.4"}}'
+status="$(run_install "${CJ_CR}" $'^13.4\r::error::X' true '' "${NOCOMPOSER}" "${PKG_CR}")"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::' \
+    && grep -qF "::warning::Could not load composer/semver to compare '^13.4%0D::error::X' with typo3/cms-core%0D::error::P '^13.4' (exit 2: " "${TMP}/case/out"; then
+    pass 'a CR in the TYPO3 line and in the package name is escaped in the load warning'
+else
+    fail "CR in TYPO3 line and package, load warning: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+status="$(run_install "${CJ_CR}" $'^13.4\r::error::X' true '' '' "${PKG_CR}")"
+if [[ "${status}" -eq 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::' \
+    && grep -qF "::warning::Could not parse a constraint while comparing '^13.4%0D::error::X' with typo3/cms-core%0D::error::P '^13.4': '^13.4%0D::error::X': " "${TMP}/case/out"; then
+    pass 'a CR in the TYPO3 line and in the package name is escaped in the parse warning'
+else
+    fail "CR in TYPO3 line and package, parse warning: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# The disjoint error needs a TYPO3 line that parses; composer/semver reads an
+# LF inside it as whitespace.
+status="$(run_install '{"require":{"typo3/cms-core\r::error::P":"^14.3"}}' $'^13.4 ||\n^13.5' true '' '' "${PKG_CR}")"
+if [[ "${status}" -ne 0 ]] \
+    && ! tr '\r' '\n' < "${TMP}/case/out" | grep -q '^::error::P\|^\^13\.5' \
+    && grep -qF "::error::The lowest TYPO3 line of typo3-versions, '^13.4 ||%0A^13.5', lies outside typo3/cms-core%0D::error::P '^14.3' in composer.json" "${TMP}/case/out"; then
+    pass 'a line break in the TYPO3 line and in the package name is escaped in the disjoint error'
+else
+    fail "line break in TYPO3 line and package, disjoint error: exit ${status}, out $(tr '\r\n' '||' < "${TMP}/case/out")"
+fi
+
+# --- Functional database --------------------------------------------------
+
+FUNCTIONAL="$(step_run lowest-deps 'Run functional tests')"
+driver_for() { # functional-test-db
+    # The stub runs in the block's own shell, which shellcheck cannot see.
+    # Older shellcheck (the runner's) reports it as SC2317, newer as SC2329.
+    # shellcheck disable=SC2317,SC2329
+    (
+        cd "${TMP}" || exit 99
+        composer() {
+            case "$1" in
+                run-script) printf 'ci:test:php:functional\n' ;;
+                *) printf 'DRIVER=%s\n' "${typo3DatabaseDriver:-unset}" ;;
+            esac
+            return
+        }
+        export -f composer
+        FUNCTIONAL_TEST_COMMAND='' FUNCTIONAL_TEST_DB="${1}" \
+            "${RUNNER_SHELL[@]}" -c "${FUNCTIONAL}"
+    ) 2>/dev/null | sed -n 's/^DRIVER=//p'
+}
+for pair in 'sqlite pdo_sqlite' 'postgres pdo_pgsql' 'mysql mysqli' 'mariadb mysqli' "'' mysqli"; do
+    db="${pair% *}"; want="${pair#* }"
+    [[ "${db}" == "''" ]] && db=''
+    got="$(driver_for "${db}")"
+    if [[ "${got}" == "${want}" ]]; then
+        pass "functional-test-db '${db}' -> ${got}, as in the matrix"
+    else
+        fail "functional-test-db '${db}': expected ${want}, got '${got}'"
+    fi
+done
+
+# --- Coverage driver ------------------------------------------------------
+
+matrix_cov="$(yq -r '.jobs["unit-tests"].steps[] | select(.name == "Setup PHP") | .with.coverage' "${WORKFLOW}")"
+cell_cov="$(yq -r '.jobs["lowest-deps"].steps[] | select(.name == "Setup PHP") | .with.coverage' "${WORKFLOW}")"
+if [[ "${cell_cov}" == "${matrix_cov}" ]]; then
+    pass "coverage driver matches the matrix cells (${cell_cov})"
+else
+    fail "coverage driver '${cell_cov}' differs from the matrix cells' '${matrix_cov}'"
+fi
+
+exit "${FAILED}"

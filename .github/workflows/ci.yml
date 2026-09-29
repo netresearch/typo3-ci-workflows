@@ -229,6 +229,36 @@ on:
         type: string
         default: '[]'
 
+      # Lower bound of the dependency constraints
+      lowest-deps:
+        description: >-
+          Run one extra cell that resolves every dependency to the lowest
+          version composer can install (composer update --prefer-lowest
+          --prefer-stable), on the lowest non-excluded php/typo3 combination
+          of the matrix, and run the unit and functional tests there. Every
+          other cell resolves the newest allowed versions, so a defect that
+          exists only under an older major the constraints still admit is
+          otherwise never tested. With roave/security-advisories in
+          require-dev, "lowest" means the lowest release without a known
+          advisory, not the constraint's lower bound, and that floor rises
+          as advisories are published. The matrix TYPO3 line is ANDed with
+          composer.json's own constraint, so a declared floor such as
+          ^13.4.21 holds; a line composer.json rules out fails the cell with
+          an error naming both. No coverage or JUnit upload from this cell.
+        type: boolean
+        default: false
+      pin-packages:
+        description: >-
+          Space-separated "vendor/package:constraint" pairs (e.g.
+          "guzzlehttp/guzzle:^7.10") applied with composer require --no-update
+          in that extra cell only. Setting this alone also runs the cell, with
+          the newest versions of everything else (a committed composer.lock is
+          re-resolved in full) — the narrower, cheaper choice
+          when one package's older major matters more than the rest. Combined
+          with lowest-deps, the pins narrow the lowest resolution further.
+        type: string
+        default: ''
+
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -748,11 +778,17 @@ jobs:
 
           php_versions = sorted(load('PHP_VERSIONS'), key=rank, reverse=True)
           typo3_versions = sorted(load('TYPO3_VERSIONS'), key=rank, reverse=True)
-          excluded = {(entry.get('php'), entry.get('typo3')) for entry in load('MATRIX_EXCLUDE', of_objects=True)}
+          # GitHub excludes a cell when every key of an entry matches it, so
+          # a partial entry such as {'typo3': '^12.4'} drops a whole column.
+          excludes = load('MATRIX_EXCLUDE', of_objects=True)
+
+          def is_excluded(php, typo3):
+              cell = {'php': php, 'typo3': typo3}
+              return any(all(cell.get(key) == value for key, value in entry.items()) for entry in excludes)
 
           for php in php_versions:
               for typo3 in typo3_versions:
-                  if (php, typo3) in excluded:
+                  if is_excluded(php, typo3):
                       continue
                   with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
                       handle.write(f'php={php}\ntypo3={typo3}\n')
@@ -1622,6 +1658,397 @@ jobs:
           flags: functional
           fail_ci_if_error: false
 
+  # One extra cell at the lower bound of the dependency constraints (#258).
+  # Every other cell resolves the newest version each constraint allows, so an
+  # extension whose composer.json still admits an older major is never tested
+  # against it: a Guzzle-7-only defect passed every cell of a matrix that
+  # installed Guzzle 8.2.0 everywhere.
+  #
+  # A job of its own rather than an `include` on the test matrices. Those check
+  # names encode the cell (`Unit Tests (8.2, ^13.4)`) and rulesets require
+  # them; an include with the same php/typo3 would be MERGED into that existing
+  # cell instead of adding one, and a new matrix dimension would rename every
+  # check. A single job keeps one stable name, and runs unit and functional
+  # tests as steps against one resolution.
+  lowest-deps:
+    needs: preflight
+    # Neither input set: the job is skipped, and its check shows a name that
+    # claims no mode.
+    name: ${{ inputs.lowest-deps && 'Lowest dependencies' || (inputs.pin-packages != '' && 'Pinned dependencies' || 'Lowest or pinned dependencies') }}
+    # Both suites off would leave a job that installs and then reports success
+    # having tested nothing (#188), so it does not run at all then.
+    if: >-
+      ${{ (inputs.lowest-deps || inputs.pin-packages != '')
+      && (inputs.run-unit-tests || inputs.run-functional-tests)
+      && needs.preflight.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    # An empty image skips the service ("will not be started because the
+    # container definition has an empty image", actions/runner JobExtension),
+    # so the SQLite case and a run without functional tests start no database.
+    services:
+      db:
+        image: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' && inputs.db-image || '' }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: typo3_test
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: typo3_test
+        ports:
+          - 3306:3306
+          - 5432:5432
+        # Same health check as the functional-tests job; see there.
+        options: >-
+          --health-cmd="${{ inputs.functional-test-db == 'postgres' && 'pg_isready -U postgres' || 'mariadb-admin ping --silent || mysqladmin ping --silent' }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The mirror of phpstan-unpinned's cell selection: lowest PHP first, then
+      # the lowest TYPO3 line within it, skipping matrix-exclude. The lowest
+      # PHP is what lets composer choose the oldest releases at all — a newer
+      # PHP rules out every release that declares an older ceiling.
+      - name: Select the lowest matrix cell
+        id: cell
+        env:
+          PHP_VERSIONS: ${{ inputs.php-versions }}
+          TYPO3_VERSIONS: ${{ inputs.typo3-versions }}
+          MATRIX_EXCLUDE: ${{ inputs.matrix-exclude }}
+        run: |
+          python3 -c "
+          import json, os, re, sys
+
+          def rank(value):
+              match = re.search(r'\d+(?:\.\d+)*', str(value))
+              return tuple(int(part) for part in match.group(0).split('.')) if match else ()
+
+          def load(name, of_objects=False):
+              try:
+                  value = json.loads(os.environ[name])
+              except json.JSONDecodeError as error:
+                  print(f'::error::Invalid JSON in {name} input: {error}')
+                  sys.exit(1)
+              if not isinstance(value, list):
+                  print(f'::error::{name} must be a JSON array, got {type(value).__name__}.')
+                  sys.exit(1)
+              if of_objects:
+                  for entry in value:
+                      if not isinstance(entry, dict):
+                          print(f'::error::{name} entries must be JSON objects, got {type(entry).__name__}: {entry!r}')
+                          sys.exit(1)
+              return value
+
+          php_versions = sorted(load('PHP_VERSIONS'), key=rank)
+          typo3_versions = sorted(load('TYPO3_VERSIONS'), key=rank)
+          # GitHub excludes a cell when every key of an entry matches it, so
+          # a partial entry such as {'typo3': '^12.4'} drops a whole column.
+          excludes = load('MATRIX_EXCLUDE', of_objects=True)
+
+          def is_excluded(php, typo3):
+              cell = {'php': php, 'typo3': typo3}
+              return any(all(cell.get(key) == value for key, value in entry.items()) for entry in excludes)
+
+          for php in php_versions:
+              for typo3 in typo3_versions:
+                  if is_excluded(php, typo3):
+                      continue
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
+                      handle.write(f'php={php}\ntypo3={typo3}\n')
+                  print(f'Testing PHP {php} / TYPO3 {typo3} — the lowest cell of the matrix.')
+                  sys.exit(0)
+
+          print('::error::php-versions x typo3-versions is empty or fully covered by matrix-exclude.')
+          sys.exit(1)
+          "
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ steps.cell.outputs.php }}
+          extensions: ${{ inputs.php-extensions }}, pdo_mysql, pdo_sqlite, pdo_pgsql
+          tools: composer:v2
+          ini-values: zend.assertions=1
+          # The matrix cells' driver, so a custom *-test-command that writes
+          # or reads a coverage report runs here as it does there. The
+          # built-in commands below still pass --no-coverage.
+          coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      # A namespace of its own: this cell downloads releases no other cell
+      # uses, and must neither restore nor save under the matrix cells' keys.
+      - name: Cache Composer dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-deps-${{ inputs.lowest-deps && 'lowest' || 'pinned' }}-${{ steps.cell.outputs.php }}-${{ steps.cell.outputs.typo3 }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-deps-${{ inputs.lowest-deps && 'lowest' || 'pinned' }}-${{ steps.cell.outputs.php }}-${{ steps.cell.outputs.typo3 }}-
+            ${{ runner.os }}-composer-deps-${{ inputs.lowest-deps && 'lowest' || 'pinned' }}-${{ steps.cell.outputs.php }}-
+
+      - name: Remove incompatible dev deps
+        env:
+          REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
+          TYPO3_VERSION: ${{ steps.cell.outputs.typo3 }}
+        run: |
+          if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
+          echo "$REMOVE_DEV_DEPS" | python3 -c "
+          import json, os, sys, subprocess
+          try:
+              entries = json.load(sys.stdin)
+          except json.JSONDecodeError as e:
+              print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
+              sys.exit(1)
+          typo3 = os.environ['TYPO3_VERSION']
+          for entry in entries:
+              dep = entry.get('dep')
+              if not dep:
+                  print(f'::error::remove-dev-deps entry missing dep key: {entry}')
+                  sys.exit(1)
+              only_for = entry.get('only-for', '')
+              if only_for:
+                  patterns = [p.strip() for p in only_for.split('|')]
+                  if not any(typo3.startswith(p) for p in patterns):
+                      print(f'Removing {dep} (only compatible with {only_for})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
+              else:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+          "
+
+      # The TYPO3 line is required first, as in every cell: without it
+      # --prefer-lowest would take the lowest release of composer.json's whole
+      # TYPO3 range rather than of this cell's line. Unlike the matrix cells,
+      # the line is ANDed with composer.json's own constraint instead of
+      # replacing it: `^13.4` must not undercut a declared `^13.4.21`, and
+      # under --prefer-lowest it otherwise would.
+      #
+      # Word splitting is intended for both lists, globbing is not (`a/b:*`
+      # would match files in the checkout): hence `set -f`.
+      - name: Install dependencies
+        id: install
+        env:
+          TYPO3_VERSION: ${{ steps.cell.outputs.typo3 }}
+          TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
+          LOWEST_DEPS: ${{ inputs.lowest-deps }}
+          PIN_PACKAGES: ${{ inputs.pin-packages }}
+        run: |
+          set -f
+          # A value inserted into an ::error:: or ::warning:: line is escaped
+          # the way the runner unescapes command data (actions/runner,
+          # src/Runner.Common/ActionCommand.cs, _escapeDataMappings): "%" first,
+          # then CR and LF. Unescaped, a newline in composer.json would end the
+          # annotation and start a line the runner reads as a new command.
+          escape_data() { # value
+            local value="${1//%/%25}"
+            value="${value//$'\r'/%0D}"
+            printf '%s' "${value//$'\n'/%0A}"
+          }
+          PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
+            echo "::error::Failed to parse typo3-packages input: $(escape_data "$TYPO3_PACKAGES")"
+            exit 1
+          }
+          # `require` and `require-dev` may be absent, or an empty JSON array
+          # (what some tools write for an empty map): neither may abort the step.
+          declared_in() { # key, package
+            jq -r --arg k "$1" --arg p "$2" '.[$k] | if type == "object" then .[$p] // empty else empty end' composer.json
+          }
+          # Composer's own constraint matching, from the composer phar that
+          # setup-php installed: exit 0 when the two constraints intersect, 1
+          # when they cannot, 2 when composer/semver could not be loaded, 3
+          # when a constraint could not be parsed. On 2 and 3, stderr carries
+          # the reason; on 3 it starts with the constraint that failed.
+          intersects() { # constraint, constraint
+            # shellcheck disable=SC2016 # the $ belong to PHP, not to the shell
+            php -r '
+              try {
+                  Phar::loadPhar($argv[1], "composer.phar");
+                  require "phar://composer.phar/vendor/autoload.php";
+                  $parser = new Composer\Semver\VersionParser();
+              } catch (Throwable $error) {
+                  fwrite(STDERR, $error->getMessage() . PHP_EOL);
+                  exit(2);
+              }
+              $parsed = [];
+              foreach ([$argv[2], $argv[3]] as $constraint) {
+                  try {
+                      $parsed[] = $parser->parseConstraints($constraint);
+                  } catch (Throwable $error) {
+                      fwrite(STDERR, "\x27" . $constraint . "\x27: " . $error->getMessage() . PHP_EOL);
+                      exit(3);
+                  }
+              }
+              exit($parsed[0]->matches($parsed[1]) ? 0 : 1);
+            ' -- "$(type -P composer)" "$1" "$2"
+          }
+          for pkg in $PACKAGES; do
+            declared=$(declared_in require "$pkg")
+            [[ -n "$declared" ]] || declared=$(declared_in require-dev "$pkg")
+            if [[ -n "$declared" ]]; then
+              # A matrix line outside the extension's own constraint leaves
+              # nothing to install; say so instead of letting the solver fail.
+              status=0
+              reason=$(intersects "$TYPO3_VERSION" "$declared" 2>&1) || status=$?
+              if [[ "$status" -eq 1 ]]; then
+                echo "::error::The lowest TYPO3 line of typo3-versions, '$(escape_data "$TYPO3_VERSION")', lies outside $(escape_data "$pkg") '$(escape_data "$declared")' in composer.json, so this cell has nothing to install. Align typo3-versions with composer.json, or exclude that line with matrix-exclude."
+                exit 1
+              elif [[ "$status" -eq 3 ]]; then
+                echo "::warning::Could not parse a constraint while comparing '$(escape_data "$TYPO3_VERSION")' with $(escape_data "$pkg") '$(escape_data "$declared")': $(escape_data "$reason"); resolving anyway."
+              elif [[ "$status" -ne 0 ]]; then
+                echo "::warning::Could not load composer/semver to compare '$(escape_data "$TYPO3_VERSION")' with $(escape_data "$pkg") '$(escape_data "$declared")' (exit $status: $(escape_data "$reason")); resolving anyway."
+              fi
+              # Composer has no parentheses: distribute the AND over every
+              # disjunct of both sides.
+              constraint=$(python3 -c '
+          import re, sys
+          split = lambda c: [d for d in re.split(r"\s*\|\|?\s*", c.strip()) if d]
+          print(" || ".join(f"{a}, {b}" for a in split(sys.argv[1]) for b in split(sys.argv[2])))
+          ' "$TYPO3_VERSION" "$declared")
+            else
+              constraint="$TYPO3_VERSION"
+            fi
+            composer require --no-update -- "$pkg:$constraint"
+          done
+
+          # Composer's own package-name pattern, so no entry can start with
+          # "-" and reach composer as an option. Names are lowercased first:
+          # Composer treats them case-insensitively, but writes them into
+          # composer.json as given, and the require-dev lookup below compares
+          # exact keys. A package that sits in require-dev is pinned there:
+          # composer require without --dev would silently move it into
+          # require.
+          PIN_PATTERN='^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*:[^[:space:]]+$'
+          PINNED=0
+          for pin in $PIN_PACKAGES; do
+            name="${pin%%:*}"
+            name="${name,,}"
+            [[ "$pin" == *:* ]] && pin="$name:${pin#*:}"
+            if [[ ! "$pin" =~ $PIN_PATTERN ]]; then
+              echo "::error::pin-packages entry '$(escape_data "$pin")' is not vendor/package:constraint"
+              exit 1
+            fi
+            if jq -e --arg p "$name" '."require-dev" | type == "object" and has($p)' composer.json > /dev/null; then
+              composer require --dev --no-update -- "$pin"
+            else
+              composer require --no-update -- "$pin"
+            fi
+            PINNED=$((PINNED + 1))
+          done
+          set +f
+          if [[ "$LOWEST_DEPS" != "true" && "$PINNED" -eq 0 ]]; then
+            echo "::error::pin-packages contains no pins, and lowest-deps is off: this cell would test nothing the matrix does not."
+            exit 1
+          fi
+
+          composer config --no-plugins audit.block-insecure false
+          eval "$COMPOSER_RETRY"
+          # A committed composer.lock no longer matches the constraints just
+          # required, and `composer install` refuses a lock whose versions
+          # fall outside them. With a lock, the cell therefore resolves
+          # everything anew, as install does without one: the pins hold, and
+          # every other package gets its newest allowed version. A partial
+          # update would not do: -W on the TYPO3 packages moves their whole
+          # tree anyway, and a pin on a dependency of a locked package outside
+          # that list cannot resolve.
+          if [[ "$LOWEST_DEPS" == "true" ]]; then
+            composer_retry update --prefer-lowest --prefer-stable --prefer-dist --no-progress
+          elif [[ -f composer.lock ]]; then
+            composer_retry update --with-all-dependencies --prefer-dist --no-progress
+          else
+            composer_retry install --prefer-dist --no-progress
+          fi
+
+          {
+            if [[ "$LOWEST_DEPS" == "true" ]]; then
+              echo "### Lowest dependencies — PHP $(php -r 'echo PHP_VERSION;'), TYPO3 ${TYPO3_VERSION}"
+            else
+              echo "### Pinned dependencies — PHP $(php -r 'echo PHP_VERSION;'), TYPO3 ${TYPO3_VERSION}"
+            fi
+            if [[ -n "$PIN_PACKAGES" ]]; then
+              echo
+              echo "Pinned: \`${PIN_PACKAGES}\`"
+            fi
+            echo
+            echo '```'
+            composer show --direct
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          composer show --direct
+
+      - name: Run unit tests
+        if: ${{ inputs.run-unit-tests }}
+        env:
+          UNIT_TEST_COMMAND: ${{ inputs.unit-test-command }}
+        run: |
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          if [[ -n "$UNIT_TEST_COMMAND" ]]; then
+            bash -euo pipefail -c "$UNIT_TEST_COMMAND"
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:unit'; then
+            composer ci:test:php:unit -- --no-coverage
+          elif echo "$SCRIPTS" | grep -q 'ci:tests:unit'; then
+            composer ci:tests:unit
+          elif echo "$SCRIPTS" | grep -q 'check:tests:unit'; then
+            composer check:tests:unit
+          elif echo "$SCRIPTS" | grep -q 'test:unit'; then
+            composer test:unit
+          else
+            echo "::error::No unit test script found. This job would report success without running anything. Add ci:test:php:unit to composer scripts, pass unit-test-command, or set run-unit-tests: false if this extension has none."
+            exit 1
+          fi
+
+      # Runs after a unit failure too: the two suites answer different
+      # questions about the same resolution.
+      - name: Run functional tests
+        if: ${{ !cancelled() && inputs.run-functional-tests && steps.install.outcome == 'success' }}
+        env:
+          FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
+          FUNCTIONAL_TEST_DB: ${{ inputs.functional-test-db }}
+        run: |
+          # The same database settings as the functional-tests and
+          # functional-tests-sqlite jobs; SQLite gets only the driver there too.
+          # Anything but sqlite or postgres is MySQL, an empty value included,
+          # because the matrix routes every non-sqlite value to functional-tests.
+          case "${FUNCTIONAL_TEST_DB:-}" in
+            sqlite)
+              export typo3DatabaseDriver=pdo_sqlite
+              ;;
+            postgres)
+              export typo3DatabaseDriver=pdo_pgsql typo3DatabaseHost=127.0.0.1 typo3DatabasePort=5432 \
+                typo3DatabaseName=typo3_test typo3DatabaseUsername=postgres typo3DatabasePassword=root
+              ;;
+            *)
+              export typo3DatabaseDriver=mysqli typo3DatabaseHost=127.0.0.1 typo3DatabasePort=3306 \
+                typo3DatabaseName=typo3_test typo3DatabaseUsername=root typo3DatabasePassword=root
+              ;;
+          esac
+          SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          if [[ -n "$FUNCTIONAL_TEST_COMMAND" ]]; then
+            bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
+          elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
+            composer ci:test:php:functional -- --no-coverage
+          elif echo "$SCRIPTS" | grep -q 'ci:tests:functional'; then
+            composer ci:tests:functional
+          elif echo "$SCRIPTS" | grep -q 'check:tests:functional'; then
+            composer check:tests:functional
+          elif echo "$SCRIPTS" | grep -q 'test:functional'; then
+            composer test:functional
+          else
+            echo "::error::No functional test script found. This job would report success without running anything. Add ci:test:php:functional to composer scripts, pass functional-test-command, or set run-functional-tests: false if this extension has none."
+            exit 1
+          fi
+
   # Detect whether the repo ships rendered documentation. Split from the
   # render job because a reusable-workflow (`uses:`) job cannot itself check
   # out the repo to decide whether to run — it needs a preceding job's output.
@@ -1704,6 +2131,7 @@ jobs:
       - acceptance-tests
       - functional-tests
       - functional-tests-sqlite
+      - lowest-deps
       - detect-docs
       - docs
     if: ${{ always() }}
