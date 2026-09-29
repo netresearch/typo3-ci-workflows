@@ -16,13 +16,21 @@
 #   - with a lock built on a newer PHP (exit 2, and `php` the only failing
 #     requirement of `check-platform-reqs --lock`): the same fallback;
 #   - with a missing ext-*, alone or beside a PHP mismatch: fail, no update;
+#   - with config.platform.php set: no fallback at all, the install fails;
+#   - with a lock out of sync with the committed composer.json (content-hash),
+#     or one that cannot be checked: no fallback, an ::error:: naming it;
 #   - on any other install failure: fail, without falling back to update;
 #   - on a network error: retry the install through composer_retry.
 #
 # The stub answers `install --dry-run` with DRY_STATUS, `check-platform-reqs`
 # with PLATFORM_JSON and PLATFORM_STATUS (shapes as Composer 2.10.3 prints
 # them), and a real install with INSTALL_STATUS (or with a transport error on
-# its first call when INSTALL_FLAKY is set). Every block runs under the runner's own shell flags
+# its first call when INSTALL_FLAKY is set), and `config platform.php` with
+# CASE_PLATFORM_PHP. The fixture is a git repository with composer.json
+# committed; its composer.lock carries the content-hash Composer's own
+# Locker::getContentHash() gives for it (CASE_LOCK_HASH overrides it, and
+# CASE_NO_GIT leaves the repository out). The freshness check therefore needs
+# a real `php` and a composer phar on PATH. Every block runs under the runner's own shell flags
 # (`bash --noprofile --norc -eo pipefail`), in a shell of its own. The blocks
 # are executed, not grepped: a text probe would confirm a branch nothing
 # reaches.
@@ -56,6 +64,23 @@ step_run() { # job, step name
     return
 }
 
+if ! command -v php > /dev/null || ! type -P composer > /dev/null || ! command -v git > /dev/null; then
+    fail 'the cases need php, git and a composer phar on PATH'
+    exit 1
+fi
+
+FIXTURE_JSON='{"require":{"typo3/cms-core":"^13.4 || ^14.3"}}'
+# shellcheck disable=SC2016 # the $ belong to PHP, not to the shell
+FRESH_HASH="$(printf '%s\n' "${FIXTURE_JSON}" | php -r '
+    Phar::loadPhar($argv[1], "composer.phar");
+    require "phar://composer.phar/vendor/autoload.php";
+    echo Composer\Package\Locker::getContentHash(stream_get_contents(STDIN));
+' -- "$(type -P composer)")"
+if [[ ! "${FRESH_HASH}" =~ ^[0-9a-f]{32}$ ]]; then
+    fail "could not compute the fixture's content-hash: '${FRESH_HASH}'"
+    exit 1
+fi
+
 COMPOSER_RETRY_SNIPPET="$(yq -o json '.env' "${WORKFLOW}" | jq -r '.COMPOSER_RETRY // empty')"
 INSTALL_CELL_SNIPPET="$(yq -o json '.env' "${WORKFLOW}" | jq -r '.COMPOSER_INSTALL_CELL // empty')"
 if [[ -z "${COMPOSER_RETRY_SNIPPET}" ]]; then
@@ -69,8 +94,18 @@ run_install() { # job, with-lock (yes|no), dry-run status, install status, [typo
     local dir="${TMP}/case" block
     rm -rf "${dir}"
     mkdir -p "${dir}/work"
-    printf '{"require":{"typo3/cms-core":"^13.4 || ^14.3"}}\n' > "${dir}/work/composer.json"
-    [[ "${2}" == yes ]] && printf '{}\n' > "${dir}/work/composer.lock"
+    printf '%s\n' "${FIXTURE_JSON}" > "${dir}/work/composer.json"
+    [[ "${2}" == yes ]] \
+        && printf '{"content-hash":"%s"}\n' "${CASE_LOCK_HASH:-${FRESH_HASH}}" > "${dir}/work/composer.lock"
+    if [[ -z "${CASE_NO_GIT:-}" ]]; then
+        if ! { git -C "${dir}/work" init -q \
+            && git -C "${dir}/work" add composer.json \
+            && git -C "${dir}/work" -c user.name=check -c user.email=check@example.invalid \
+                -c commit.gpgsign=false commit -q -m fixture; }; then
+            printf 'gitfail'
+            return
+        fi
+    fi
     block="$(step_run "${1}" 'Install TYPO3')"
     if [[ -z "${block}" || "${block}" == null ]]; then
         printf 'noblock'
@@ -83,11 +118,21 @@ run_install() { # job, with-lock (yes|no), dry-run status, install status, [typo
 composer() {
     printf '%s\n' "$*" >> "$CALLS"
     case "$*" in
+        'require '*)
+            # Changes composer.json as the real require does, so that a check
+            # reading the working copy instead of the committed file differs.
+            jq '.require["check/marker"] = "*"' composer.json > composer.json.tmp \
+                && mv composer.json.tmp composer.json
+            return 0 ;;
         'install --dry-run'*)
             printf 'dry-run output\n'
             # What Composer adds for a solver problem when GITHUB_ACTIONS is set.
             [[ "$DRY_STATUS" != 2 ]] || printf '::error ::Your lock file does not contain a compatible set of packages. Please run composer update.%%0A%%0A  Problem 1\n'
             return "$DRY_STATUS" ;;
+        'config platform.php')
+            [[ -n "${PLATFORM_PHP:-}" ]] || return 1
+            printf '%s\n' "$PLATFORM_PHP"
+            return 0 ;;
         'check-platform-reqs --lock --format=json')
             printf '%s\n' "$PLATFORM_JSON"
             return "$PLATFORM_STATUS" ;;
@@ -111,7 +156,7 @@ EOF
         cd "${dir}/work" || exit 99
         COMPOSER_RETRY="${COMPOSER_RETRY_SNIPPET}" COMPOSER_INSTALL_CELL="${INSTALL_CELL_SNIPPET}" \
             DRY_STATUS="${3}" INSTALL_STATUS="${4}" INSTALL_FLAKY="${6:-}" GITHUB_JOB="${1}" \
-            PLATFORM_JSON="${7:-[]}" PLATFORM_STATUS="${8:-0}" \
+            PLATFORM_JSON="${7:-[]}" PLATFORM_STATUS="${8:-0}" PLATFORM_PHP="${CASE_PLATFORM_PHP:-}" \
             TYPO3_VERSION="${5:-^13.4}" TYPO3_PACKAGES='["typo3/cms-core"]' GITHUB_ENV="${dir}/env" \
             "${RUNNER_SHELL[@]}" "${dir}/script.sh"
     ) > "${dir}/out" 2>&1
@@ -214,7 +259,45 @@ for job in "${JOBS[@]}"; do
     else
         fail "${job} with a missing extension and a PHP mismatch: $(show "${status}")"
     fi
+
+    for dry in 2 4; do
+        status="$(CASE_PLATFORM_PHP=8.3.0 run_install "${job}" yes "${dry}" "${dry}" '^13.4' '' "[${OK_ENTRY},${PHP_ENTRY}]" 1)"
+        if [[ "${status}" == "${dry}" ]] \
+            && grep -qxF 'config platform.php' "${calls}" \
+            && grep -qxF "${INSTALL_CALL}" "${calls}" \
+            && ! grep -q "${ANY_UPDATE}" "${calls}" \
+            && grep -qxF '::notice::composer.json sets config.platform.php, so this cell does not re-resolve a composer.lock that does not install.' "${out}" \
+            && [[ "$(grep -c '::notice::' "${out}")" == 1 ]]; then
+            pass "${job}: with config.platform.php set, dry run exit ${dry} fails the step, without an update"
+        else
+            fail "${job} with config.platform.php, dry run exit ${dry}: $(show "${status}")"
+        fi
+    done
+
+    for dry in 4 2; do
+        status="$(CASE_LOCK_HASH=0123456789abcdef0123456789abcdef run_install "${job}" yes "${dry}" 0 '^13.4' '' "[${OK_ENTRY},${PHP_ENTRY}]" 1)"
+        if [[ "${status}" == 1 ]] \
+            && ! grep -q "${ANY_UPDATE}" "${calls}" \
+            && ! grep -qxF "${INSTALL_CALL}" "${calls}" \
+            && ! grep -q '::notice::' "${out}" \
+            && grep -qF "::error::composer.lock is out of sync with the committed composer.json (content-hash 0123456789abcdef0123456789abcdef, composer.json gives ${FRESH_HASH}). Run composer update and commit composer.lock. In this cell (${job}, PHP " "${out}"; then
+            pass "${job}: a stale composer.lock (dry run exit ${dry}) fails with an error naming it, without an update"
+        else
+            fail "${job} with a stale composer.lock, dry run exit ${dry}: $(show "${status}")"
+        fi
+    done
 done
+
+# Without a git repository the committed composer.json cannot be read: no
+# fallback, and an error that says the lock could not be checked.
+status="$(CASE_NO_GIT=yes run_install unit-tests yes 4 0)"
+if [[ "${status}" == 1 ]] \
+    && ! grep -q "${ANY_UPDATE}" "${calls}" \
+    && grep -qF "::error::Could not check composer.lock against the committed composer.json (lock content-hash '${FRESH_HASH}', composer.json '')" "${out}"; then
+    pass 'a lock that cannot be checked against the committed composer.json fails, without an update'
+else
+    fail "unverifiable lock: $(show "${status}")"
+fi
 
 # A network error in the install is retried by composer_retry, as before, and
 # is no reason to update.

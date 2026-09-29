@@ -331,28 +331,55 @@ env:
   #     newer PHP than the cell's, e.g. PHPUnit 12 locked on 8.3 in the 8.2
   #     cell. A missing or failing `ext-*` is a real platform problem and
   #     still fails, with or without a PHP mismatch beside it.
+  # Neither fallback runs when composer.json sets config.platform.php: the
+  # update would resolve for that value, not for the PHP the cell runs (an
+  # override of 8.3.0 in the 8.2 cell installed PHPUnit 12 on PHP 8.2), so
+  # the cell fails on composer's own message, as it did before.
+  # Both fallbacks need a lock that was in sync with the committed
+  # composer.json, before this job's own `composer remove`/`require
+  # --no-update` changed it: the lock's content-hash must equal Composer's
+  # Locker::getContentHash() of `git show HEAD:./composer.json`. A stale lock
+  # is the caller's error; the cell fails with an ::error:: that says so
+  # instead of papering over it.
   # The probe is a dry run, outside composer_retry: that would annotate the
   # expected exit as an error. Its output is shown only when the cell falls
-  # back, without the workflow commands Composer adds on GitHub Actions; on any other result the real install runs through composer_retry,
-  # so a network error is retried and every other failure fails the step
-  # with composer's own message.
+  # back or the lock is stale, without the workflow commands Composer adds on
+  # GitHub Actions. On any other result the real install runs through
+  # composer_retry, so a network error is retried and every other failure
+  # fails the step with composer's own message.
   COMPOSER_INSTALL_CELL: |
+    composer_lock_hash_of_head() {
+      # shellcheck disable=SC2016 # the $ belong to PHP, not to the shell
+      git show HEAD:./composer.json | php -r '
+        Phar::loadPhar($argv[1], "composer.phar");
+        require "phar://composer.phar/vendor/autoload.php";
+        echo Composer\Package\Locker::getContentHash(stream_get_contents(STDIN));
+      ' -- "$(type -P composer)"
+    }
     composer_install_cell() {
-      local status=0 out reason="" platform failing cell message
+      local status=0 out reason="" platform failing required cell message locked expected
       if [[ ! -f composer.lock ]]; then
         composer_retry install --prefer-dist --no-progress
         return
       fi
       out=$(composer install --dry-run --no-progress 2>&1) || status=$?
-      if [[ "$status" == 4 ]]; then
+      if [[ "$status" == 4 || "$status" == 2 ]] \
+        && composer config platform.php > /dev/null 2>&1; then
+        message="composer.json sets config.platform.php, so this cell does not"
+        echo "::notice::$message re-resolve a composer.lock that does not install."
+      elif [[ "$status" == 4 ]]; then
         reason="composer install exits 4: the lock does not satisfy the constraints of this cell"
       elif [[ "$status" == 2 ]]; then
         # check-platform-reqs exits 1 for a failing and 2 for a missing
         # requirement; the JSON lists both, so its exit status is not needed.
         platform=$(composer check-platform-reqs --lock --format=json 2>/dev/null) || true
-        failing=$(jq -r '[.[] | select(.status != "success") | .name] | unique | join(" ")' <<< "$platform" 2>/dev/null) || failing=""
+        failing=$(jq -r '[.[] | select(.status != "success") | .name] | unique | join(" ")' \
+          <<< "$platform" 2>/dev/null) || failing=""
         if [[ "$failing" == php ]]; then
-          reason="composer install exits 2: the locked packages need another PHP version ($(jq -r '[.[] | select(.status != "success") | .failed_requirement | "\(.source) requires php \(.constraint)"] | first' <<< "$platform"))"
+          required=$(jq -r '[.[] | select(.status != "success") | .failed_requirement
+            | "\(.source) requires php \(.constraint)"] | first' <<< "$platform")
+          reason="composer install exits 2: the locked packages need another PHP"
+        reason+=" version ($required)"
         fi
       fi
       if [[ -z "$reason" ]]; then
@@ -361,11 +388,33 @@ env:
       fi
       # Composer's own `::error ::` line would annotate a cell that passes.
       printf '%s\n' "$out" | sed '/^::/d'
-      cell="${GITHUB_JOB:-this job}, PHP $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo '?'), TYPO3 ${TYPO3_VERSION:-?}"
-      message="composer.lock cannot be installed in this cell ($cell). $reason. The cell resolves everything anew with composer update --with-all-dependencies instead of installing the locked versions."
+      cell="${GITHUB_JOB:-this job}, PHP $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo '?')"
+      cell+=", TYPO3 ${TYPO3_VERSION:-?}"
+      locked=$(jq -r '."content-hash" // empty' composer.lock 2>/dev/null) || locked=""
+      expected=$(composer_lock_hash_of_head 2>/dev/null) || expected=""
+      if [[ -z "$locked" || -z "$expected" ]]; then
+        message="Could not check composer.lock against the committed composer.json"
+        message+=" (lock content-hash '$locked', composer.json '$expected'), so this"
+        message+=" cell ($cell) does not re-resolve it: $reason."
+        status=1
+      elif [[ "$locked" != "$expected" ]]; then
+        message="composer.lock is out of sync with the committed composer.json"
+        message+=" (content-hash $locked, composer.json gives $expected). Run composer"
+        message+=" update and commit composer.lock. In this cell ($cell): $reason."
+        status=1
+      else
+        message="composer.lock cannot be installed in this cell ($cell). $reason. The"
+        message+=" cell resolves everything anew with composer update --with-all-dependencies"
+        message+=" instead of installing the locked versions."
+        status=0
+      fi
       message=${message//%/%25}
       message=${message//$'\r'/%0D}
       message=${message//$'\n'/%0A}
+      if [[ "$status" != 0 ]]; then
+        echo "::error::$message"
+        return 1
+      fi
       echo "::notice::$message"
       composer_retry update --with-all-dependencies --prefer-dist --no-progress
     }
