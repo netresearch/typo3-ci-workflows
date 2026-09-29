@@ -332,6 +332,7 @@ jobs:
           shellcheck -x Build/Scripts/check-runner-detection.sh
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
+          shellcheck -x Build/Scripts/check-php-server-backtrace.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
@@ -361,6 +362,12 @@ jobs:
         # bash with an empty script list and asserts a non-zero exit, rather
         # than grepping for `exit 1` — text can sit in a branch nothing reaches.
         run: bash Build/Scripts/check-empty-suite-fails.sh .github/workflows/ci.yml
+
+      - name: Check the PHP server backtrace prints each frame once
+        # gdb prints frame #0 when it loads a core and again as the first line
+        # of `bt`, and the report printed both. This runs the step's own bash
+        # against a stand-in gdb that replays real gdb output for a php core.
+        run: bash Build/Scripts/check-php-server-backtrace.sh .github/workflows/e2e.yml
 
       - name: Check the release refuses a stale composer.json version
         # TYPO3 14.3 reads the version from composer.json

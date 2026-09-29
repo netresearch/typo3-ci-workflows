@@ -732,8 +732,48 @@ jobs:
           require $docRoot . '/index.php';
           ROUTER
 
-          php -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php > /tmp/php-server.log 2>&1 &
-          echo $! > /tmp/php-server.pid
+          # The server runs in the background, so nothing reported how it ended:
+          # a crash mid-suite left only connection errors in the test output and
+          # a log that stops mid-request. The wrapper below waits for php and
+          # appends its exit status to the server log (128 + N means signal N).
+          # A core file is written for a crash; "Report PHP server status"
+          # prints its backtrace. RLIMIT_CORE is raised only for php and its
+          # child processes, so the rest of the job does not start writing cores.
+          # php runs as the user that creates the directory, so it can write
+          # its core there; no world-writable mode is needed.
+          mkdir -p /tmp/php-cores
+          sudo sysctl -q -w kernel.core_pattern=/tmp/php-cores/core.%e.%p.%s || true
+          echo "PHP modules loaded by the server: $(php -m | tr '\n' ' ')"
+
+          # No OPcache JIT for the server. setup-php appends `opcache.enable=1`,
+          # `opcache.jit=1235` and `opcache.jit_buffer_size=256M` to php.ini, and
+          # the built-in server is governed by `opcache.enable`, not
+          # `opcache.enable_cli`, so `php -S` ran TYPO3 under the tracing JIT.
+          # In t3x-nr-mcp-agent that crashed the server with SIGSEGV partway
+          # through the suite, after which every test failed with connection
+          # errors. The backtrace (zend_hash_find <- zend_std_get_method <-
+          # opcache.so <- an address in no loaded library) is consistent with
+          # JIT-compiled code; the core has no symbols to prove it. Without the
+          # JIT, 20 of 20 runs passed. OPcache itself stays on.
+          server_ini=(-d opcache.jit=disable)
+          echo "OPcache settings of the server:"
+          php "${server_ini[@]}" -i | grep -E '^opcache\.(enable|jit|jit_buffer_size) ' || true
+
+          rm -f /tmp/php-server.up
+          : > /tmp/php-server.log
+          (
+            ulimit -c unlimited 2>/dev/null || true
+            php "${server_ini[@]}" -S 0.0.0.0:8080 -t "$WEB_DIR" /tmp/typo3-router.php >> /tmp/php-server.log 2>&1 &
+            pid=$!
+            echo "$pid" > /tmp/php-server.pid
+            status=0
+            wait "$pid" || status=$?
+            reason=""
+            if (( status > 128 )); then
+              reason=" (signal $(kill -l $((status - 128)) 2>/dev/null || echo $((status - 128))))"
+            fi
+            echo "[$(date -u '+%a %b %d %H:%M:%S %Y')] php -S (pid ${pid}) exited with status ${status}${reason}"
+          ) < /dev/null >> /tmp/php-server.log 2>&1 &
 
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/typo3/login > /dev/null 2>&1; then
@@ -748,6 +788,9 @@ jobs:
             cat /tmp/php-server.log
             exit 1
           fi
+          # Tells "Report PHP server status" that the server answered once, so
+          # a server that is gone later died during the tests.
+          touch /tmp/php-server.up
 
       - name: Run E2E tests
         if: inputs.setup-script == ''
@@ -757,6 +800,98 @@ jobs:
           E2E_TYPO3_VERSION: ${{ matrix.typo3 }}
           TEST_COMMAND: ${{ inputs.test-command }}
         run: bash -c "$TEST_COMMAND"
+
+      # Runs before "Stop PHP server", so a server that is gone here died on
+      # its own and was not stopped by this workflow. It never changes the job
+      # result; it only reports what the kernel and the core files say.
+      - name: Report PHP server status
+        if: inputs.setup-script == '' && always()
+        env:
+          PHP_CLI_SERVER_WORKERS: ${{ inputs.php-server-workers }}
+        run: |
+          pid=$(cat /tmp/php-server.pid 2>/dev/null || true)
+          if [[ -z "$pid" ]]; then
+            # An earlier step (composer, TYPO3 setup, npm, Playwright) failed
+            # before "Start PHP server" ran.
+            echo "PHP server was not started."
+            exit 0
+          fi
+
+          shopt -s nullglob
+          # The core pattern applies to every process in the job, so only
+          # `core.php*` belongs to the server; any other core is listed by name.
+          cores=(/tmp/php-cores/core.php*)
+          other_cores=()
+          for f in /tmp/php-cores/core.*; do
+            [[ "$f" == /tmp/php-cores/core.php* ]] || other_cores+=("$f")
+          done
+          up=false
+          [[ -f /tmp/php-server.up ]] && up=true
+          alive=false
+          dead_workers=0
+          if kill -0 "$pid" 2>/dev/null; then
+            alive=true
+            # With PHP_CLI_SERVER_WORKERS > 1 the master forks the workers and
+            # reaps them only at shutdown, so a worker that crashed stays a
+            # zombie child of the master while the master keeps running.
+            if [[ "$PHP_CLI_SERVER_WORKERS" =~ ^[0-9]+$ ]] && (( PHP_CLI_SERVER_WORKERS > 1 )); then
+              # Only php children count: a request may spawn other programs.
+              dead_workers=$(ps -o stat=,comm= --ppid "$pid" | awk '$1 ~ /^Z/ && $2 ~ /^php/ { n++ } END { print n + 0 }')
+            fi
+          fi
+
+          if (( ${#other_cores[@]} > 0 )); then
+            echo "Core files from other programs (not examined): ${other_cores[*]}"
+          fi
+
+          if [[ "$up" == true && "$alive" == true ]] && (( dead_workers == 0 && ${#cores[@]} == 0 )); then
+            echo "PHP server (pid ${pid}) is still running."
+            exit 0
+          fi
+
+          if [[ "$up" != true ]]; then
+            # "Start PHP server" already failed the job; this only adds the
+            # kernel messages and backtraces below.
+            echo "PHP server (pid ${pid}) did not come up; see the \"Start PHP server\" step."
+          elif [[ "$alive" == true ]]; then
+            echo "PHP server (pid ${pid}) is still running."
+            echo "::error::PHP built-in server: ${dead_workers} worker process(es) died, ${#cores[@]} core file(s) written; the requests being handled there failed."
+          else
+            echo "::error::The PHP built-in server (pid ${pid}) stopped during the run; the test failures after that point are connection errors, not test results."
+          fi
+          echo "::group::Last 40 lines of /tmp/php-server.log"
+          tail -n 40 /tmp/php-server.log 2>/dev/null || true
+          echo "::endgroup::"
+
+          echo "::group::Kernel messages about php, segfaults, OOM and killed processes"
+          if kernel_log=$(sudo dmesg -T 2>&1); then
+            # `php[0-9.]*\[` is the process-name form of a kernel line
+            # (`php8.3[1234]: segfault at …`); a bare `php` also matches acpiphp.
+            grep -iE 'php[0-9.]*\[[0-9]+\]|segfault|general protection|out of memory|oom|killed process' <<< "$kernel_log" || echo "(no matching kernel messages)"
+          else
+            echo "dmesg not readable: ${kernel_log}"
+          fi
+          echo "::endgroup::"
+
+          if (( ${#cores[@]} == 0 )); then
+            echo "No php core file in /tmp/php-cores."
+            exit 0
+          fi
+          if ! command -v gdb > /dev/null; then
+            sudo timeout 300 apt-get install -y -qq gdb > /dev/null 2>&1 || true
+          fi
+          for core in "${cores[@]}"; do
+            echo "::group::Backtrace from ${core}"
+            if command -v gdb > /dev/null; then
+              # gdb prints frame #0 once when it loads the core and again as the
+              # first line of `bt`; the marker keeps only the output of `bt`.
+              timeout 120 gdb -batch -ex 'echo --- bt ---\n' -ex 'bt' "$(command -v php)" "$core" 2>&1 \
+                | awk '$0 == "--- bt ---" { on = 1; next } on && /^#[0-9]+ / { print; if (++n == 40) exit }' || true
+            else
+              echo "gdb could not be installed; core file left at ${core}."
+            fi
+            echo "::endgroup::"
+          done
 
       # ─── Common: compute artifact name suffix ──────────────────────
       # Sanitize matrix values for safe artifact names. GitHub allows
