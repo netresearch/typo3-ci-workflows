@@ -126,6 +126,8 @@ show() {
 # The composer call a real install is logged as, and the fallback's.
 INSTALL_CALL='install --prefer-dist --no-progress'
 UPDATE_CALL='update --with-all-dependencies --prefer-dist --no-progress'
+# Any composer update, partial or full.
+ANY_UPDATE='^update'
 
 # check-platform-reqs --lock --format=json as Composer 2.10.3 prints it, one
 # passing entry plus the failing ones.
@@ -148,7 +150,7 @@ for job in "${JOBS[@]}"; do
     if [[ "${status}" == 0 ]] \
         && grep -qxF 'install --dry-run --no-progress' "${calls}" \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
-        && ! grep -q '^update' "${calls}" \
+        && ! grep -q "${ANY_UPDATE}" "${calls}" \
         && ! grep -q '::notice::\|::error::' "${out}"; then
         pass "${job}: a composer.lock that fits the cell is installed, not updated"
     else
@@ -170,7 +172,7 @@ for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" yes 2 2)"
     if [[ "${status}" == 2 ]] \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
-        && ! grep -q '^update' "${calls}" \
+        && ! grep -q "${ANY_UPDATE}" "${calls}" \
         && ! grep -q '::notice::' "${out}"; then
         pass "${job}: any other install failure fails the step, without an update"
     else
@@ -194,7 +196,7 @@ for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" yes 2 2 '^13.4' '' "[${OK_ENTRY},${EXT_ENTRY}]" 2)"
     if [[ "${status}" == 2 ]] \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
-        && ! grep -q '^update' "${calls}" \
+        && ! grep -q "${ANY_UPDATE}" "${calls}" \
         && ! grep -q '::notice::' "${out}"; then
         pass "${job}: a missing ext-* fails the step, without an update"
     else
@@ -204,7 +206,7 @@ for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" yes 2 2 '^13.4' '' "[${OK_ENTRY},${EXT_ENTRY},${PHP_ENTRY}]" 2)"
     if [[ "${status}" == 2 ]] \
         && grep -qxF "${INSTALL_CALL}" "${calls}" \
-        && ! grep -q '^update' "${calls}" \
+        && ! grep -q "${ANY_UPDATE}" "${calls}" \
         && ! grep -q '::notice::' "${out}"; then
         pass "${job}: a missing ext-* beside a PHP mismatch fails the step, without an update"
     else
@@ -217,7 +219,7 @@ done
 status="$(run_install unit-tests yes 100 0 '^13.4' yes)"
 if [[ "${status}" == 0 ]] \
     && [[ "$(grep -cxF "${INSTALL_CALL}" "${calls}")" == 2 ]] \
-    && ! grep -q '^update' "${calls}"; then
+    && ! grep -q "${ANY_UPDATE}" "${calls}"; then
     pass 'a network error in the install is retried through composer_retry, not updated'
 else
     fail "network error: $(show "${status}")"
