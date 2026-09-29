@@ -13,12 +13,16 @@
 #   - with a lock that fits the cell: install it, no update;
 #   - with a lock composer refuses (exit 4): update --with-all-dependencies,
 #     with a notice naming the cell;
+#   - with a lock built on a newer PHP (exit 2, and `php` the only failing
+#     requirement of `check-platform-reqs --lock`): the same fallback;
+#   - with a missing ext-*, alone or beside a PHP mismatch: fail, no update;
 #   - on any other install failure: fail, without falling back to update;
 #   - on a network error: retry the install through composer_retry.
 #
-# The stub answers `install --dry-run` with DRY_STATUS and a real install with
-# INSTALL_STATUS (or with a transport error on its first call when
-# INSTALL_FLAKY is set). Every block runs under the runner's own shell flags
+# The stub answers `install --dry-run` with DRY_STATUS, `check-platform-reqs`
+# with PLATFORM_JSON and PLATFORM_STATUS (shapes as Composer 2.10.3 prints
+# them), and a real install with INSTALL_STATUS (or with a transport error on
+# its first call when INSTALL_FLAKY is set). Every block runs under the runner's own shell flags
 # (`bash --noprofile --norc -eo pipefail`), in a shell of its own. The blocks
 # are executed, not grepped: a text probe would confirm a branch nothing
 # reaches.
@@ -61,7 +65,7 @@ fi
 
 # Runs a job's install block in a fixture checkout. Prints the exit status; the
 # composer call log (one call per line) and the output land in ${TMP}/case/.
-run_install() { # job, with-lock (yes|no), dry-run status, install status, [typo3 line], [flaky]
+run_install() { # job, with-lock (yes|no), dry-run status, install status, [typo3 line], [flaky], [platform json], [platform status]
     local dir="${TMP}/case" block
     rm -rf "${dir}"
     mkdir -p "${dir}/work"
@@ -82,6 +86,9 @@ composer() {
         'install --dry-run'*)
             printf 'dry-run output\n'
             return "$DRY_STATUS" ;;
+        'check-platform-reqs --lock --format=json')
+            printf '%s\n' "$PLATFORM_JSON"
+            return "$PLATFORM_STATUS" ;;
         install*)
             if [[ -n "${INSTALL_FLAKY:-}" && ! -e "$CALLS.flaked" ]]; then
                 : > "$CALLS.flaked"
@@ -102,6 +109,7 @@ EOF
         cd "${dir}/work" || exit 99
         COMPOSER_RETRY="${COMPOSER_RETRY_SNIPPET}" COMPOSER_INSTALL_CELL="${INSTALL_CELL_SNIPPET}" \
             DRY_STATUS="${3}" INSTALL_STATUS="${4}" INSTALL_FLAKY="${6:-}" GITHUB_JOB="${1}" \
+            PLATFORM_JSON="${7:-[]}" PLATFORM_STATUS="${8:-0}" \
             TYPO3_VERSION="${5:-^13.4}" TYPO3_PACKAGES='["typo3/cms-core"]' GITHUB_ENV="${dir}/env" \
             "${RUNNER_SHELL[@]}" "${dir}/script.sh"
     ) > "${dir}/out" 2>&1
@@ -115,8 +123,15 @@ show() {
     return
 }
 
-# The composer call a real install is logged as.
+# The composer call a real install is logged as, and the fallback's.
 INSTALL_CALL='install --prefer-dist --no-progress'
+UPDATE_CALL='update --with-all-dependencies --prefer-dist --no-progress'
+
+# check-platform-reqs --lock --format=json as Composer 2.10.3 prints it, one
+# passing entry plus the failing ones.
+OK_ENTRY='{"name":"composer-plugin-api","version":"2.9.0","status":"success","failed_requirement":null,"provider":null}'
+PHP_ENTRY='{"name":"php","version":"8.2.33","status":"failed","failed_requirement":{"source":"phpunit/php-code-coverage","type":"requires","target":"php","constraint":">=8.3"},"provider":null}'
+EXT_ENTRY='{"name":"ext-intl","version":"n/a","status":"missing","failed_requirement":{"source":"typo3/cms-core","type":"requires","target":"ext-intl","constraint":"*"},"provider":null}'
 
 for job in "${JOBS[@]}"; do
     status="$(run_install "${job}" no 0 0)"
@@ -142,9 +157,9 @@ for job in "${JOBS[@]}"; do
 
     status="$(run_install "${job}" yes 4 0)"
     if [[ "${status}" == 0 ]] \
-        && grep -qxF 'update --with-all-dependencies --prefer-dist --no-progress' "${calls}" \
+        && grep -qxF "${UPDATE_CALL}" "${calls}" \
         && ! grep -qxF "${INSTALL_CALL}" "${calls}" \
-        && grep -q "^::notice::composer.lock does not satisfy the constraints of this cell (${job}, PHP [^,]*, TYPO3 ^13.4): composer install exits 4" "${out}" \
+        && grep -q "^::notice::composer.lock cannot be installed in this cell (${job}, PHP [^,]*, TYPO3 ^13.4)\. composer install exits 4: the lock does not satisfy the constraints of this cell\. " "${out}" \
         && grep -qxF 'dry-run output' "${out}" \
         && ! grep -q '::error::' "${out}"; then
         pass "${job}: a composer.lock composer refuses (exit 4) falls back to update, with a notice"
@@ -160,6 +175,40 @@ for job in "${JOBS[@]}"; do
         pass "${job}: any other install failure fails the step, without an update"
     else
         fail "${job} with another install failure: $(show "${status}")"
+    fi
+
+    status="$(run_install "${job}" yes 2 2 '^13.4' '' "[${OK_ENTRY},${PHP_ENTRY}]" 1)"
+    if [[ "${status}" == 0 ]] \
+        && grep -qxF 'check-platform-reqs --lock --format=json' "${calls}" \
+        && grep -qxF "${UPDATE_CALL}" "${calls}" \
+        && ! grep -qxF "${INSTALL_CALL}" "${calls}" \
+        && grep -qF "::notice::composer.lock cannot be installed in this cell (${job}, PHP " "${out}" \
+        && grep -qF 'composer install exits 2: the locked packages need another PHP version (phpunit/php-code-coverage requires php >=8.3).' "${out}" \
+        && grep -qxF 'dry-run output' "${out}" \
+        && ! grep -q '::error::' "${out}"; then
+        pass "${job}: a composer.lock built on a newer PHP falls back to update, with a notice"
+    else
+        fail "${job} with a PHP-only platform mismatch: $(show "${status}")"
+    fi
+
+    status="$(run_install "${job}" yes 2 2 '^13.4' '' "[${OK_ENTRY},${EXT_ENTRY}]" 2)"
+    if [[ "${status}" == 2 ]] \
+        && grep -qxF "${INSTALL_CALL}" "${calls}" \
+        && ! grep -q '^update' "${calls}" \
+        && ! grep -q '::notice::' "${out}"; then
+        pass "${job}: a missing ext-* fails the step, without an update"
+    else
+        fail "${job} with a missing extension: $(show "${status}")"
+    fi
+
+    status="$(run_install "${job}" yes 2 2 '^13.4' '' "[${OK_ENTRY},${EXT_ENTRY},${PHP_ENTRY}]" 2)"
+    if [[ "${status}" == 2 ]] \
+        && grep -qxF "${INSTALL_CALL}" "${calls}" \
+        && ! grep -q '^update' "${calls}" \
+        && ! grep -q '::notice::' "${out}"; then
+        pass "${job}: a missing ext-* beside a PHP mismatch fails the step, without an update"
+    else
+        fail "${job} with a missing extension and a PHP mismatch: $(show "${status}")"
     fi
 done
 

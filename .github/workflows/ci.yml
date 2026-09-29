@@ -320,33 +320,52 @@ env:
     }
   # The matrix cells require their TYPO3 line with `composer require
   # --no-update` and then install. A committed composer.lock is installed as
-  # it is wherever it satisfies the cell. Where it does not (a lock at 14.3 in
-  # the ^13.4 cell), `composer install` exits 4 (Installer::
-  # ERROR_LOCK_FILE_INVALID) and changes nothing; only then does the cell
-  # resolve everything anew, with a notice, as it would without a lock (see
-  # the lowest-deps job for why not a partial update). The probe is a dry
-  # run, outside composer_retry: that would annotate the expected exit 4 as
-  # an error. Its output is shown only for exit 4; on any other result the
-  # real install runs through composer_retry, so a network error is retried
-  # and every other failure fails the step with composer's own message.
+  # it is wherever it can serve the cell. It cannot in two cases, and only in
+  # those does the cell resolve everything anew, with a notice, as it would
+  # without a lock (see the lowest-deps job for why not a partial update):
+  #   - `composer install` exits 4 (Installer::ERROR_LOCK_FILE_INVALID): the
+  #     lock lies outside the cell's constraints, e.g. a lock at 14.3 in the
+  #     ^13.4 cell;
+  #   - it exits 2 (a solver problem) and `composer check-platform-reqs --lock`
+  #     names `php` as the only failing requirement: the lock was built on a
+  #     newer PHP than the cell's, e.g. PHPUnit 12 locked on 8.3 in the 8.2
+  #     cell. A missing or failing `ext-*` is a real platform problem and
+  #     still fails, with or without a PHP mismatch beside it.
+  # The probe is a dry run, outside composer_retry: that would annotate the
+  # expected exit as an error. Its output is shown only when the cell falls
+  # back; on any other result the real install runs through composer_retry,
+  # so a network error is retried and every other failure fails the step
+  # with composer's own message.
   COMPOSER_INSTALL_CELL: |
     composer_install_cell() {
-      local status=0 out cell
+      local status=0 out reason="" platform failing cell message
       if [[ ! -f composer.lock ]]; then
         composer_retry install --prefer-dist --no-progress
         return
       fi
       out=$(composer install --dry-run --no-progress 2>&1) || status=$?
-      if [[ "$status" != 4 ]]; then
+      if [[ "$status" == 4 ]]; then
+        reason="composer install exits 4: the lock does not satisfy the constraints of this cell"
+      elif [[ "$status" == 2 ]]; then
+        # check-platform-reqs exits 1 for a failing and 2 for a missing
+        # requirement; the JSON lists both, so its exit status is not needed.
+        platform=$(composer check-platform-reqs --lock --format=json 2>/dev/null) || true
+        failing=$(jq -r '[.[] | select(.status != "success") | .name] | unique | join(" ")' <<< "$platform" 2>/dev/null) || failing=""
+        if [[ "$failing" == php ]]; then
+          reason="composer install exits 2: the locked packages need another PHP version ($(jq -r '[.[] | select(.status != "success") | .failed_requirement | "\(.source) requires php \(.constraint)"] | first' <<< "$platform"))"
+        fi
+      fi
+      if [[ -z "$reason" ]]; then
         composer_retry install --prefer-dist --no-progress
         return
       fi
       printf '%s\n' "$out"
       cell="${GITHUB_JOB:-this job}, PHP $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo '?'), TYPO3 ${TYPO3_VERSION:-?}"
-      cell=${cell//%/%25}
-      cell=${cell//$'\r'/%0D}
-      cell=${cell//$'\n'/%0A}
-      echo "::notice::composer.lock does not satisfy the constraints of this cell ($cell): composer install exits 4, so the cell resolves everything anew with composer update --with-all-dependencies instead of installing the locked versions."
+      message="composer.lock cannot be installed in this cell ($cell). $reason. The cell resolves everything anew with composer update --with-all-dependencies instead of installing the locked versions."
+      message=${message//%/%25}
+      message=${message//$'\r'/%0D}
+      message=${message//$'\n'/%0A}
+      echo "::notice::$message"
       composer_retry update --with-all-dependencies --prefer-dist --no-progress
     }
 

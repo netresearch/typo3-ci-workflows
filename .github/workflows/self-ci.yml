@@ -380,8 +380,10 @@ jobs:
         # refused a lock outside the cell's TYPO3 line (exit 4, #264). This
         # runs the six jobs' own install blocks with ci.yml's COMPOSER_RETRY
         # and COMPOSER_INSTALL_CELL against a stubbed composer: a fitting lock
-        # installs, exit 4 falls back to update -W with a notice, any other
-        # failure fails, a network error is retried, no lock installs.
+        # installs; exit 4, or exit 2 with `php` the only failing platform
+        # requirement, falls back to update -W with a notice; a missing ext-*
+        # and any other failure fail; a network error is retried; no lock
+        # installs.
         run: bash Build/Scripts/check-matrix-cell-lock.sh .github/workflows/ci.yml
 
       - name: Check the PHP server backtrace prints each frame once
