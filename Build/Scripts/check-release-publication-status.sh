@@ -138,13 +138,15 @@ done
 complete() { # state, make-latest
   (cd "${TMP}" && PATH="${TMP}/bin:${PATH}" RS="${RS}" BUILD=current STATE="${1}" \
     MAKE_LATEST="${2}" ATTEMPTS=4 REPO=o/r TAG=v1.0.0 bash -e complete.sh > /dev/null 2> "${TMP}/complete.err")
+  return
 }
 # shellcheck disable=SC2329
-fails() { ! "$@"; }
+fails() { ! "$@"; return; }
 holds() { # description, command...
   local what="${1}"
   shift
   if "$@"; then pass "${what}"; else fail "${what}"; fi
+  return
 }
 expected_assets="$(find "${TMP}/dist" -maxdepth 1 -type f -printf '%f\n' | sort | paste -sd' ')"
 
@@ -174,17 +176,21 @@ STORE="${RS}/body"
 write_status() { # block [DROP_EDIT]
   (cd "${TMP}" && PATH="${TMP}/bin:${PATH}" RS="${RS}" BLOCK="${1}" DROP_EDIT="${2:-0}" \
     REPO=o/r TAG=v1.0.0 bash -e status.sh > /dev/null 2>&1)
+  return
 }
 has() {
   if grep -qF -- "${2}" "${STORE}"; then pass "${1}"; else fail "${1}"; fi
+  return
 }
 count() {
   local n
   n="$(grep -cF -- "${2}" "${STORE}" || true)"
   if [[ "${n}" == "${3}" ]]; then pass "${1} (${n})"; else fail "${1} (got ${n}, want ${3})"; fi
+  return
 }
 START='<!-- publication-status:start -->'
 END='<!-- publication-status:end -->'
+VERIFIED="${START}"$'\n- TER: verified\n'"${END}"
 
 printf '## Changes\n- x\n\n%s\n## Publication status\n\nPending: ...\n%s\n\n## Security\nkeep me\n' \
   "${START}" "${END}" > "${STORE}"
@@ -193,7 +199,7 @@ has "the result replaces the pending line" "- TER: failure"
 count "no pending line left" "Pending:" 0
 has "text after the section is kept" "keep me"
 
-write_status "${START}"$'\n- TER: verified\n'"${END}"
+write_status "${VERIFIED}"
 count "a re-run leaves one section" "${START}" 1
 has "a re-run writes the new result" "- TER: verified"
 count "a re-run removes the old result" "- TER: failure" 0
@@ -211,19 +217,19 @@ has "the status text is inserted literally" '- a \1 $& \g<0>'
 printf '%s\n- old\n\n## Security\nkeep me\n' "${START}" > "${STORE}"
 cp "${STORE}" "${TMP}/before.md"
 holds "an unpaired marker fails the step" \
-  fails write_status "${START}"$'\n- TER: verified\n'"${END}"
+  fails write_status "${VERIFIED}"
 holds "an unpaired marker leaves the body unchanged" cmp -s "${STORE}" "${TMP}/before.md"
 
 # Start and end marker twice, or in the wrong order: also refused unchanged.
 printf '%s\n- a\n%s\n%s\n- b\n%s\n' "${START}" "${END}" "${START}" "${END}" > "${STORE}"
 cp "${STORE}" "${TMP}/before.md"
 holds "a duplicated marker pair fails the step" \
-  fails write_status "${START}"$'\n- TER: verified\n'"${END}"
+  fails write_status "${VERIFIED}"
 holds "a duplicated marker pair leaves the body unchanged" cmp -s "${STORE}" "${TMP}/before.md"
 printf '%s\n- a\n%s\n' "${END}" "${START}" > "${STORE}"
 cp "${STORE}" "${TMP}/before.md"
 holds "markers in the wrong order fail the step" \
-  fails write_status "${START}"$'\n- TER: verified\n'"${END}"
+  fails write_status "${VERIFIED}"
 holds "markers in the wrong order leave the body unchanged" cmp -s "${STORE}" "${TMP}/before.md"
 
 # An edit the API accepted but did not store must fail the step, also on the
@@ -231,6 +237,6 @@ holds "markers in the wrong order leave the body unchanged" cmp -s "${STORE}" "$
 # for the markers alone would pass there.
 printf 'Notes.\n\n%s\n- TER: failure\n%s\n' "${START}" "${END}" > "${STORE}"
 holds "a body that was not stored fails the read-back" \
-  fails write_status "${START}"$'\n- TER: verified\n'"${END}" 1
+  fails write_status "${VERIFIED}" 1
 
 exit "${FAILED}"
