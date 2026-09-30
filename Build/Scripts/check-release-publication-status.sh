@@ -133,14 +133,15 @@ mkdir -p "${TMP}/dist"
 for f in ext-1.0.0.zip ext-1.0.0.zip.sigstore.json ext-1.0.0.sbom.spdx.json checksums.txt; do
   echo "${f}" > "${TMP}/dist/${f}"
 done
-# complete and fails are called through holds, which shellcheck does not follow.
-# shellcheck disable=SC2329
+# complete and fails are called through holds, which shellcheck does not follow;
+# older releases report that as SC2317, newer ones as SC2329.
+# shellcheck disable=SC2317,SC2329
 complete() { # state, make-latest
   (cd "${TMP}" && PATH="${TMP}/bin:${PATH}" RS="${RS}" BUILD=current STATE="${1}" \
     MAKE_LATEST="${2}" ATTEMPTS=4 REPO=o/r TAG=v1.0.0 bash -e complete.sh > /dev/null 2> "${TMP}/complete.err")
   return
 }
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 fails() { ! "$@"; return; }
 holds() { # description, command...
   local what="${1}"
