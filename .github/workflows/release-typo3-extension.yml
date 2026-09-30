@@ -24,9 +24,12 @@ name: Release (TYPO3 extension)
 #   4. publication-status — writes the result of every target into the marked
 #      section of the release body, whether the targets succeeded or not.
 #
-# Recovery: re-run the tag-push run of the caller's release workflow
-# (`gh run rerun <run-id> --failed`, or "Re-run failed jobs" in the UI). That
-# works for every caller. A caller whose release workflow also declares
+# Recovery: re-run the tag-push run of the caller's release workflow. For a
+# failed target, re-run the failed jobs (`gh run rerun <run-id> --failed`, or
+# "Re-run failed jobs" in the UI). For a release left as a draft, re-run all
+# jobs (`gh run rerun <run-id>`): the dist artifact is kept for one day, so a
+# later failed-jobs re-run has nothing to upload. GitHub allows re-runs for 30
+# days after the run. A caller whose release workflow also declares
 # `workflow_dispatch` can start a fresh run on the tag instead
 # (`gh workflow run release.yml --ref vX.Y.Z`). Either way a published release
 # is left as it is — no asset is uploaded again — the targets run again, and
@@ -531,22 +534,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A draft found at the start of this job was left by an earlier run
-          # whose build may differ from this one: the SBOMs carry a creation
-          # time and a namespace UUID, and every Cosign bundle is new. Keeping
-          # its assets and adding only the missing names would publish a
-          # checksums.txt and signatures that do not match the files next to
-          # them, on a release that cannot be changed afterwards. A draft can
-          # still be changed, so remove its assets and upload this build's set.
-          if [[ "$STATE" == "draft" ]]; then
-            gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' > stale.txt
-            while IFS= read -r name; do
-              [[ -n "$name" ]] || continue
-              gh release delete-asset "$TAG" "$name" --repo "$REPO" --yes
-              echo "  removed ${name} from the draft"
-            done < stale.txt
-          fi
-
           # Read the two sides into files rather than through a pipeline or a
           # process substitution. `set -e` does not see a failure inside
           # `<(...)`, so a `gh` call that dies there would hand the loop an
@@ -555,6 +542,24 @@ jobs:
           [[ -d dist ]] || { echo "::error::dist/ is missing; nothing to upload."; exit 1; }
           find dist -maxdepth 1 -type f -printf '%f\n' | sort > expected.txt
           [[ -s expected.txt ]] || { echo "::error::dist/ holds no files."; exit 1; }
+
+          # A draft found at the start of this job was left by an earlier run
+          # whose build may differ from this one: the SBOMs carry a creation
+          # time and a namespace UUID, and every Cosign bundle is new. Keeping
+          # its assets and adding only the missing names would publish a
+          # checksums.txt and signatures that do not match the files next to
+          # them, on a release that cannot be changed afterwards. A draft can
+          # still be changed, so remove its assets and upload this build's set.
+          # This runs after the dist/ checks, so a missing build never empties
+          # the draft.
+          if [[ "$STATE" == "draft" ]]; then
+            gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' > stale.txt
+            while IFS= read -r name; do
+              [[ -n "$name" ]] || continue
+              gh release delete-asset "$TAG" "$name" --repo "$REPO" --yes
+              echo "  removed ${name} from the draft"
+            done < stale.txt
+          fi
 
           # Only assets the API reports as `uploaded` count as present. A
           # failed upload can leave the name behind in `starter` state -- an
@@ -786,13 +791,13 @@ jobs:
           PY
           gh release edit "$TAG" --repo "$REPO" --notes-file new-body.md
           # Read back and compare with what was sent: this step is the one
-          # place the status reaches the reader. Line endings and trailing
-          # newlines are normalised, since the API does not keep them as sent.
+          # place the status reaches the reader. Trailing newlines are
+          # ignored: `--jq` adds one, and text mode already folds CRLF.
           gh release view "$TAG" --repo "$REPO" --json body --jq '.body' > stored.md
           python3 - new-body.md stored.md <<'PY'
           import sys
           def norm(path):
-              return open(path, encoding="utf-8").read().replace("\r\n", "\n").rstrip("\n")
+              return open(path, encoding="utf-8").read().rstrip("\n")
           if norm(sys.argv[1]) != norm(sys.argv[2]):
               print("::error::The stored release body differs from the body this job sent.")
               sys.exit(1)

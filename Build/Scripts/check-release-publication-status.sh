@@ -214,8 +214,22 @@ holds "an unpaired marker fails the step" \
   fails write_status "${START}"$'\n- TER: verified\n'"${END}"
 holds "an unpaired marker leaves the body unchanged" cmp -s "${STORE}" "${TMP}/before.md"
 
-# An edit the API accepted but did not store must fail the step.
-printf 'Notes.\n' > "${STORE}"
+# Start and end marker twice, or in the wrong order: also refused unchanged.
+printf '%s\n- a\n%s\n%s\n- b\n%s\n' "${START}" "${END}" "${START}" "${END}" > "${STORE}"
+cp "${STORE}" "${TMP}/before.md"
+holds "a duplicated marker pair fails the step" \
+  fails write_status "${START}"$'\n- TER: verified\n'"${END}"
+holds "a duplicated marker pair leaves the body unchanged" cmp -s "${STORE}" "${TMP}/before.md"
+printf '%s\n- a\n%s\n' "${END}" "${START}" > "${STORE}"
+cp "${STORE}" "${TMP}/before.md"
+holds "markers in the wrong order fail the step" \
+  fails write_status "${START}"$'\n- TER: verified\n'"${END}"
+holds "markers in the wrong order leave the body unchanged" cmp -s "${STORE}" "${TMP}/before.md"
+
+# An edit the API accepted but did not store must fail the step, also on the
+# ordinary re-run where the body already carries a status section: a check
+# for the markers alone would pass there.
+printf 'Notes.\n\n%s\n- TER: failure\n%s\n' "${START}" "${END}" > "${STORE}"
 holds "a body that was not stored fails the read-back" \
   fails write_status "${START}"$'\n- TER: verified\n'"${END}" 1
 
