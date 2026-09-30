@@ -2,27 +2,33 @@ name: Release (TYPO3 extension)
 
 # Orchestrator for the full TYPO3-extension release pipeline.
 #
-# Order of operations (immutability-friendly):
+# A release is the signed tag plus its GitHub release. TER, Packagist and
+# docs.typo3.org are publication targets: a target that fails does not undo
+# or withhold the release, it turns the run red and is shown as failed in the
+# release body.
+#
+# Order of operations:
 #
 #   1. build-and-sign — create archives, SBOMs, checksums, Cosign signatures,
 #      build-provenance attestations. Uploads everything as the `dist` run
 #      artifact. No external publishing yet.
-#   2. publish-to-ter, verify-packagist, verify-docs — all run in parallel
-#      after the build succeeds. docs.typo3.org renders via Intercept's
-#      GitHub-push webhook (independent of TER), so the docs verifier is not
-#      coupled to the TER publish. Each sub-workflow is idempotent and polls
+#   2. create-release — the GitHub release is created with every artifact the
+#      build produced. Under GitHub "Immutable Releases" the tag and the
+#      assets are locked from here on; title and body stay editable. Its body
+#      carries a "Publication status" section between two HTML-comment
+#      markers, pending until step 4.
+#   3. publish-to-ter, verify-packagist, verify-docs — run in parallel after
+#      the release exists. docs.typo3.org renders via Intercept's GitHub-push
+#      webhook (independent of TER). Each sub-workflow is idempotent and polls
 #      its respective service until the new version is visible.
-#   3. create-release — the GitHub release is created LAST, in a single
-#      atomic `softprops/action-gh-release` call, with every artifact and the
-#      verification-evidence block already determined. Compatible with GitHub
-#      "Immutable Releases": nothing is added, removed, or edited after
-#      publication.
+#   4. publication-status — writes the result of every target into the marked
+#      section of the release body, whether the targets succeeded or not.
 #
-# If any of step 2's sub-jobs fail, step 3 is skipped: no release is created,
-# the tag exists without a GitHub release, and the maintainer re-runs the
-# whole orchestrator (which is idempotent on every publish step) to finish.
-# The `republish.yml` dispatcher is for recovering a completed release whose
-# publishes later regressed — not for mid-release crashes.
+# Recovery: re-run the orchestrator on the tag
+# (`gh workflow run release.yml --ref vX.Y.Z` in the caller). A published
+# release is left as it is — no asset is uploaded again — the targets run
+# again, and the status section is rewritten. A release left as a draft by a
+# failed asset upload is completed and published.
 
 on:
   workflow_call:
@@ -139,23 +145,6 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
-
-      - name: Preflight TER token
-        # When `secrets:` is mapped explicitly on a `uses:` job, GitHub
-        # Actions treats the entry as "present" regardless of whether the
-        # value resolved to a real string or an empty one — so the
-        # called workflow's `required: true` declaration is satisfied
-        # even if the consumer never set the secret. Fail here with a
-        # clear message instead of letting `tailor ter:publish` fail
-        # later with a less direct API auth error.
-        if: ${{ !inputs.skip-ter }}
-        env:
-          TER_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
-        run: |
-          if [[ -z "$TER_TOKEN" ]]; then
-            echo "::error::TYPO3_TER_ACCESS_TOKEN secret is required when skip-ter=false"
-            exit 1
-          fi
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -383,83 +372,13 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  publish-to-ter:
-    name: Publish to TER
-    needs: build-and-sign
-    if: ${{ !inputs.skip-ter }}
-    # Declare permissions at the calling-job level so GitHub's startup-time
-    # validator sees that we can cover publish-to-ter.yml's inner
-    # `contents: read`. The workflow-level `permissions: {}` is empty and
-    # is inherited by `uses:` jobs just like by regular jobs — but an
-    # inherited empty set cannot satisfy the called workflow's required
-    # `contents: read`, so without this per-job grant the workflow fails
-    # with `startup_failure` and zero materialised jobs.
-    permissions:
-      contents: read
-    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
-    with:
-      ref: ${{ github.ref }}
-      # create-release runs after this job, so publish-to-ter cannot read the
-      # release body it would otherwise prefer. Hand it the same notes.
-      release-notes: ${{ needs.build-and-sign.outputs.release-notes }}
-      derive-tags-from-composer: ${{ inputs.derive-tags-from-composer }}
-      exclude-from-packaging: ${{ inputs.exclude-from-packaging }}
-    # Explicit secret pass-through (NOT `secrets: inherit`) so a
-    # compromised action in the called workflow can't reach unrelated
-    # org secrets. Forwards only the TER token actually needed.
-    secrets:
-      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
-
-  verify-packagist:
-    name: Verify Packagist
-    needs: build-and-sign
-    if: ${{ !inputs.skip-packagist }}
-    # Packagist's GitHub integration auto-subscribes to push/tag events and
-    # rescans without our workflow having to do anything. This job only
-    # polls the Packagist API until the new version is visible.
-    permissions:
-      contents: read
-    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
-    with:
-      package-name: ${{ inputs.package-name }}
-      version: ${{ needs.build-and-sign.outputs.version }}
-
-  verify-docs:
-    name: Verify docs.typo3.org
-    needs: build-and-sign
-    # docs.typo3.org renders via the Intercept webhook subscribed to GitHub
-    # push events — independent of TER. Runs in parallel with the TER and
-    # Packagist jobs, no `needs:` coupling.
-    if: ${{ !inputs.skip-docs }}
-    permissions:
-      contents: read
-    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
-    with:
-      package-name: ${{ inputs.package-name }}
-
   create-release:
     name: Create GitHub Release
-    needs: [build-and-sign, publish-to-ter, verify-packagist, verify-docs]
-    # Run only if every publish that is under our control reached success. This
-    # enforces "release-last": the GitHub release is a receipt of a successful
-    # run, and never a canvas that gets edited afterwards. If TER or Packagist
-    # failed, no release is created and the orchestrator must be re-run.
-    #
-    # verify-docs is deliberately NOT part of this gate: docs.typo3.org renders
-    # via the external Intercept webhook, which can be down or slow at tag time
-    # (a 500 from docs-hook.typo3.org once blocked an otherwise-complete
-    # release). It must never hold back the GitHub release, TER, or Packagist.
-    # Since it also stopped failing on a miss, it no longer reddens the run
-    # either — the two halves of the same intent, which used to disagree.
-    # verify-docs stays in `needs` so its `dispatched` output reaches the
-    # evidence step.
-    if: >-
-      ${{
-        always()
-        && needs.build-and-sign.result == 'success'
-        && (needs.publish-to-ter.result == 'success' || needs.publish-to-ter.result == 'skipped')
-        && (needs.verify-packagist.result == 'success' || needs.verify-packagist.result == 'skipped')
-      }}
+    needs: build-and-sign
+    # The release is the tag plus this GitHub release; TER, Packagist and
+    # docs.typo3.org run after it as publication targets and cannot withhold
+    # it. The publication-status job at the end writes their results into the
+    # marked section of the body.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -470,61 +389,46 @@ jobs:
         with:
           egress-policy: audit
 
+      # A re-run on the tag is the recovery path for a failed target, so this
+      # job must cope with a release that already exists. Under Immutable
+      # Releases the assets of a published release cannot be changed, and
+      # both the action and the completion step below would try to upload
+      # them. Three states:
+      #   absent    - create the release (the normal first run)
+      #   draft     - an earlier run died during the asset upload; the
+      #               completion step finishes it
+      #   published - leave it alone; only the targets and the status run
+      - name: Read the release state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft' > draft.txt 2> view.err; then
+            if [[ "$(cat draft.txt)" == "true" ]]; then
+              STATE=draft
+            else
+              STATE=published
+            fi
+          elif grep -qi 'release not found' view.err; then
+            STATE=absent
+          else
+            # Any other failure (rate limit, network, permissions) must not
+            # read as "absent": that would try to create a second release.
+            echo "::error::Could not read the release for ${TAG}: $(cat view.err)"
+            exit 1
+          fi
+          echo "Release ${TAG}: ${STATE}"
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+
       - name: Download dist artifact
+        if: steps.state.outputs.state != 'published'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-dist
           path: dist/
-
-      - name: Compose verification-evidence block
-        id: evidence
-        env:
-          PACKAGE: ${{ inputs.package-name }}
-          KEY: ${{ inputs.extension-key }}
-          VERSION: ${{ needs.build-and-sign.outputs.version }}
-          TER_RESULT: ${{ needs.publish-to-ter.result }}
-          PKGST_RESULT: ${{ needs.verify-packagist.result }}
-          DOCS_RESULT: ${{ needs.verify-docs.result }}
-          DOCS_DISPATCHED: ${{ needs.verify-docs.outputs.dispatched }}
-        run: |
-          DELIMITER="ghadelim_$(openssl rand -hex 8)"
-          # Intercept maps the tag to a major.minor docs branch (v0.8.1 → 0.8),
-          # so the published URL uses major.minor, not the full semver.
-          DOCS_BRANCH=$(echo "$VERSION" | awk -F. '{printf "%s.%s", $1, $2}')
-          {
-            echo "block<<$DELIMITER"
-            echo "## Publication status"
-            echo ""
-            if [[ "$TER_RESULT" == "success" ]]; then
-              echo "- TER: [extensions.typo3.org/extension/${KEY}](https://extensions.typo3.org/extension/${KEY}) — ${VERSION} verified"
-            elif [[ "$TER_RESULT" == "skipped" ]]; then
-              echo "- TER: skipped"
-            fi
-            if [[ "$PKGST_RESULT" == "success" ]]; then
-              echo "- Packagist: [packagist.org/packages/${PACKAGE}](https://packagist.org/packages/${PACKAGE}) — ${VERSION} verified"
-            elif [[ "$PKGST_RESULT" == "skipped" ]]; then
-              echo "- Packagist: skipped"
-            fi
-            # docs.typo3.org path uses the composer package name verbatim
-            # (`{vendor}/{repo-name}` with dashes), NOT the TYPO3 extension key
-            # (which uses underscores).
-            #
-            # "accepted by Intercept" is the strongest claim available here:
-            # the verify job no longer waits for the render to finish, so it
-            # knows the job was dispatched and nothing about its outcome.
-            # Saying "render verified" would overclaim.
-            if [[ "$DOCS_DISPATCHED" == "true" ]]; then
-              echo "- Documentation: [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/) — render accepted by Intercept"
-            elif [[ "$DOCS_RESULT" == "skipped" ]]; then
-              echo "- Documentation: skipped"
-            else
-              # Render not yet confirmed (Intercept webhook down/slow at tag
-              # time). The release is published regardless; the render catches
-              # up on the next Intercept delivery.
-              echo "- Documentation: render pending — will appear at [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/)"
-            fi
-            echo "$DELIMITER"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release (atomic, all assets)
         id: gh-release
@@ -534,6 +438,7 @@ jobs:
         # asset set. The completion step below finishes the job or fails
         # loudly, and `continue-on-error` is what lets it run at all.
         continue-on-error: true
+        if: steps.state.outputs.state == 'absent'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           make_latest: ${{ inputs.make-latest }}
@@ -557,7 +462,11 @@ jobs:
             composer require ${{ inputs.package-name }}
             ```
 
-            ${{ steps.evidence.outputs.block }}
+            <!-- publication-status:start -->
+            ## Publication status
+
+            Pending: TER, Packagist and docs.typo3.org run after this release is created.
+            <!-- publication-status:end -->
 
             ## Security
 
@@ -598,6 +507,7 @@ jobs:
       # an unpublished draft and the job fails, which is the same outcome as
       # today minus the manual repair.
       - name: Complete and publish the release
+        if: steps.state.outputs.state != 'published'
         env:
           GH_TOKEN: ${{ github.token }}
           # This job never checks the repository out -- it only downloads
@@ -675,3 +585,170 @@ jobs:
             echo "Publishing the completed release."
             gh release edit "$TAG" --repo "$REPO" --draft=false
           fi
+
+  publish-to-ter:
+    name: Publish to TER
+    needs: [build-and-sign, create-release]
+    if: ${{ !inputs.skip-ter }}
+    # Declare permissions at the calling-job level so GitHub's startup-time
+    # validator sees that we can cover publish-to-ter.yml's inner
+    # `contents: read`. The workflow-level `permissions: {}` is empty and
+    # is inherited by `uses:` jobs just like by regular jobs — but an
+    # inherited empty set cannot satisfy the called workflow's required
+    # `contents: read`, so without this per-job grant the workflow fails
+    # with `startup_failure` and zero materialised jobs.
+    permissions:
+      contents: read
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
+    with:
+      ref: ${{ github.ref }}
+      # The release exists by now, but its body opens with the installation
+      # and verification boilerplate. Hand TER the change list itself.
+      release-notes: ${{ needs.build-and-sign.outputs.release-notes }}
+      derive-tags-from-composer: ${{ inputs.derive-tags-from-composer }}
+      exclude-from-packaging: ${{ inputs.exclude-from-packaging }}
+    # Explicit secret pass-through (NOT `secrets: inherit`) so a
+    # compromised action in the called workflow can't reach unrelated
+    # org secrets. Forwards only the TER token actually needed.
+    secrets:
+      TYPO3_TER_ACCESS_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+
+  verify-packagist:
+    name: Verify Packagist
+    needs: [build-and-sign, create-release]
+    if: ${{ !inputs.skip-packagist }}
+    # Packagist's GitHub integration auto-subscribes to push/tag events and
+    # rescans without our workflow having to do anything. This job only
+    # polls the Packagist API until the new version is visible.
+    permissions:
+      contents: read
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-packagist.yml@main
+    with:
+      package-name: ${{ inputs.package-name }}
+      version: ${{ needs.build-and-sign.outputs.version }}
+
+  verify-docs:
+    name: Verify docs.typo3.org
+    needs: [build-and-sign, create-release]
+    # docs.typo3.org renders via the Intercept webhook subscribed to GitHub
+    # push events — independent of TER. Runs in parallel with the TER and
+    # Packagist jobs, no `needs:` coupling between the three.
+    if: ${{ !inputs.skip-docs }}
+    permissions:
+      contents: read
+    uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-docs.yml@main
+    with:
+      package-name: ${{ inputs.package-name }}
+
+  publication-status:
+    name: Record publication status
+    needs: [build-and-sign, create-release, publish-to-ter, verify-packagist, verify-docs]
+    # Runs whatever the targets did, as long as the release exists: a failed
+    # target is recorded as failed, not left as "pending". verify-docs is in
+    # `needs` for its `dispatched` output; docs.typo3.org renders through an
+    # external webhook and is reported, never waited for.
+    if: ${{ always() && needs.create-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Compose verification-evidence block
+        id: evidence
+        env:
+          PACKAGE: ${{ inputs.package-name }}
+          KEY: ${{ inputs.extension-key }}
+          VERSION: ${{ needs.build-and-sign.outputs.version }}
+          TER_RESULT: ${{ needs.publish-to-ter.result }}
+          PKGST_RESULT: ${{ needs.verify-packagist.result }}
+          DOCS_RESULT: ${{ needs.verify-docs.result }}
+          DOCS_DISPATCHED: ${{ needs.verify-docs.outputs.dispatched }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          DELIMITER="ghadelim_$(openssl rand -hex 8)"
+          # Intercept maps the tag to a major.minor docs branch (v0.8.1 → 0.8),
+          # so the published URL uses major.minor, not the full semver.
+          DOCS_BRANCH=$(echo "$VERSION" | awk -F. '{printf "%s.%s", $1, $2}')
+          {
+            echo "block<<$DELIMITER"
+            echo "<!-- publication-status:start -->"
+            echo "## Publication status"
+            echo ""
+            if [[ "$TER_RESULT" == "success" ]]; then
+              echo "- TER: [extensions.typo3.org/extension/${KEY}](https://extensions.typo3.org/extension/${KEY}) — ${VERSION} verified"
+            elif [[ "$TER_RESULT" == "skipped" ]]; then
+              echo "- TER: skipped"
+            else
+              echo "- TER: ${TER_RESULT} — see [the release run](${RUN_URL}); re-run the release workflow on the tag to retry"
+            fi
+            if [[ "$PKGST_RESULT" == "success" ]]; then
+              echo "- Packagist: [packagist.org/packages/${PACKAGE}](https://packagist.org/packages/${PACKAGE}) — ${VERSION} verified"
+            elif [[ "$PKGST_RESULT" == "skipped" ]]; then
+              echo "- Packagist: skipped"
+            else
+              echo "- Packagist: ${PKGST_RESULT} — see [the release run](${RUN_URL}); re-run the release workflow on the tag to retry"
+            fi
+            # docs.typo3.org path uses the composer package name verbatim
+            # (`{vendor}/{repo-name}` with dashes), NOT the TYPO3 extension key
+            # (which uses underscores).
+            #
+            # "accepted by Intercept" is the strongest claim available here:
+            # the verify job no longer waits for the render to finish, so it
+            # knows the job was dispatched and nothing about its outcome.
+            # Saying "render verified" would overclaim.
+            if [[ "$DOCS_DISPATCHED" == "true" ]]; then
+              echo "- Documentation: [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/) — render accepted by Intercept"
+            elif [[ "$DOCS_RESULT" == "skipped" ]]; then
+              echo "- Documentation: skipped"
+            else
+              # Render not yet confirmed (Intercept webhook down/slow at tag
+              # time). The release is published regardless; the render catches
+              # up on the next Intercept delivery.
+              echo "- Documentation: render pending — will appear at [docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/](https://docs.typo3.org/p/${PACKAGE}/${DOCS_BRANCH}/en-us/)"
+            fi
+            echo "<!-- publication-status:end -->"
+            echo "$DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
+      # Replaces only the text between the two markers, so a body that was
+      # rewritten by hand after the first run keeps everything else. If the
+      # markers were removed, the section is appended.
+      - name: Write the publication status into the release body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          BLOCK: ${{ steps.evidence.outputs.block }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$REPO" --json body --jq '.body' > body.md
+          python3 - body.md new-body.md <<'PY'
+          import os, re, sys
+          src, dst = sys.argv[1], sys.argv[2]
+          body = open(src, encoding="utf-8").read()
+          block = os.environ["BLOCK"].strip("\n")
+          pattern = re.compile(
+              r"<!-- publication-status:start -->.*?<!-- publication-status:end -->",
+              re.S,
+          )
+          if pattern.search(body):
+              new = pattern.sub(lambda _m: block, body, count=1)
+          else:
+              new = body.rstrip("\n") + "\n\n" + block + "\n"
+          open(dst, "w", encoding="utf-8").write(new)
+          PY
+          gh release edit "$TAG" --repo "$REPO" --notes-file new-body.md
+          # Read back: the edit endpoint answers 2xx for a body it did not store
+          # exactly as sent only in theory, but this step is the one place the
+          # status reaches the reader, so check it.
+          gh release view "$TAG" --repo "$REPO" --json body --jq '.body' > stored.md
+          grep -qF '<!-- publication-status:end -->' stored.md || {
+            echo "::error::The release body for ${TAG} does not carry the publication status after the edit."
+            exit 1
+          }
+          echo "Publication status written to ${TAG}."

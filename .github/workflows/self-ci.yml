@@ -408,6 +408,13 @@ jobs:
           .github/workflows/release-typo3-extension.yml
           .github/workflows/publish-to-ter.yml
 
+      - name: Check a release re-run leaves a published release alone
+        # The GitHub release is created before TER, Packagist and docs, so a
+        # re-run on the tag is the retry path for a failed target. It must not
+        # upload assets to a published (immutable) release, and it must
+        # rewrite the publication status section instead of adding a second.
+        run: bash Build/Scripts/check-release-publication-status.sh .github/workflows/release-typo3-extension.yml
+
       - name: Check that no testsuite name is hardcoded in a workflow
         # extended-testing.yml carried `--testsuite="Unit Tests"` in seven
         # places, which is one extension's spelling written into a shared
