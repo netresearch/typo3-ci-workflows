@@ -519,11 +519,11 @@ The server runs with OPcache but without the OPcache JIT (`-d opcache.jit=disabl
 
 Composer dependency audit and [Opengrep](https://github.com/opengrep/opengrep) SAST (the fully-OSS LGPL-2.1 fork of Semgrep). Both jobs run by default.
 
-Opengrep **blocks CI on findings at severity WARNING or higher** and also uploads SARIF to the repo's **Security** tab. Override `opengrep-config` to tune behavior:
+Opengrep **blocks CI on findings of severity WARNING and ERROR** (`--severity WARNING --severity ERROR`) and also uploads SARIF to the repo's **Security** tab. `--severity` selects exactly the level it names and can be repeated, so every level that should report and gate is listed; findings of an unlisted level are neither reported nor uploaded. Override `opengrep-config` to tune behavior:
 
 - **Report-only (all findings, CI never fails):** `--config auto` — drop both `--error` and `--severity` so every finding reaches the Security tab without gating merges.
 - **Block only on critical (RCE/SQLi/XXE):** `--config auto --error --severity ERROR`.
-- **Block on everything, including INFO:** `--config auto --error --severity INFO`.
+- **Block on everything, including INFO:** `--config auto --error` — without `--severity` every level is reported and gates.
 
 ### Minimal caller
 
@@ -543,7 +543,7 @@ jobs:
 | `php-version` | string | `8.5` | PHP version for Composer audit |
 | `skip-composer-audit` | boolean | `false` | Skip Composer dependency audit |
 | `skip-opengrep` | boolean | `false` | Skip Opengrep SAST scanning |
-| `opengrep-config` | string | `--config auto --error --severity WARNING` | Opengrep scan arguments (rules + behavior flags). See the [overrides above](#security) for report-only, ERROR-only, and INFO-blocking variants. |
+| `opengrep-config` | string | `--config auto --error --severity WARNING --severity ERROR` | Opengrep scan arguments (rules + behavior flags). See the [overrides above](#security) for report-only, ERROR-only, and INFO-blocking variants. |
 
 ---
 
