@@ -180,7 +180,7 @@ jobs:
           TER_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
         run: |
           if [[ -z "$TER_TOKEN" ]]; then
-            echo "::error::The TYPO3_TER_ACCESS_TOKEN secret is empty or not set for this repository. Set it, or pass skip-ter: true to release-typo3-extension.yml if the extension is not published to TER."
+            echo "::error::The TYPO3_TER_ACCESS_TOKEN secret is empty or not set for this repository. Set it. If the extension is not published to TER, do not call this workflow; callers of release-typo3-extension.yml pass skip-ter: true."
             exit 1
           fi
 

@@ -359,6 +359,7 @@ jobs:
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
+          shellcheck -x Build/Scripts/check-release-publication-status.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses

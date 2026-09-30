@@ -24,11 +24,15 @@ name: Release (TYPO3 extension)
 #   4. publication-status — writes the result of every target into the marked
 #      section of the release body, whether the targets succeeded or not.
 #
-# Recovery: re-run the orchestrator on the tag
-# (`gh workflow run release.yml --ref vX.Y.Z` in the caller). A published
-# release is left as it is — no asset is uploaded again — the targets run
-# again, and the status section is rewritten. A release left as a draft by a
-# failed asset upload is completed and published.
+# Recovery: re-run the tag-push run of the caller's release workflow
+# (`gh run rerun <run-id> --failed`, or "Re-run failed jobs" in the UI). That
+# works for every caller. A caller whose release workflow also declares
+# `workflow_dispatch` can start a fresh run on the tag instead
+# (`gh workflow run release.yml --ref vX.Y.Z`). Either way a published release
+# is left as it is — no asset is uploaded again — the targets run again, and
+# the status section is rewritten. A release left as a draft by a failed asset
+# upload loses its partial assets and gets the full set of the current build,
+# then is published.
 
 on:
   workflow_call:
@@ -381,6 +385,11 @@ jobs:
     # marked section of the body.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A manual retry started while the tag-push run is still going must not
+    # read "absent" at the same time and create the release twice.
+    concurrency:
+      group: release-create-${{ github.repository }}-${{ github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -517,8 +526,26 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           ATTEMPTS: '4'
+          STATE: ${{ steps.state.outputs.state }}
+          MAKE_LATEST: ${{ inputs.make-latest }}
         run: |
           set -euo pipefail
+
+          # A draft found at the start of this job was left by an earlier run
+          # whose build may differ from this one: the SBOMs carry a creation
+          # time and a namespace UUID, and every Cosign bundle is new. Keeping
+          # its assets and adding only the missing names would publish a
+          # checksums.txt and signatures that do not match the files next to
+          # them, on a release that cannot be changed afterwards. A draft can
+          # still be changed, so remove its assets and upload this build's set.
+          if [[ "$STATE" == "draft" ]]; then
+            gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' > stale.txt
+            while IFS= read -r name; do
+              [[ -n "$name" ]] || continue
+              gh release delete-asset "$TAG" "$name" --repo "$REPO" --yes
+              echo "  removed ${name} from the draft"
+            done < stale.txt
+          fi
 
           # Read the two sides into files rather than through a pipeline or a
           # process substitution. `set -e` does not see a failure inside
@@ -583,7 +610,10 @@ jobs:
 
           if [[ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft')" == "true" ]]; then
             echo "Publishing the completed release."
-            gh release edit "$TAG" --repo "$REPO" --draft=false
+            # --latest carries make-latest: without it this path would not
+            # pass the input on, and a backport release could take the Latest
+            # badge from the top major line.
+            gh release edit "$TAG" --repo "$REPO" --draft=false --latest="$MAKE_LATEST"
           fi
 
   publish-to-ter:
@@ -650,6 +680,10 @@ jobs:
     if: ${{ always() && needs.create-release.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Two runs on one tag must not read and rewrite the body at the same time.
+    concurrency:
+      group: release-status-${{ github.repository }}-${{ github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -716,8 +750,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # Replaces only the text between the two markers, so a body that was
-      # rewritten by hand after the first run keeps everything else. If the
-      # markers were removed, the section is appended.
+      # rewritten by hand after the first run keeps everything else. If both
+      # markers were removed, the section is appended. If only one of them is
+      # left, or either appears twice, the step fails: matching from an
+      # orphaned marker to a new one would delete the text between them.
       - name: Write the publication status into the release body
         env:
           GH_TOKEN: ${{ github.token }}
@@ -728,27 +764,37 @@ jobs:
           set -euo pipefail
           gh release view "$TAG" --repo "$REPO" --json body --jq '.body' > body.md
           python3 - body.md new-body.md <<'PY'
-          import os, re, sys
+          import os, sys
           src, dst = sys.argv[1], sys.argv[2]
           body = open(src, encoding="utf-8").read()
           block = os.environ["BLOCK"].strip("\n")
-          pattern = re.compile(
-              r"<!-- publication-status:start -->.*?<!-- publication-status:end -->",
-              re.S,
-          )
-          if pattern.search(body):
-              new = pattern.sub(lambda _m: block, body, count=1)
-          else:
+          start, end = "<!-- publication-status:start -->", "<!-- publication-status:end -->"
+          n_start, n_end = body.count(start), body.count(end)
+          if n_start == 1 and n_end == 1 and body.index(start) < body.index(end):
+              i, j = body.index(start), body.index(end) + len(end)
+              new = body[:i] + block + body[j:]
+          elif n_start == 0 and n_end == 0:
               new = body.rstrip("\n") + "\n\n" + block + "\n"
+          else:
+              print(
+                  f"::error::The release body holds {n_start} start and {n_end} end "
+                  "marker(s) of the publication status section, not one ordered pair "
+                  "or none. Restore one pair, or remove both, and re-run this job."
+              )
+              sys.exit(1)
           open(dst, "w", encoding="utf-8").write(new)
           PY
           gh release edit "$TAG" --repo "$REPO" --notes-file new-body.md
-          # Read back: the edit endpoint answers 2xx for a body it did not store
-          # exactly as sent only in theory, but this step is the one place the
-          # status reaches the reader, so check it.
+          # Read back and compare with what was sent: this step is the one
+          # place the status reaches the reader. Line endings and trailing
+          # newlines are normalised, since the API does not keep them as sent.
           gh release view "$TAG" --repo "$REPO" --json body --jq '.body' > stored.md
-          grep -qF '<!-- publication-status:end -->' stored.md || {
-            echo "::error::The release body for ${TAG} does not carry the publication status after the edit."
-            exit 1
-          }
+          python3 - new-body.md stored.md <<'PY'
+          import sys
+          def norm(path):
+              return open(path, encoding="utf-8").read().replace("\r\n", "\n").rstrip("\n")
+          if norm(sys.argv[1]) != norm(sys.argv[2]):
+              print("::error::The stored release body differs from the body this job sent.")
+              sys.exit(1)
+          PY
           echo "Publication status written to ${TAG}."
