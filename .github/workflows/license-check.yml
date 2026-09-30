@@ -9,10 +9,10 @@ on:
         type: string
         default: '8.5'
       forbidden-licenses:
-        description: 'Regex pattern for forbidden license identifiers'
+        description: 'Extended regex (grep -E) matched against the output of `composer licenses --format=json`. The default refuses the SPDX identifiers SSPL-1.0 and BUSL-1.1 (any version, also inside an expression) and the bare strings "SSPL", "BSL" and "BUSL"; BSL-1.0 (Boost) passes.'
         required: false
         type: string
-        default: '"(SSPL|BSL)"'
+        default: '"(SSPL|BSL|BUSL)"|(^|[^A-Za-z0-9])(SSPL|BUSL)-[0-9]'
 
 # CALLER REQUIREMENTS
 # ===================

@@ -613,7 +613,7 @@ jobs:
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `php-version` | string | `8.5` | PHP version for license checking |
-| `forbidden-licenses` | string | `"(SSPL\|BSL)"` | Regex pattern for forbidden licenses |
+| `forbidden-licenses` | string | `"(SSPL\|BSL\|BUSL)"\|(^\|[^A-Za-z0-9])(SSPL\|BUSL)-[0-9]` | Extended regex matched against `composer licenses --format=json`. The default refuses `SSPL-1.0` and `BUSL-1.1` (also inside a licence expression) and the bare strings `SSPL`, `BSL` and `BUSL`; `BSL-1.0` (Boost Software License) passes. |
 
 ---
 
