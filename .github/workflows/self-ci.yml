@@ -360,6 +360,8 @@ jobs:
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
           shellcheck -x Build/Scripts/check-release-publication-status.sh
+          shellcheck -x Build/Scripts/check-forbidden-licenses.sh
+          shellcheck -x Build/Scripts/check-opengrep-severity.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
@@ -415,6 +417,20 @@ jobs:
         # upload assets to a published (immutable) release, and it must
         # rewrite the publication status section instead of adding a second.
         run: bash Build/Scripts/check-release-publication-status.sh .github/workflows/release-typo3-extension.yml
+
+      - name: Check the licence audit refuses SSPL and BUSL
+        # The default pattern `"(SSPL|BSL)"` matched only the bare strings, so
+        # dependencies declaring the SPDX ids SSPL-1.0 or BUSL-1.1 passed
+        # (#267). This runs the step's own bash with the input's default
+        # against fixture `composer licenses` output.
+        run: bash Build/Scripts/check-forbidden-licenses.sh .github/workflows/license-check.yml
+
+      - name: Check Opengrep fails on WARNING and ERROR findings
+        # `--severity WARNING` alone selects only WARNING rules, so ERROR
+        # findings never failed the job (#268). This installs the pinned
+        # binary with the workflow's own step and runs the scan step with the
+        # input's default against one fixture finding per severity.
+        run: bash Build/Scripts/check-opengrep-severity.sh .github/workflows/security.yml
 
       - name: Check that no testsuite name is hardcoded in a workflow
         # extended-testing.yml carried `--testsuite="Unit Tests"` in seven
