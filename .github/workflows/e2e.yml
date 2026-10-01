@@ -518,6 +518,10 @@ jobs:
 
       - name: Setup TYPO3
         if: inputs.setup-script == ''
+        env:
+          # Passed through the environment, not interpolated into the script,
+          # so the input value is never parsed as shell code.
+          SETUP_EXTENSIONS: ${{ inputs.typo3-setup-extensions }}
         run: |
           # Wait for database
           DB_READY=false
@@ -583,7 +587,7 @@ jobs:
             --no-interaction \
             --force
 
-          if [[ "${{ inputs.typo3-setup-extensions }}" == "true" ]]; then
+          if [[ "$SETUP_EXTENSIONS" == "true" ]]; then
             .Build/bin/typo3 extension:setup --no-interaction
           fi
 
