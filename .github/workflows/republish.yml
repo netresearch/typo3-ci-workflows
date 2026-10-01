@@ -6,10 +6,12 @@ name: Republish
 # without cutting a new version. All sub-steps are idempotent — running
 # republish against a fully-published version is a safe no-op.
 #
-# Explicitly does NOT mutate the existing GitHub release, per our release
-# immutability policy. If the release itself is missing (first-run aborted
-# before creation), the orchestrator `release-typo3-extension.yml` must be
-# re-run instead; this workflow only retries the external publishes.
+# Does not touch the GitHub release, so the "Publication status" section of
+# its body keeps the result of the last orchestrator run. For a release whose
+# targets failed during the release run, re-run the orchestrator
+# `release-typo3-extension.yml` on the tag instead: it leaves a published
+# release as it is, retries the targets and rewrites that section. It also
+# creates the release if the first run never got that far.
 
 on:
   workflow_call:

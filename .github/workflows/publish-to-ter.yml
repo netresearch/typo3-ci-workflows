@@ -15,9 +15,9 @@ on:
       release-notes:
         description: >-
           Changelog text for TER's upload comment. Pass the notes the caller
-          already generated; without it this workflow can only read the GitHub
-          release body, which does not exist yet when the release is created
-          after publishing, leaving TER with the bare fallback link.
+          already generated; without it this workflow falls back to the GitHub
+          release body, which opens with installation and verification
+          boilerplate, or to the bare link when no release exists yet.
         required: false
         type: string
         default: ''
@@ -165,6 +165,24 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+
+      - name: Preflight TER token
+        # When `secrets:` is mapped explicitly on a `uses:` job, GitHub
+        # Actions treats the entry as "present" regardless of whether the
+        # value resolved to a real string or an empty one — so the
+        # `required: true` declaration above is satisfied even if the
+        # consumer never set the secret. Fail here with a clear message
+        # instead of letting `tailor ter:publish` fail later with a less
+        # direct API auth error. This check used to run in the build job of
+        # release-typo3-extension.yml, where a missing token stopped the whole
+        # release; TER is one publication target, so only this job fails.
+        env:
+          TER_TOKEN: ${{ secrets.TYPO3_TER_ACCESS_TOKEN }}
+        run: |
+          if [[ -z "$TER_TOKEN" ]]; then
+            echo "::error::The TYPO3_TER_ACCESS_TOKEN secret is empty or not set for this repository. Set it. If the extension is not published to TER, do not call this workflow; callers of release-typo3-extension.yml pass skip-ter: true."
+            exit 1
+          fi
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -358,10 +376,10 @@ jobs:
 
           # 0. Prefer the CHANGELOG section for this version. It is curated,
           # committed, and present at the tagged commit — unlike the GitHub
-          # release body, which does not exist yet on a tag-triggered release,
-          # and unlike the generated notes, which are just "Initial release" for
-          # a first release. Absent file or absent section yields nothing and
-          # falls through.
+          # release body, which may not exist yet when this workflow runs on its
+          # own, and unlike the generated notes, which are just "Initial release"
+          # for a first release. Absent file or absent section yields nothing
+          # and falls through.
           if [[ -f CHANGELOG.md ]]; then
             COMMENT=$(python3 - "$VERSION" CHANGELOG.md <<'PY'
           import re, sys
@@ -384,10 +402,10 @@ jobs:
           fi
 
           # 1. Otherwise use notes handed over by the caller. The
-          # release-typo3-extension pipeline creates the GitHub release *after*
-          # this job, so the lookup below cannot find a body during a normal
-          # tag-triggered release and every upload would fall through to the
-          # bare link. Callers that already generated the notes pass them in.
+          # release-typo3-extension pipeline passes its generated change list:
+          # the GitHub release exists by then, but its body opens with
+          # installation and verification boilerplate that does not belong in
+          # a TER upload comment.
           if [[ -z "${COMMENT// }" ]] && [[ -n "${RELEASE_NOTES// }" ]]; then
             COMMENT=$(
               printf '%s' "$RELEASE_NOTES" \

@@ -686,6 +686,19 @@ jobs:
       make-latest: false
 ```
 
+### TYPO3 extension releases: the release first, then the targets
+
+`release-typo3-extension.yml` treats a release as the signed tag plus its GitHub release. TER, Packagist and docs.typo3.org are publication targets. The order is:
+
+1. Build and sign the archives, SBOMs and checksums.
+2. Create the GitHub release with every asset. Its body carries a "Publication status" section between the markers `<!-- publication-status:start -->` and `<!-- publication-status:end -->`.
+3. Publish to TER and check Packagist and docs.typo3.org.
+4. Write the result of each target into the marked section, also when a target failed.
+
+A failed target turns the run red and shows as failed in the release body; the release stays. To retry a failed target, re-run the failed jobs of the tag-push run (`gh run rerun <run-id> --failed`, or "Re-run failed jobs" in the UI). For a release left as a draft, re-run all jobs (`gh run rerun <run-id>`): the build artifact is kept for one day, so a later failed-jobs re-run has nothing to upload. GitHub allows re-runs for 30 days after the run. If the repository's release workflow also declares `workflow_dispatch`, `gh workflow run release.yml --ref vX.Y.Z` starts a fresh run on the tag. The re-run leaves a published release and its assets as they are, runs the targets again and rewrites only the marked section, so a body rewritten by hand keeps everything else. A release left as a draft by a failed asset upload loses its partial assets, gets the full set from the current build, and is published.
+
+A missing `TYPO3_TER_ACCESS_TOKEN` fails the TER target, not the release. For an extension that is not published to TER, pass `skip-ter: true`.
+
 ---
 
 ## Release gate
