@@ -397,13 +397,21 @@ jobs:
               text = open(path, encoding='utf-8').read()
           except OSError:
               sys.exit(0)
-          # Matches "## [1.2.3] - 2026-01-01", "## 1.2.3" and "## v1.2.3".
-          heading = re.compile(r'^##\s+\[?v?' + re.escape(version) + r'\]?.*$', re.M)
+          # Matches "## [1.2.3] - 2026-01-01", "## 1.2.3" and "## v1.2.3", and
+          # the same under a level-1 heading ("# 1.2.3"), which some
+          # changelogs use for versions. The version must end there: "1.2.3"
+          # does not match a "1.2.30" or "1.2.3-rc1" heading.
+          heading = re.compile(
+              r'^(#{1,2})\s+\[?v?' + re.escape(version) + r'(?![\w.+-])\]?.*$', re.M
+          )
           found = heading.search(text)
           if not found:
               sys.exit(0)
           rest = text[found.end():]
-          following = re.search(r'^##\s+', rest, re.M)
+          # The section ends at the next heading of the same or a higher level,
+          # so the subsections of a level-1 version section stay in it.
+          level = len(found.group(1))
+          following = re.search(r'^#{1,%d}\s+' % level, rest, re.M)
           section = (rest[:following.start()] if following else rest).strip()
           sys.stdout.write(section[:1900])
           PY
