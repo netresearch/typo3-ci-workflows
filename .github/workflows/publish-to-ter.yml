@@ -127,7 +127,9 @@ on:
         description: >-
           'true' when the job failed because a filter in front of the TER API
           refused the upload comment. A re-run on the same tag sends the same
-          comment, so it cannot succeed.
+          comment unless it was taken from the GitHub release body, which
+          release-typo3-extension.yml never uses because it passes
+          release-notes.
         value: ${{ jobs.publish.outputs.comment-refused }}
     secrets:
       TYPO3_EXTENSION_KEY:
@@ -382,6 +384,10 @@ jobs:
           RELEASE_NOTES: ${{ inputs.release-notes }}
         run: |
           COMMENT=""
+          # Where the comment came from, for the comment check's advice: a
+          # comment from the release body can be corrected by editing the body
+          # and republishing, the other sources only by a new release.
+          SOURCE=""
 
           # 0. Prefer the CHANGELOG section for this version. It is curated,
           # committed, and present at the tagged commit — unlike the GitHub
@@ -409,13 +415,25 @@ jobs:
               sys.exit(0)
           rest = text[found.end():]
           # The section ends at the next heading of the same or a higher level,
-          # so the subsections of a level-1 version section stay in it.
+          # so the subsections of a level-1 version section stay in it. A line
+          # inside a code fence is not a heading: "# comment" in a shell sample
+          # must not end the section.
           level = len(found.group(1))
-          following = re.search(r'^#{1,%d}\s+' % level, rest, re.M)
-          section = (rest[:following.start()] if following else rest).strip()
+          ending = re.compile(r'^#{1,%d}\s+' % level)
+          lines, fenced = [], False
+          for line in rest.splitlines():
+              if re.match(r'^\s*(```|~~~)', line):
+                  fenced = not fenced
+              elif not fenced and ending.match(line):
+                  break
+              lines.append(line)
+          section = '\n'.join(lines).strip()
           sys.stdout.write(section[:1900])
           PY
             )
+            if [[ -n "${COMMENT// }" ]]; then
+              SOURCE=changelog
+            fi
           fi
 
           # 1. Otherwise use notes handed over by the caller. The
@@ -428,6 +446,7 @@ jobs:
               printf '%s' "$RELEASE_NOTES" \
                 | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
             )
+            SOURCE=release-notes
           fi
 
           # 2. Otherwise read the GitHub release body (curated, may cover
@@ -455,6 +474,7 @@ jobs:
                   | sed 's/<[^>]*>//g' \
                   | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
               )
+              SOURCE=release-body
             fi
           fi
 
@@ -477,6 +497,7 @@ jobs:
                 printf '%s' "$LOG" \
                   | python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:1900])'
               )
+              SOURCE=commit-log
             fi
           fi
 
@@ -558,6 +579,7 @@ jobs:
             echo "comment<<$DELIMITER"
             echo "$COMMENT"
             echo "$DELIMITER"
+            echo "source=${SOURCE:-default}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check if version is already on TER
@@ -669,8 +691,9 @@ jobs:
         # HTML "403 Forbidden" page before the API sees the request (measured:
         # the text "(be_user", a parenthesis directly followed by a database
         # column name). tailor reports that as "Reason: Unknown (Status 403)",
-        # which reads like a refused token, and every re-run on the tag sends
-        # the same comment. The API answers a request without credentials with
+        # which reads like a refused token, and a re-run on the tag sends the
+        # same comment unless it came from the editable release body. The API
+        # answers a request without credentials with
         # JSON, so the comment is sent here without credentials, which cannot
         # publish anything: first a neutral control text, to know that the API
         # is reachable at all, then the comment itself (#273).
@@ -678,6 +701,7 @@ jobs:
           KEY: ${{ steps.extkey.outputs.key }}
           VERSION: ${{ steps.version.outputs.version }}
           COMMENT: ${{ steps.comment.outputs.comment }}
+          SOURCE: ${{ steps.comment.outputs.source }}
           TER_API_URL: https://extensions.typo3.org/api/v1/extension
         run: |
           PROBE_DIR="$(mktemp -d)"
@@ -712,7 +736,18 @@ jobs:
           echo "::group::Upload comment that was refused"
           printf '%s\n' "$COMMENT"
           echo "::endgroup::"
-          echo "::error title=TER refused the upload comment::A filter in front of the TER API answers this upload comment with an HTML 403 page, while a neutral text reaches the API. The token is not the problem. The comment is built from what the release already holds (the CHANGELOG section for ${VERSION} at the released commit, else the release notes or the commit log), so re-running the release on this tag sends the same text and fails the same way. Reword the comment text and release a new version. Text known to be refused: a parenthesis directly followed by a database column name, such as '(be_user'."
+          case "$SOURCE" in
+            release-body)
+              ADVICE="The comment was taken from the GitHub release body, so edit the body and publish to TER again (republish.yml with target ter)."
+              ;;
+            changelog)
+              ADVICE="The comment is the CHANGELOG section for ${VERSION} at the released commit, so re-running on this tag sends the same text and fails the same way. Reword the section and release a new version."
+              ;;
+            *)
+              ADVICE="The comment comes from the ${SOURCE} of this release, so re-running on this tag sends the same text and fails the same way. Add a CHANGELOG section for the next version with reworded text and release it."
+              ;;
+          esac
+          echo "::error title=TER refused the upload comment::A filter in front of the TER API answers this upload comment with an HTML 403 page, while a neutral text reaches the API. The token is not the problem. ${ADVICE} Text known to be refused: a parenthesis directly followed by a database column name, such as '(be_user'."
           exit 1
 
       - name: Publish to TER

@@ -105,6 +105,20 @@ expect_comment() {
     return 0
 }
 
+# expect_source NAME VERSION SOURCE: the step's `source` output.
+expect_source() {
+    local got
+    CASES=$((CASES + 1))
+    comment_for "${1}" "${2}" >/dev/null
+    got="$(output_value "${TMP}/c-${1}/out" source)"
+    if [[ "${got}" == "${3}" ]]; then
+        pass "${1} ${2}: source ${got}"
+    else
+        fail "${1} ${2}: source '${got}', expected '${3}'"
+    fi
+    return 0
+}
+
 cat > "${TMP}/level2.md" <<'MD'
 # Changelog
 
@@ -151,6 +165,23 @@ cat > "${TMP}/prefix.md" <<'MD'
 - Entry for the real 1.2.3
 MD
 
+cat > "${TMP}/fence.md" <<'MD'
+# 3.0.0
+
+## Changed
+
+```bash
+# a shell comment inside a sample
+composer update
+```
+
+- Entry after the sample
+
+# 2.9.0
+
+- Entry for 2.9.0
+MD
+
 cat > "${TMP}/none.md" <<'MD'
 # Changelog
 
@@ -164,6 +195,9 @@ expect_comment level2 1.2.3 'Level-two entry for 1.2.3' 'Fixed:' -- 'Entry for 1
 expect_comment level1 5.0.3 'Level-one entry for 5.0.3' 'Second subsection of 5.0.3' -- 'Entry for 5.0.2'
 expect_comment prefix 1.2.3 'Entry for the real 1.2.3' -- 'Entry for 1.2.30' 'Entry for 1.2.3-rc1'
 expect_comment none 2.0.0 'Released version 2.0.0' -- 'Entry for 1.0.0'
+expect_comment fence 3.0.0 'a shell comment inside a sample' 'Entry after the sample' -- 'Entry for 2.9.0'
+expect_source level2 1.2.3 changelog
+expect_source none 2.0.0 default
 
 # --- "Check TER accepts the upload comment" ---------------------------------
 
@@ -198,7 +232,7 @@ check_case() {
     mkdir -p "${work}"
     : > "${work}/out"
     (cd "${work}" \
-        && env "$@" PATH="${TMP}/bin:${PATH}" KEY='demo_ext' VERSION='1.2.3' COMMENT="${comment}" \
+        && env SOURCE='changelog' "$@" PATH="${TMP}/bin:${PATH}" KEY='demo_ext' VERSION='1.2.3' COMMENT="${comment}" \
            TER_API_URL='https://ter.invalid/api/v1/extension' GITHUB_OUTPUT="${work}/out" \
            bash -e "${TMP}/check.sh" > "${work}/log" 2>&1) || status=$?
     printf '%s' "${status}" > "${work}/status"
@@ -229,6 +263,11 @@ check_case refused 'Restricts the query (be_users only).'
 expect_check refused 1 'true' '::error title=TER refused the upload comment::'
 check_case refused-at '@not-a-file (be_user'
 expect_check refused-at 1 'true' '::error title=TER refused the upload comment::'
+expect_check refused 1 'true' 'Reword the section and release a new version.'
+check_case refused-body 'Restricts the query (be_users only).' SOURCE=release-body
+expect_check refused-body 1 'true' 'edit the body and publish to TER again'
+check_case refused-notes 'Restricts the query (be_users only).' SOURCE=release-notes
+expect_check refused-notes 1 'true' 'Add a CHANGELOG section for the next version'
 check_case unreachable 'Restricts the query (be_users only).' TER_STUB=down
 expect_check unreachable 0 '' '::warning title=TER comment check skipped::'
 check_case gateway 'Fixed: anything.' TER_STUB=gateway

@@ -891,7 +891,7 @@ Why: TYPO3 14.3 takes the version from `extra.typo3/cms.version`, falling back t
 
 Republishing a tag with `republish.yml` or `force-republish` runs the same check. A historic tag whose `composer.json` was stale is refused, and the `tailor ter:update` metadata sync for it is skipped as well, because it runs in the same job. A pushed tag cannot be corrected, so the fix is a new release with matching fields. There is no input to skip the check.
 
-The TER upload comment is the `CHANGELOG.md` section of the released version at the tagged commit: a level-1 or level-2 heading naming the version (`# 1.2.3`, `## [1.2.3] - 2026-01-01`, `## v1.2.3`), up to the next heading of the same or a higher level. Without such a section it falls back to the `release-notes` input, the GitHub release body, and the commit log since the previous tag. A filter in front of the TER API refuses some comment texts with an HTML 403 page, which tailor reports as `Reason: Unknown (Status 403)`. Before uploading, the job therefore sends a neutral text and then the comment to the upload endpoint without credentials, which cannot publish anything. When only the comment is refused, the job fails with an error that says so, prints the comment, and sets the `comment-refused` output; a re-run on the same tag would send the same text, so the fix is a reworded section and a new release. When the neutral text does not reach the API either, the check is skipped with a warning.
+The TER upload comment is the `CHANGELOG.md` section of the released version at the tagged commit: a level-1 or level-2 heading naming the version (`# 1.2.3`, `## [1.2.3] - 2026-01-01`, `## v1.2.3`), up to the next heading of the same or a higher level. Without such a section it falls back to the `release-notes` input, the GitHub release body, and the commit log since the previous tag. A filter in front of the TER API refuses some comment texts with an HTML 403 page, which tailor reports as `Reason: Unknown (Status 403)`. Before uploading, the job therefore sends a neutral text and then the comment to the upload endpoint without credentials, which cannot publish anything. When only the comment is refused, the job fails with an error that says so, prints the comment, and sets the `comment-refused` output. A re-run on the same tag would send the same text when the comment came from the CHANGELOG, the `release-notes` input or the commit log, so the fix there is a reworded section and a new release; a comment taken from the GitHub release body can be corrected by editing the body and publishing again with `republish.yml`. When the neutral text does not reach the API either, the check is skipped with a warning. The section ends at a heading outside a code fence, so a `# comment` line in a shell sample stays in the section.
 
 ### Minimal caller
 
@@ -929,7 +929,7 @@ jobs:
 
 | Output | Description |
 |--------|-------------|
-| `comment-refused` | `true` when the job failed because the TER upload comment was refused before it reached the API. `release-typo3-extension.yml` uses it to say so in the release's publication status instead of recommending a re-run. |
+| `comment-refused` | `true` when the job failed because the TER upload comment was refused before it reached the API. `release-typo3-extension.yml` uses it to say so in the release's publication status instead of recommending a re-run. When the output does not arrive, the status falls back to the generic re-run advice. |
 
 ### Notes on the "External manual" field
 
