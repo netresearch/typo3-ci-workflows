@@ -891,6 +891,8 @@ Why: TYPO3 14.3 takes the version from `extra.typo3/cms.version`, falling back t
 
 Republishing a tag with `republish.yml` or `force-republish` runs the same check. A historic tag whose `composer.json` was stale is refused, and the `tailor ter:update` metadata sync for it is skipped as well, because it runs in the same job. A pushed tag cannot be corrected, so the fix is a new release with matching fields. There is no input to skip the check.
 
+The TER upload comment is the `CHANGELOG.md` section of the released version at the tagged commit: a level-1 or level-2 heading naming the version (`# 1.2.3`, `## [1.2.3] - 2026-01-01`, `## v1.2.3`), up to the next heading of the same or a higher level. Without such a section it falls back to the `release-notes` input, the GitHub release body, and the commit log since the previous tag. A filter in front of the TER API refuses some comment texts with an HTML 403 page, which tailor reports as `Reason: Unknown (Status 403)`. Before uploading, the job therefore sends a neutral text and then the comment to the upload endpoint without credentials, which cannot publish anything. When only the comment is refused, the job fails with an error that says so, prints the comment, and sets the `comment-refused` output. Re-running the same workflow on the tag sends the same text. A CHANGELOG section is fixed at the tagged commit, so it needs a reworded section and a new release; any other comment can be corrected by editing the GitHub release body and publishing again with `republish.yml`, which passes no `release-notes` and so takes the comment from the release body. When the neutral text does not reach the API either, the check is skipped with a warning. The section ends at a heading outside a code fence, so a `# comment` line in a shell sample stays in the section.
+
 ### Minimal caller
 
 ```yaml
@@ -922,6 +924,12 @@ jobs:
 |--------|----------|-------------|
 | `TYPO3_TER_ACCESS_TOKEN` | Yes | TER API access token |
 | `TYPO3_EXTENSION_KEY` | No | Deprecated: auto-resolved from composer.json |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `comment-refused` | `true` when the job failed because the TER upload comment was refused before it reached the API. `release-typo3-extension.yml` uses it to say so in the release's publication status instead of recommending a re-run. When the output does not arrive, the status falls back to the generic re-run advice. |
 
 ### Notes on the "External manual" field
 
