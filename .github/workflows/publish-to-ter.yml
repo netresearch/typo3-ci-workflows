@@ -126,10 +126,9 @@ on:
       comment-refused:
         description: >-
           'true' when the job failed because a filter in front of the TER API
-          refused the upload comment. A re-run on the same tag sends the same
-          comment unless it was taken from the GitHub release body, which
-          release-typo3-extension.yml never uses because it passes
-          release-notes.
+          refused the upload comment. Re-running the same workflow on the tag
+          sends the same comment; the job's error names the correction for
+          the comment's source.
         value: ${{ jobs.publish.outputs.comment-refused }}
     secrets:
       TYPO3_EXTENSION_KEY:
@@ -385,8 +384,9 @@ jobs:
         run: |
           COMMENT=""
           # Where the comment came from, for the comment check's advice: a
-          # comment from the release body can be corrected by editing the body
-          # and republishing, the other sources only by a new release.
+          # CHANGELOG section is fixed at the tagged commit, so only a new
+          # release corrects it. Without one, republish.yml (which passes no
+          # release-notes) takes the comment from the editable release body.
           SOURCE=""
 
           # 0. Prefer the CHANGELOG section for this version. It is curated,
@@ -691,9 +691,8 @@ jobs:
         # HTML "403 Forbidden" page before the API sees the request (measured:
         # the text "(be_user", a parenthesis directly followed by a database
         # column name). tailor reports that as "Reason: Unknown (Status 403)",
-        # which reads like a refused token, and a re-run on the tag sends the
-        # same comment unless it came from the editable release body. The API
-        # answers a request without credentials with
+        # which reads like a refused token, and re-running the same workflow
+        # on the tag sends the same comment. The API answers a request without credentials with
         # JSON, so the comment is sent here without credentials, which cannot
         # publish anything: first a neutral control text, to know that the API
         # is reachable at all, then the comment itself (#273).
@@ -737,14 +736,11 @@ jobs:
           printf '%s\n' "$COMMENT"
           echo "::endgroup::"
           case "$SOURCE" in
-            release-body)
-              ADVICE="The comment was taken from the GitHub release body, so edit the body and publish to TER again (republish.yml with target ter)."
-              ;;
             changelog)
               ADVICE="The comment is the CHANGELOG section for ${VERSION} at the released commit, so re-running on this tag sends the same text and fails the same way. Reword the section and release a new version."
               ;;
             *)
-              ADVICE="The comment comes from the ${SOURCE} of this release, so re-running on this tag sends the same text and fails the same way. Add a CHANGELOG section for the next version with reworded text and release it."
+              ADVICE="The comment came from the ${SOURCE} of this release. Re-running the same workflow sends the same text. Edit the GitHub release body instead and publish to TER again with republish.yml (target ter): without a CHANGELOG section for ${VERSION}, republish takes the comment from the release body."
               ;;
           esac
           echo "::error title=TER refused the upload comment::A filter in front of the TER API answers this upload comment with an HTML 403 page, while a neutral text reaches the API. The token is not the problem. ${ADVICE} Text known to be refused: a parenthesis directly followed by a database column name, such as '(be_user'."

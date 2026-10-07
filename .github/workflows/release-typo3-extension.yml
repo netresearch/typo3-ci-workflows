@@ -725,7 +725,7 @@ jobs:
               echo "- TER: skipped"
             elif [[ "$TER_COMMENT_REFUSED" == "true" ]]; then
               # A re-run sends the same comment from the same tag (#273).
-              echo "- TER: ${TER_RESULT} — TER refused the upload comment, see [the release run](${RUN_URL}); a re-run on this tag sends the same comment, so reword it and release a new version"
+              echo "- TER: ${TER_RESULT} — TER refused the upload comment; a re-run of this workflow sends the same comment. The error in [the release run](${RUN_URL}) says how to correct it"
             else
               echo "- TER: ${TER_RESULT} — see [the release run](${RUN_URL}); re-run the release workflow on the tag to retry"
             fi

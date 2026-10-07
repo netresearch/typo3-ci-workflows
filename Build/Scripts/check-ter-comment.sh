@@ -265,9 +265,9 @@ check_case refused-at '@not-a-file (be_user'
 expect_check refused-at 1 'true' '::error title=TER refused the upload comment::'
 expect_check refused 1 'true' 'Reword the section and release a new version.'
 check_case refused-body 'Restricts the query (be_users only).' SOURCE=release-body
-expect_check refused-body 1 'true' 'edit the body and publish to TER again'
+expect_check refused-body 1 'true' 'Edit the GitHub release body instead and publish to TER again with republish.yml'
 check_case refused-notes 'Restricts the query (be_users only).' SOURCE=release-notes
-expect_check refused-notes 1 'true' 'Add a CHANGELOG section for the next version'
+expect_check refused-notes 1 'true' 'Edit the GitHub release body instead and publish to TER again with republish.yml'
 check_case unreachable 'Restricts the query (be_users only).' TER_STUB=down
 expect_check unreachable 0 '' '::warning title=TER comment check skipped::'
 check_case gateway 'Fixed: anything.' TER_STUB=gateway
@@ -293,7 +293,7 @@ status_line() { # TER_COMMENT_REFUSED value -> the TER line of the block
 printf 'Compose verification-evidence block (%s)\n' "${RELEASE}"
 CASES=$((CASES + 1))
 line="$(status_line true)"
-if [[ "${line}" == *"refused the upload comment"* && "${line}" != *"to retry"* ]]; then
+if [[ "${line}" == *"refused the upload comment"* && "${line}" == *"says how to correct it"* && "${line}" != *"to retry"* ]]; then
     pass "comment refused: no re-run advice"
 else
     fail "comment refused: ${line}"
