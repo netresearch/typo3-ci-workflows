@@ -182,6 +182,24 @@ composer update
 - Entry for 2.9.0
 MD
 
+cat > "${TMP}/nested-fence.md" <<'MD'
+# 4.0.0
+
+````markdown
+```bash
+# a comment in a nested sample
+```
+~~~
+# still inside the outer fence
+````
+
+- Entry after the nested sample
+
+# 3.9.0
+
+- Entry for 3.9.0
+MD
+
 cat > "${TMP}/none.md" <<'MD'
 # Changelog
 
@@ -196,6 +214,7 @@ expect_comment level1 5.0.3 'Level-one entry for 5.0.3' 'Second subsection of 5.
 expect_comment prefix 1.2.3 'Entry for the real 1.2.3' -- 'Entry for 1.2.30' 'Entry for 1.2.3-rc1'
 expect_comment none 2.0.0 'Released version 2.0.0' -- 'Entry for 1.0.0'
 expect_comment fence 3.0.0 'a shell comment inside a sample' 'Entry after the sample' -- 'Entry for 2.9.0'
+expect_comment nested-fence 4.0.0 'a comment in a nested sample' 'still inside the outer fence' 'Entry after the nested sample' -- 'Entry for 3.9.0'
 expect_source level2 1.2.3 changelog
 expect_source none 2.0.0 default
 

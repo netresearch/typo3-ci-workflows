@@ -420,11 +420,21 @@ jobs:
           # must not end the section.
           level = len(found.group(1))
           ending = re.compile(r'^#{1,%d}\s+' % level)
-          lines, fenced = [], False
+          # CommonMark: a fence closes only on a line of the opener's
+          # character, at least as long, followed by nothing but whitespace.
+          lines, fence = [], None
           for line in rest.splitlines():
-              if re.match(r'^\s*(```|~~~)', line):
-                  fenced = not fenced
-              elif not fenced and ending.match(line):
+              marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', line)
+              if fence is None and marker:
+                  fence = marker.group(1)
+              elif (
+                  fence is not None and marker
+                  and marker.group(1)[0] == fence[0]
+                  and len(marker.group(1)) >= len(fence)
+                  and not marker.group(2).strip()
+              ):
+                  fence = None
+              elif fence is None and ending.match(line):
                   break
               lines.append(line)
           section = '\n'.join(lines).strip()
