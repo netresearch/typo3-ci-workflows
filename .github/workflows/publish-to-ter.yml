@@ -122,6 +122,13 @@ on:
         required: false
         type: string
         default: ''
+    outputs:
+      comment-refused:
+        description: >-
+          'true' when the job failed because a filter in front of the TER API
+          refused the upload comment. A re-run on the same tag sends the same
+          comment, so it cannot succeed.
+        value: ${{ jobs.publish.outputs.comment-refused }}
     secrets:
       TYPO3_EXTENSION_KEY:
         description: "Deprecated: extension key is auto-resolved from composer.json"
@@ -160,6 +167,8 @@ jobs:
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     permissions:
       contents: read
+    outputs:
+      comment-refused: ${{ steps.comment-check.outputs.refused == 'true' }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -644,6 +653,59 @@ jobs:
           printf("%s: %d directories, %d files\n", $file, count($config['directories']), count($config['files']));
           PHP
           php /tmp/check-exclude.php "$EXCLUDE_FILE"
+
+      - name: Check TER accepts the upload comment
+        id: comment-check
+        if: steps.precheck.outputs.already-published != 'true'
+        # A filter in front of the TER API refuses some upload comments with an
+        # HTML "403 Forbidden" page before the API sees the request (measured:
+        # the text "(be_user", a parenthesis directly followed by a database
+        # column name). tailor reports that as "Reason: Unknown (Status 403)",
+        # which reads like a refused token, and every re-run on the tag sends
+        # the same comment. The API answers a request without credentials with
+        # JSON, so the comment is sent here without credentials, which cannot
+        # publish anything: first a neutral control text, to know that the API
+        # is reachable at all, then the comment itself (#273).
+        env:
+          KEY: ${{ steps.extkey.outputs.key }}
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMENT: ${{ steps.comment.outputs.comment }}
+          TER_API_URL: https://extensions.typo3.org/api/v1/extension
+        run: |
+          PROBE_DIR="$(mktemp -d)"
+          printf 'x' > "$PROBE_DIR/probe.zip"
+          printf 'Released version %s' "$VERSION" > "$PROBE_DIR/control.txt"
+          printf '%s' "$COMMENT" > "$PROBE_DIR/comment.txt"
+          # probe FILE: prints "<http status> <content type>". The field value
+          # is read from the file (`<`), so a comment starting with @ or < is
+          # sent as text, not as a file reference.
+          probe() {
+            local out
+            out=$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' --max-time 30 \
+              -X POST "${TER_API_URL}/${KEY}/${VERSION}" \
+              -F "description=<$1" -F gplCompliant=1 -F "file=@$PROBE_DIR/probe.zip") || true
+            printf '%s' "${out:-000}"
+          }
+          read -r CONTROL_STATUS CONTROL_TYPE <<< "$(probe "$PROBE_DIR/control.txt")"
+          if [[ "$CONTROL_TYPE" != application/json* ]]; then
+            echo "::warning title=TER comment check skipped::The TER API did not answer a neutral control request with JSON (HTTP ${CONTROL_STATUS}, ${CONTROL_TYPE:-no content type}), so the upload comment cannot be checked. Publishing without the check."
+            exit 0
+          fi
+          read -r STATUS TYPE <<< "$(probe "$PROBE_DIR/comment.txt")"
+          if [[ "$TYPE" == application/json* ]]; then
+            echo "The upload comment reaches the TER API (HTTP ${STATUS}, JSON answer)."
+            exit 0
+          fi
+          if [[ "$STATUS" != "403" ]]; then
+            echo "::warning title=TER comment check inconclusive::The upload comment got HTTP ${STATUS} (${TYPE:-no content type}) where the control text got JSON. Publishing anyway; if tailor fails, check the comment."
+            exit 0
+          fi
+          echo "refused=true" >> "$GITHUB_OUTPUT"
+          echo "::group::Upload comment that was refused"
+          printf '%s\n' "$COMMENT"
+          echo "::endgroup::"
+          echo "::error title=TER refused the upload comment::A filter in front of the TER API answers this upload comment with an HTML 403 page, while a neutral text reaches the API. The token is not the problem. The comment is built from what the release already holds (the CHANGELOG section for ${VERSION} at the released commit, else the release notes or the commit log), so re-running the release on this tag sends the same text and fails the same way. Reword the comment text and release a new version. Text known to be refused: a parenthesis directly followed by a database column name, such as '(be_user'."
+          exit 1
 
       - name: Publish to TER
         if: steps.precheck.outputs.already-published != 'true'
