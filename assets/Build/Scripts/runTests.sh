@@ -16,7 +16,15 @@
 # Reference: https://github.com/TYPO3BestPractices/tea
 #
 
-trap 'clean_up;exit 2' SIGINT
+# The network this run creates is removed by the EXIT trap armed right after
+# `network create` below, so every way out of the script takes it along: the
+# end of a suite, each `exit 1` on an invalid option or a failed step, and a
+# conf suite that calls exit itself. Before, only the end of the script and
+# SIGINT removed it, and every early exit left one network behind — each
+# holding a subnet until the address pool runs out. A signal only has to end
+# the script; the EXIT trap does the rest.
+trap 'exit 2' SIGINT
+trap 'exit 143' SIGTERM
 
 wait_for() {
     local host=${1}
@@ -66,12 +74,17 @@ wait_for_http() {
 }
 
 clean_up() {
-    if [[ -n "${NETWORK:-}" ]] && [[ -n "${CONTAINER_BIN:-}" ]]; then
+    # Only a network this run created. NETWORK alone is not proof of that: it is
+    # a generic name an environment can carry, and this function force-removes
+    # every container attached to it. The flag also makes a second call — an
+    # explicit clean_up followed by the EXIT trap — a no-op.
+    if [[ "${NETWORK_CREATED:-0}" == "1" ]] && [[ -n "${NETWORK:-}" ]] && [[ -n "${CONTAINER_BIN:-}" ]]; then
         ATTACHED_CONTAINERS=$(${CONTAINER_BIN} ps --filter network=${NETWORK} --format='{{.Names}}' 2>/dev/null)
         for ATTACHED_CONTAINER in ${ATTACHED_CONTAINERS}; do
             ${CONTAINER_BIN} rm -f ${ATTACHED_CONTAINER} >/dev/null 2>&1
         done
         ${CONTAINER_BIN} network rm ${NETWORK} >/dev/null 2>&1
+        NETWORK_CREATED=0
     fi
     return 0
 }
@@ -794,6 +807,8 @@ NETWORK_CREATE_ERROR="$(${CONTAINER_BIN} network create ${NETWORK} 2>&1 >/dev/nu
     echo "  ${CONTAINER_BIN} network ls, then remove the ones no container uses." >&2
     exit 1
 }
+NETWORK_CREATED=1
+trap 'clean_up' EXIT
 
 if [[ ${CONTAINER_BIN} = "${DOCKER_BIN}" ]]; then
     CONTAINER_COMMON_PARAMS="${CONTAINER_INTERACTIVE} --rm --network ${NETWORK} --add-host "${CONTAINER_HOST}:host-gateway" ${USERSET} -e RUNTESTS_IN_CONTAINER=1 -v ${ROOT_DIR}:${ROOT_DIR} -w ${ROOT_DIR}"
