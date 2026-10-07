@@ -49,7 +49,9 @@ cat > "${ROOT}/Build/Scripts/runTests.conf" <<'CONF'
 suite_ok() { return 0; }
 suite_fail() { return 3; }
 suite_bail() { exit 4; }
-suite_hang() { sleep 30; }
+# Writes a marker once the suite runs, i.e. after the network exists and the
+# EXIT trap is armed, so the SIGTERM case below never signals before that.
+suite_hang() { echo 'suite ready' >> "${STUB_LOG}"; sleep 30; }
 CONF
 
 # $1 label, $2 expected exit code, rest: runner arguments. -b docker, because
@@ -107,7 +109,7 @@ term_log="${TMP}/sigterm.log"
     PATH="${TMP}/bin:${PATH}" STUB_LOG="${term_log}" setsid "${RUNNER}" -b docker -s hang </dev/null >/dev/null 2>&1 &
     pid=$!
     for _ in $(seq 1 50); do
-        grep -q '^network create' "${term_log}" && break
+        grep -q '^suite ready' "${term_log}" && break
         sleep 0.1
     done
     kill -TERM -- "-${pid}" 2>/dev/null
