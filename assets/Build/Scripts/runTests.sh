@@ -751,14 +751,17 @@ ROOT_DIR="${PROJECT_ROOT}"
 mkdir -p .Build/.cache
 mkdir -p ${WEB_DIR}/typo3temp/var/tests
 
-IMAGE_PREFIX="docker.io/"
+# Docker official images come from AWS's mirror of them, not from Docker Hub.
+# A GitHub runner pulls anonymously, and Docker Hub's anonymous pull limit
+# failed whole runs before a test started (toomanyrequests). The mirror carries
+# the same images under the same tags, without that limit and without a login.
+LIBRARY_IMAGE_PREFIX="public.ecr.aws/docker/library/"
 TYPO3_IMAGE_PREFIX="ghcr.io/typo3/"
 CONTAINER_INTERACTIVE="-it --init"
 
 IS_CORE_CI=0
 if [[ "${CI}" == "true" ]] || ! [[ -t 0 ]]; then
     IS_CORE_CI=1
-    IMAGE_PREFIX=""
     CONTAINER_INTERACTIVE=""
 fi
 
@@ -786,11 +789,11 @@ if declare -f php_image >/dev/null 2>&1; then
     IMAGE_PHP="$(php_image "${PHP_VERSION}")"
 fi
 IMAGE_PHP="${IMAGE_PHP:-${TYPO3_IMAGE_PREFIX}core-testing-$(echo "php${PHP_VERSION}" | sed -e 's/\.//'):latest}"
-IMAGE_ALPINE="${IMAGE_PREFIX}alpine:3.20"
+IMAGE_ALPINE="${LIBRARY_IMAGE_PREFIX}alpine:3.20"
 IMAGE_APACHE="${IMAGE_APACHE:-${TYPO3_IMAGE_PREFIX}core-testing-apache24:1.7}"
-IMAGE_MARIADB="docker.io/mariadb:${DBMS_VERSION}"
-IMAGE_MYSQL="docker.io/mysql:${DBMS_VERSION}"
-IMAGE_POSTGRES="docker.io/postgres:${DBMS_VERSION}-alpine"
+IMAGE_MARIADB="${LIBRARY_IMAGE_PREFIX}mariadb:${DBMS_VERSION}"
+IMAGE_MYSQL="${LIBRARY_IMAGE_PREFIX}mysql:${DBMS_VERSION}"
+IMAGE_POSTGRES="${LIBRARY_IMAGE_PREFIX}postgres:${DBMS_VERSION}-alpine"
 
 shift $((OPTIND - 1))
 set -- "$@" ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}

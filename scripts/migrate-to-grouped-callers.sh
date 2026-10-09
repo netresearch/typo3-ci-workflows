@@ -24,7 +24,7 @@
 #   RUN_FUNCTIONAL_TESTS  - true/false (default: false)
 #   UPLOAD_COVERAGE       - true/false (default: false)
 #   FUNCTIONAL_TEST_DB    - sqlite/mysql/mariadb/postgres (default: sqlite)
-#   DB_IMAGE              - Docker image for DB (default: mysql:9.6)
+#   DB_IMAGE              - Docker image for DB (default: public.ecr.aws/docker/library/mysql:9.6)
 #   PHP_EXTENSIONS        - Comma-separated (default: intl, mbstring, xml)
 #   TYPO3_PACKAGES        - JSON array (default: '["typo3/cms-core"]')
 #   RUN_UNIT_TESTS        - true/false (default: true)
@@ -66,7 +66,7 @@ REMOVE_DEV_DEPS='[]'
 RUN_FUNCTIONAL_TESTS=false
 UPLOAD_COVERAGE=false
 FUNCTIONAL_TEST_DB=sqlite
-DB_IMAGE='mysql:9.6'
+DB_IMAGE='public.ecr.aws/docker/library/mysql:9.6'
 PHP_EXTENSIONS='intl, mbstring, xml'
 TYPO3_PACKAGES='["typo3/cms-core"]'
 RUN_UNIT_TESTS=true
@@ -143,7 +143,7 @@ build_ci_with_block() {
     lines+=("        functional-test-db: ${FUNCTIONAL_TEST_DB}")
   fi
 
-  if [[ "$DB_IMAGE" != "mysql:9.6" ]]; then
+  if [[ "$DB_IMAGE" != "public.ecr.aws/docker/library/mysql:9.6" ]]; then
     lines+=("        db-image: '${DB_IMAGE}'")
   fi
 
