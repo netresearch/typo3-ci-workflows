@@ -73,9 +73,12 @@ on:
         type: string
         default: 'npm run test:e2e'
       db-image:
+        # AWS's mirror of the Docker official images: same image and tag as
+        # Docker Hub's mariadb, without Docker Hub's anonymous pull limit,
+        # which failed runs before any test started (toomanyrequests).
         description: Database Docker image (default mode only)
         type: string
-        default: 'mariadb:11.4'
+        default: 'public.ecr.aws/docker/library/mariadb:11.4'
       php-extensions:
         description: PHP extensions to install
         type: string

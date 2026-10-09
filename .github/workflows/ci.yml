@@ -160,9 +160,11 @@ on:
         type: string
         default: sqlite
       db-image:
+        # AWS's mirror of the Docker official images: same image and tag as
+        # Docker Hub's mysql, without Docker Hub's anonymous pull limit.
         description: Docker image for database service
         type: string
-        default: 'mysql:9.6'
+        default: 'public.ecr.aws/docker/library/mysql:9.6'
 
       # Coverage
       upload-coverage:
