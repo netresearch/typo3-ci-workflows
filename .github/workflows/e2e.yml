@@ -933,7 +933,7 @@ jobs:
 
       # ─── Common: artifact upload (both modes) ──────────────────────
       - name: Upload test results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           # Disambiguate artifact name across matrix entries to avoid
@@ -944,7 +944,7 @@ jobs:
 
       - name: Upload PHP server logs
         if: inputs.setup-script == '' && failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: php-server-logs${{ steps.artifact-suffix.outputs.value }}
           path: /tmp/php-server.log
