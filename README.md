@@ -1325,6 +1325,33 @@ Two details of the phplint template matter when you compare it with an older cop
 - It uses `cache-dir`. From 9.6.2, phplint ignores a `cache` key in the configuration file and writes the cache to `./.phplint.cache` in the repository root.
 - Its excludes are anchored regular expressions. A plain string matches anywhere in the path, so `vendor` also skips `Classes/Payment/vendorApi/`, and `.Build` skips a file named `Query.BuildHelper.php`.
 
+## PHPStan
+
+An extension includes `config/phpstan/phpstan.neon` in its own `Build/phpstan.neon` and adds its `paths`; the header of that file shows the include. The shared file turns on more than the usual tool list, so an extension that switches to it meets new findings. They come from three places.
+
+**Parameters** in `phpstan.neon`:
+
+| Parameter | Effect |
+|---|---|
+| `level: 10` | The highest level: `mixed` is reported wherever a typed value is needed. |
+| `checkMissingCallableSignature: true` | A `callable` or `Closure` type without a signature (`callable(int): string`) is reported. |
+| `checkUninitializedProperties: true` | A typed property that the constructor leaves unset is reported. |
+| `reportUnmatchedIgnoredErrors: true` | An `ignoreErrors` entry that matches nothing is reported, so stale entries surface. |
+| `treatPhpDocTypesAsCertain: false` | PHPDoc types do not make a later check "always true", so defensive checks are not reported. |
+
+**`ergebnis/phpstan-rules`**, with `allRules: false` and six rules switched on: `declareStrictTypes`, `noCompact`, `noErrorSuppression` (no `@`), `noEval`, `noReturnByReference` and `testCaseWithSuffix` (a test class name ends in `Test`). The other rules are off because they conflict with TYPO3 patterns, such as extending `ActionController`; the comments in `phpstan.neon` list them.
+
+**Extensions** that `phpstan/extension-installer` registers: `phpstan-strict-rules`, `phpstan-deprecation-rules`, `phpstan-phpunit`, `saschaegerer/phpstan-typo3`, `phpat/phpat` and `ergebnis/phpstan-rules`. `phpstan-phpunit` adds rules on test code, among them:
+
+- `assertSame(true, …)`, `assertSame(false, …)` and `assertSame(null, …)` should be `assertTrue()`, `assertFalse()` and `assertNull()`;
+- `assertSame($n, count($x))` should be `assertCount($n, $x)`;
+- a class or method named in a `@covers` or `@coversDefaultClass` annotation must exist (the `#[CoversClass]` attribute is not checked);
+- a mocked method must exist on the mocked type;
+- `setUp()` and `tearDown()` must call the parent method;
+- a data provider must be declared correctly.
+
+`saschaegerer/phpstan-typo3` gives TYPO3 APIs real return types, for example for `GeneralUtility::makeInstance()`. An extension that did not use it before gets findings where it relied on `mixed`, and has to regenerate its baseline.
+
 ## Code Style
 
 `config/php-cs-fixer/config.php` builds the shared PHP-CS-Fixer configuration. A third argument adds project rules on top of the shared set:
