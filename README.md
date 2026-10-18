@@ -533,6 +533,8 @@ Opengrep **blocks CI on findings of severity WARNING and ERROR** (`--severity WA
 - **Block only on critical (RCE/SQLi/XXE):** `--config auto --error --severity ERROR`.
 - **Block on everything, including INFO:** `--config auto --error` — without `--severity` every level is reported and gates.
 
+Whatever `opengrep-config` says, the scan excludes the registry rule `php.lang.security.exec-use.exec-use` and runs a replacement written for the workflow (the registry rules are under the Semgrep Rules License v1.0, which does not allow distributing them, so none of their text is copied). Since [semgrep/semgrep-rules#4081](https://github.com/semgrep/semgrep-rules/pull/4081) the registry version matches every callee whose name starts with a sink name in any case, so static calls such as `ExecutionIdentity::interactive()` fail the job. The replacement matches only the whole names `exec`, `passthru`, `proc_open`, `popen`, `shell_exec`, `system` and `pcntl_exec`, in any case and with an optional leading `\`. Its id in the SARIF and the Security tab carries a path prefix and ends in the registry id, and a `nosemgrep: php.lang.security.exec-use.exec-use` comment suppresses it.
+
 ### Minimal caller
 
 ```yaml

@@ -112,8 +112,9 @@ printf 'default %s, run as: %s\n' "${DEFAULT}" "${CONFIG}"
 # run_case TREE: prints the scan's output, returns the step's exit code.
 run_case() {
     local status=0
+    mkdir -p "${TMP}/runner_temp"
     (cd "${TMP}/fx/${1}" && HOME="${TMP}/home" PATH="${BIN_DIR}:${PATH}" OPENGREP_CONFIG="${CONFIG}" \
-        bash -e "${TMP}/scan.sh" 2>&1) || status=$?
+        RUNNER_TEMP="${TMP}/runner_temp" bash -e "${TMP}/scan.sh" 2>&1) || status=$?
     return "${status}"
 }
 
