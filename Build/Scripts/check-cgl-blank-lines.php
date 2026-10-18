@@ -11,7 +11,9 @@
 
 declare(strict_types=1);
 
-$fixed = (require __DIR__ . '/cgl-probe.php')(<<<'PHP'
+require_once __DIR__ . '/cgl-probe.php';
+
+$fixed = cglProbe(<<<'PHP'
     <?php
 
     declare(strict_types=1);

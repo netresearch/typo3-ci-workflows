@@ -5,13 +5,14 @@
  * the fixed source. Used by the check-cgl-*.php scripts that pin what the
  * shared rules do to a piece of code.
  *
- * Usage: $fixed = (require __DIR__ . '/cgl-probe.php')($source);
+ * Usage: require_once __DIR__ . '/cgl-probe.php'; $fixed = cglProbe($source);
  * Exits with 1 when php-cs-fixer fails.
  */
 
 declare(strict_types=1);
 
-return static function (string $source): string {
+function cglProbe(string $source): string
+{
     $package = dirname(__DIR__, 2);
     $root    = sys_get_temp_dir() . '/check-cgl-probe-' . bin2hex(random_bytes(4));
 
@@ -49,4 +50,4 @@ return static function (string $source): string {
     }
 
     return $fixed;
-};
+}
