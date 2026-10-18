@@ -10,7 +10,7 @@
     The database comes from the environment (typo3DatabaseDriver and the
     other typo3Database* variables), as the shared CI workflow sets them.
 
-    vendor/bin/check-phpunit-config asserts failOnRisky and failOnWarning.
+    The composer bin check-phpunit-config asserts failOnRisky and failOnWarning.
     Its strict option also asserts beStrictAboutOutputDuringTests,
     requireCoverageMetadata, beStrictAboutCoverageMetadata,
     failOnDeprecation, failOnNotice, failOnPhpunitDeprecation and
@@ -24,7 +24,6 @@
          colors="true"
          failOnRisky="true"
          failOnWarning="true"
-         displayDetailsOnPhpunitDeprecations="true"
          displayDetailsOnTestsThatTriggerDeprecations="true"
          displayDetailsOnTestsThatTriggerErrors="true"
          displayDetailsOnTestsThatTriggerNotices="true"

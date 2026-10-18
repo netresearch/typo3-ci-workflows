@@ -7,7 +7,7 @@
         .Build/vendor (bootstrap, xsi:noNamespaceSchemaLocation, cacheDirectory);
       - the test suites and the source set.
 
-    vendor/bin/check-phpunit-config asserts failOnRisky and failOnWarning.
+    The composer bin check-phpunit-config asserts failOnRisky and failOnWarning.
     Its strict option also asserts beStrictAboutOutputDuringTests,
     requireCoverageMetadata, beStrictAboutCoverageMetadata,
     failOnDeprecation, failOnNotice, failOnPhpunitDeprecation and
@@ -21,7 +21,6 @@
          executionOrder="defects"
          failOnRisky="true"
          failOnWarning="true"
-         displayDetailsOnPhpunitDeprecations="true"
          displayDetailsOnTestsThatTriggerDeprecations="true"
          displayDetailsOnTestsThatTriggerErrors="true"
          displayDetailsOnTestsThatTriggerNotices="true"

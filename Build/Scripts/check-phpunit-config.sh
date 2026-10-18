@@ -70,4 +70,10 @@ expect 'no file is a usage error' 2 'Usage:'
 expect 'an unknown option is a usage error' 2 'Unknown option --strcit' --strcit "${UNIT}"
 
 printf '%d cases passed\n' "${PASSED}"
+# A case that stopped running would leave the count short and nothing red.
+EXPECTED=17
+if [[ "${FAILED}" -eq 0 && "${PASSED}" -ne "${EXPECTED}" ]]; then
+    printf '  FAIL: %d cases passed, expected %d\n' "${PASSED}" "${EXPECTED}" >&2
+    FAILED=1
+fi
 exit "${FAILED}"

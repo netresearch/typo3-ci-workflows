@@ -1284,14 +1284,16 @@ Why `14` skips the plugin rule: TYPO3 14 registers every plugin as a content ele
 
 ## PHPUnit
 
-`config/phpunit/phpunit.xml` (unit tests) and `config/phpunit/FunctionalTests.xml` are templates. Copy them to `Build/phpunit.xml` and `Build/FunctionalTests.xml`, then adjust the vendor directory if `composer.json` sets another `vendor-dir` than `.Build/vendor`, and the test suites and source set. Both validate against the PHPUnit 11.5, 12.5 and 13 schemas and use the bootstraps of `typo3/testing-framework`.
+`config/phpunit/phpunit.xml` (unit tests) and `config/phpunit/FunctionalTests.xml` are templates. Copy them to `Build/phpunit.xml` and `Build/FunctionalTests.xml`, then adjust the vendor directory if `composer.json` sets another `vendor-dir` than `.Build/vendor`, and the test suites and source set. Both validate against the schemas of every PHPUnit version that `typo3/testing-framework` allows, from 10.1 to 13, and use its bootstraps.
 
-PHPUnit has no includes, so the copies drift. `vendor/bin/check-phpunit-config` asserts the flags that matter on the `<phpunit>` element of each file and ignores everything else, so a project's own suites and source set never fail it:
+PHPUnit has no includes, so the copies drift. The Composer bin `check-phpunit-config` asserts the flags that matter on the `<phpunit>` element of each file and ignores everything else, so a project's own suites and source set never fail it:
 
 | Profile | Flags, each `"true"` |
 |---|---|
 | baseline (default) | `failOnRisky`, `failOnWarning` |
 | strict (`--strict`) | the baseline plus `beStrictAboutOutputDuringTests`, `requireCoverageMetadata`, `beStrictAboutCoverageMetadata`, `failOnDeprecation`, `failOnNotice`, `failOnPhpunitDeprecation`, `failOnEmptyTestSuite` |
+
+`failOnPhpunitDeprecation` exists from PHPUnit 10.5 in the 10 series and from 11.3 in the 11 series. On an older PHPUnit, for example in a cell that installs the lowest dependencies, the configuration fails schema validation, and `failOnWarning` turns that into a failed run. Raise the PHPUnit floor in `require-dev` before adopting the strict profile.
 
 It needs the installed package, so it cannot run in the repo-checks job of `ci.yml`, which skips `composer install`. Do not chain it into the test scripts either: the test jobs call them with PHPUnit options (`composer ci:test:php:unit -- --no-coverage`), Composer appends those options to every script in the chain, and the check rejects them as unknown options. The CGL job calls `composer ci:test:php:cgl` after `composer install` and without arguments, so chain it there:
 
