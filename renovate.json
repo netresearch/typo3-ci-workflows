@@ -2,5 +2,28 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>netresearch/renovate-config"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Commits of the rule repositories the Opengrep job pins in security.yml",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/security\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+)\\s+[A-Z_]+: (?<currentDigest>[0-9a-f]{40})"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "A new rule commit changes what the Opengrep gate blocks in every caller; refresh FILES and RULES_DIGEST with Build/Scripts/refresh-opengrep-rules.sh and merge by hand",
+      "matchDepNames": [
+        "https://github.com/semgrep/semgrep-rules",
+        "https://github.com/trailofbits/semgrep-rules"
+      ],
+      "automerge": false,
+      "minimumReleaseAge": null
+    }
   ]
 }
