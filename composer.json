@@ -15,7 +15,7 @@
         "php": "^8.2",
         "a9f/typo3-fractor": "^1.0",
         "captainhook/captainhook": "^5.28",
-        "captainhook/hook-installer": "^1.0",
+        "captainhook/hook-installer": "^1.0.5",
         "dg/bypass-finals": "^1.9",
         "ergebnis/composer-normalize": "^2.0",
         "ergebnis/phpstan-rules": "^2.6",
