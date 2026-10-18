@@ -160,11 +160,12 @@ on:
         type: string
         default: sqlite
       db-image:
-        # AWS's mirror of the Docker official images: same image and tag as
-        # Docker Hub's mysql, without Docker Hub's anonymous pull limit.
+        # Our copy of the Docker official image on GHCR (ci-mirror.yml): same
+        # image and tag as Docker Hub's mysql, without the anonymous limits of
+        # Docker Hub (pull count) and ECR Public (data quota).
         description: Docker image for database service
         type: string
-        default: 'public.ecr.aws/docker/library/mysql:9.6'
+        default: 'ghcr.io/netresearch/ci-mirror/mysql:9.6'
 
       # Coverage
       upload-coverage:

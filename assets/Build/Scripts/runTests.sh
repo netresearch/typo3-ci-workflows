@@ -751,10 +751,16 @@ ROOT_DIR="${PROJECT_ROOT}"
 mkdir -p .Build/.cache
 mkdir -p ${WEB_DIR}/typo3temp/var/tests
 
-# Docker official images come from AWS's mirror of them, not from Docker Hub.
-# A GitHub runner pulls anonymously, and Docker Hub's anonymous pull limit
-# failed whole runs before a test started (toomanyrequests). The mirror carries
-# the same images under the same tags, without that limit and without a login.
+# Docker official images come from our copy of them on GHCR, which
+# ci-mirror.yml in netresearch/typo3-ci-workflows refreshes weekly. Both public
+# anonymous sources throttle shared runner IPs and failed whole runs before a
+# test started: Docker Hub by pull count, ECR Public by a data quota
+# (toomanyrequests). The copy is public and needs no login.
+#
+# It holds exactly the versions the -i checks above accept. DBMS_VERSION_EXACT=1
+# lets MariaDB ask for any other version, which the copy does not have; that
+# one case pulls from ECR Public, the copy's source.
+MIRROR_IMAGE_PREFIX="ghcr.io/netresearch/ci-mirror/"
 LIBRARY_IMAGE_PREFIX="public.ecr.aws/docker/library/"
 TYPO3_IMAGE_PREFIX="ghcr.io/typo3/"
 CONTAINER_INTERACTIVE="-it --init"
@@ -789,11 +795,15 @@ if declare -f php_image >/dev/null 2>&1; then
     IMAGE_PHP="$(php_image "${PHP_VERSION}")"
 fi
 IMAGE_PHP="${IMAGE_PHP:-${TYPO3_IMAGE_PREFIX}core-testing-$(echo "php${PHP_VERSION}" | sed -e 's/\.//'):latest}"
-IMAGE_ALPINE="${LIBRARY_IMAGE_PREFIX}alpine:3.20"
+IMAGE_ALPINE="${MIRROR_IMAGE_PREFIX}alpine:3.20"
 IMAGE_APACHE="${IMAGE_APACHE:-${TYPO3_IMAGE_PREFIX}core-testing-apache24:1.7}"
-IMAGE_MARIADB="${LIBRARY_IMAGE_PREFIX}mariadb:${DBMS_VERSION}"
-IMAGE_MYSQL="${LIBRARY_IMAGE_PREFIX}mysql:${DBMS_VERSION}"
-IMAGE_POSTGRES="${LIBRARY_IMAGE_PREFIX}postgres:${DBMS_VERSION}-alpine"
+if [[ "${DBMS_VERSION_EXACT:-0}" == "1" ]]; then
+    IMAGE_MARIADB="${LIBRARY_IMAGE_PREFIX}mariadb:${DBMS_VERSION}"
+else
+    IMAGE_MARIADB="${MIRROR_IMAGE_PREFIX}mariadb:${DBMS_VERSION}"
+fi
+IMAGE_MYSQL="${MIRROR_IMAGE_PREFIX}mysql:${DBMS_VERSION}"
+IMAGE_POSTGRES="${MIRROR_IMAGE_PREFIX}postgres:${DBMS_VERSION}-alpine"
 
 shift $((OPTIND - 1))
 set -- "$@" ${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}
