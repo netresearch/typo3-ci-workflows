@@ -1,0 +1,17 @@
+# Template for an extension's Build/.phplint.yml (overtrue/phplint 9).
+#
+# Copy it to Build/.phplint.yml and run it from the repository root:
+#   phplint --configuration Build/.phplint.yml
+#
+# Adjust .Build if composer.json sets another vendor-dir. phplint skips
+# dot directories by default; the exclude keeps .Build out if that default
+# changes. "cache-dir" replaces "cache", which phplint 9 deprecates and
+# version 10 removes.
+path: ./
+jobs: 10
+cache-dir: .Build/.phplint.cache
+extensions:
+  - php
+exclude:
+  - .Build
+  - vendor
