@@ -286,6 +286,53 @@ jobs:
           fi
           echo "rector boot smoke test: OK"
 
+      - name: Smoke test the shared PHPStan configs load
+        # Both entry points include phpstan-base.neon. Loads each one from a
+        # fixture, as a consumer does, and checks that the base parameters
+        # arrive and the bootstrap file resolves; then that the rule
+        # configuration reaches phpstan.neon and none of it reaches
+        # phpstan-rector.neon, whose PHPStan does not know the ergebnis schema.
+        run: |
+          FIXTURE=$(mktemp -d)
+          printf '<?php\n' > "$FIXTURE/ext_emconf.php"
+          REPO="$PWD"
+          for NEON in phpstan.neon phpstan-rector.neon; do
+            (cd "$FIXTURE" && "$REPO/vendor/bin/phpstan" dump-parameters --json --memory-limit=1G \
+              -c "$REPO/config/phpstan/$NEON") > "$FIXTURE/$NEON.json"
+            jq -e '.level == 10 and .treatPhpDocTypesAsCertain == false
+              and .inferPrivatePropertyTypeFromConstructor == true
+              and (.excludePaths.analyseAndScan | length) == 3' "$FIXTURE/$NEON.json" > /dev/null \
+              || { echo "$NEON: base parameters missing" >&2; exit 1; }
+            BOOTSTRAP=$(jq -r '.bootstrapFiles[] | select(endswith("/config/phpstan/stubs/phpunit-attributes.php"))' "$FIXTURE/$NEON.json")
+            if [ -z "$BOOTSTRAP" ] || [ ! -f "$BOOTSTRAP" ]; then
+              echo "$NEON: bootstrap file stubs/phpunit-attributes.php missing or unresolved" >&2
+              exit 1
+            fi
+          done
+          # The rule configuration of phpstan.neon, compared with what an empty
+          # config resolves to: phpstan.neon must differ in each key,
+          # phpstan-rector.neon in none. The whole ergebnis block is compared,
+          # because any ergebnis key breaks Rector's PHPStan. ignoreErrors and
+          # reportUnmatchedIgnoredErrors are left out: Rector's PHPStan knows
+          # both, and the latter is true by PHPStan's default anyway. A key set
+          # to its default value (ergebnis.noEval.enabled: true, say) leaves no
+          # trace in a dump; the Rector boot step above catches any ergebnis
+          # key in phpstan-rector.neon, because Rector then refuses the file.
+          printf 'parameters:\n    level: 10\n' > "$FIXTURE/empty.neon"
+          (cd "$FIXTURE" && "$REPO/vendor/bin/phpstan" dump-parameters --json --memory-limit=1G \
+            -c "$FIXTURE/empty.neon") > "$FIXTURE/empty.neon.json"
+          for KEY in checkMissingCallableSignature checkUninitializedProperties ergebnis; do
+            if jq -e --arg k "$KEY" --slurpfile e "$FIXTURE/empty.neon.json" '.[$k] == $e[0][$k]' "$FIXTURE/phpstan.neon.json" > /dev/null; then
+              echo "phpstan.neon: $KEY is not configured" >&2
+              exit 1
+            fi
+            if ! jq -e --arg k "$KEY" --slurpfile e "$FIXTURE/empty.neon.json" '.[$k] == $e[0][$k]' "$FIXTURE/phpstan-rector.neon.json" > /dev/null; then
+              echo "phpstan-rector.neon carries $KEY of phpstan.neon" >&2
+              exit 1
+            fi
+          done
+          echo "PHPStan config smoke test: OK"
+
   lint-json:
     name: Lint JSON
     runs-on: ubuntu-latest

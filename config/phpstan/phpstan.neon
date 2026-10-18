@@ -42,12 +42,14 @@
 # extension-specific entries.
 #
 # Override `level` in your extension's phpstan.neon if level 10 is too strict.
+#
+# level, the type-inference flags, excludePaths and bootstrapFiles live in
+# phpstan-base.neon, which phpstan-rector.neon includes as well.
+
+includes:
+    - phpstan-base.neon
 
 parameters:
-    level: 10
-
-    treatPhpDocTypesAsCertain: false
-    inferPrivatePropertyTypeFromConstructor: true
     checkMissingCallableSignature: true
     checkUninitializedProperties: true
     reportUnmatchedIgnoredErrors: true
@@ -72,22 +74,6 @@ parameters:
             enabled: true
         testCaseWithSuffix:
             enabled: true
-
-    excludePaths:
-        # Both vendor-dir spellings in use across the org (.Build and .build).
-        # Wildcard patterns are exempt from PHPStan's path-existence check, so
-        # listing the variant a repo does not use is harmless (verified on
-        # PHPStan 2.2.7).
-        - %currentWorkingDirectory%/.Build/*
-        - %currentWorkingDirectory%/.build/*
-        - %currentWorkingDirectory%/ext_emconf.php
-
-    bootstrapFiles:
-        # Relative to THIS file (PHPStan resolves relative paths against the
-        # config file that declares them), so it works for any vendor-dir the
-        # consuming repo uses — the previous absolute form hardcoded .Build
-        # and broke every .build repo.
-        - stubs/phpunit-attributes.php
 
     ignoreErrors:
         # --- Test infrastructure (affects all extensions) ---
