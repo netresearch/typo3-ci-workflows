@@ -160,6 +160,8 @@ gh api repos/netresearch/REPO/hooks --method POST \
 
 The images are listed in [`Build/ci-mirror-images.txt`](Build/ci-mirror-images.txt): `mariadb` 10.11, 11.4, 11.8, 12.3; `mysql` 8.0, 8.4, 9.0, 9.6; `postgres` 12 to 17 (`-alpine`); `alpine:3.20`. Self-CI fails when the list misses a tag the code can request, or holds one nothing requests.
 
+The `db-image` defaults of `ci.yml` and `e2e.yml`, the database and alpine images of `runTests.sh` and the MariaDB image of `e2e-provision.sh` pull from this mirror. The packages are public, so no login is needed. `runTests.sh` with `DBMS_VERSION_EXACT=1` can request a MariaDB version outside the list; that image comes from ECR Public.
+
 ---
 
 ## CI
@@ -190,7 +192,7 @@ jobs:
       matrix-exclude: '[{"php":"8.2","typo3":"^14.0"}]'
       run-functional-tests: true
       functional-test-db: mariadb
-      db-image: 'public.ecr.aws/docker/library/mariadb:11.4'
+      db-image: 'ghcr.io/netresearch/ci-mirror/mariadb:11.4'
       upload-coverage: true
       remove-dev-deps: '[{"dep":"saschaegerer/phpstan-typo3","only-for":"^12|^13"}]'
     secrets:
@@ -220,7 +222,7 @@ jobs:
 | `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
 | `run-acceptance-tests` | boolean | `false` | Run PHPUnit acceptance tests |
 | `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
-| `db-image` | string | `public.ecr.aws/docker/library/mysql:9.6` | Docker image for database service. The default comes from AWS's mirror of the Docker official images. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
+| `db-image` | string | `ghcr.io/netresearch/ci-mirror/mysql:9.6` | Docker image for database service. The default comes from our [mirror](#ci-image-mirror) of the Docker official images on GHCR. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov, under the flags `unit`, `functional` and `acceptance`. Custom `*-test-command` overrides run unchanged and must write `coverage-unit.xml` / `coverage-functional.xml` / `coverage-acceptance.xml` themselves — the upload uses `fail_ci_if_error: false`, so a missing report passes silently. |
 | `upload-test-results` | boolean | `false` | Upload per-test JUnit reports to [Codecov Test Analytics](https://docs.codecov.com/docs/test-analytics) (flaky-test detection, per-test durations). Custom `*-test-command` overrides must emit `junit-unit.xml` / `junit-functional.xml` themselves. |
 | `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (branch + path coverage, matches local `XDEBUG_MODE=coverage`) or `pcov` (line-only, ~3-10× faster) |
@@ -467,7 +469,7 @@ jobs:
       contents: read
     with:
       php-version: '8.5'
-      db-image: 'public.ecr.aws/docker/library/mariadb:11.4'
+      db-image: 'ghcr.io/netresearch/ci-mirror/mariadb:11.4'
       test-command: 'npm run test:e2e -- --project=chromium'
 ```
 
@@ -484,7 +486,7 @@ jobs:
 | `php-server-workers` | string | `'1'` | Worker processes for the built-in `php -S` server. Raise to at least the Playwright worker count before setting `workers > 1`, or the suite serialises at the web server. |
 | `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |
 | `test-command` | string | `npm run test:e2e` | E2E test command |
-| `db-image` | string | `public.ecr.aws/docker/library/mariadb:11.4` | Database Docker image. The default comes from AWS's mirror of the Docker official images. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
+| `db-image` | string | `ghcr.io/netresearch/ci-mirror/mariadb:11.4` | Database Docker image. The default comes from our [mirror](#ci-image-mirror) of the Docker official images on GHCR. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
 | `php-extensions` | string | `mysqli, pdo_mysql, gd, intl, curl, zip` | PHP extensions to install |
 | `timeout-minutes` | number | `30` | Job timeout in minutes |
 | `artifact-path` | string | `Tests/E2E/Playwright/reports/` | Path to Playwright reports |

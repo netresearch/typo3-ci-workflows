@@ -10,9 +10,9 @@
 #   - runTests.sh: the version allow-list of each `-d mariadb|mysql|postgres`
 #     case branch (postgres tags carry `-alpine`) and the IMAGE_ALPINE tag
 #
-# A default must carry one of the two prefixes the mirror replaces or serves,
-# public.ecr.aws/docker/library/ or ghcr.io/netresearch/ci-mirror/; anything
-# else is reported, so the check cannot pass on a default it did not parse.
+# A default must point at the mirror, ghcr.io/netresearch/ci-mirror/. Anything
+# else is reported: a default moved back to a throttled source, or one the
+# check did not parse.
 #
 # Usage: check-ci-mirror-list.sh <list> <ci.yml> <e2e.yml> <e2e-provision.sh> <runTests.sh>
 
@@ -34,10 +34,9 @@ REQUIRED=()
 strip_prefix() {
     local ref="${2}"
     case "${ref}" in
-        public.ecr.aws/docker/library/*) REQUIRED+=("${ref#public.ecr.aws/docker/library/}") ;;
         ghcr.io/netresearch/ci-mirror/*) REQUIRED+=("${ref#ghcr.io/netresearch/ci-mirror/}") ;;
         *)
-            printf '::error::%s: default %s is neither public.ecr.aws/docker/library/ nor ghcr.io/netresearch/ci-mirror/\n' "${1}" "${ref:-<empty>}"
+            printf '::error::%s: default %s does not point at ghcr.io/netresearch/ci-mirror/\n' "${1}" "${ref:-<empty>}"
             FAILED=1
             ;;
     esac
@@ -83,11 +82,11 @@ for dbms in mariadb mysql postgres; do
 done
 
 # shellcheck disable=SC2016 # a literal ${...} in the file is the match target
-alpine="$(sed -n 's/^IMAGE_ALPINE="\${LIBRARY_IMAGE_PREFIX}\(alpine:[^"]*\)"$/\1/p' "${RUNTESTS}")"
+alpine="$(sed -n 's/^IMAGE_ALPINE="\${MIRROR_IMAGE_PREFIX}\(alpine:[^"]*\)"$/\1/p' "${RUNTESTS}")"
 if [[ -n "${alpine}" ]]; then
     REQUIRED+=("${alpine}")
 else
-    printf '::error::%s: IMAGE_ALPINE not found\n' "${RUNTESTS}"
+    printf '::error::%s: IMAGE_ALPINE not found, or not on MIRROR_IMAGE_PREFIX\n' "${RUNTESTS}"
     FAILED=1
 fi
 

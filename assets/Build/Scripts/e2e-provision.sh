@@ -227,8 +227,9 @@ TYPOSCRIPT_EOF
 
     # MariaDB, not SQLite: TYPO3's database:updateschema does not work against
     # SQLite. The network alias gives the PHP helpers a fixed hostname. The
-    # image comes from AWS's mirror of the Docker official images: an anonymous
-    # pull from Docker Hub hits its rate limit on GitHub runners.
+    # image is our GHCR copy of the Docker official image (ci-mirror.yml):
+    # anonymous pulls from Docker Hub and ECR Public hit their limits on
+    # GitHub runners.
     echo "Starting MariaDB..."
     ${CONTAINER_BIN} run -d --rm ${CI_PARAMS} \
         --name mariadb-e2e-${SUFFIX} \
@@ -236,7 +237,7 @@ TYPOSCRIPT_EOF
         --network-alias mariadb-e2e \
         -e MYSQL_ROOT_PASSWORD=root \
         -e MYSQL_DATABASE=e2e_test \
-        "${E2E_MARIADB_IMAGE:-public.ecr.aws/docker/library/mariadb:10.11}" \
+        "${E2E_MARIADB_IMAGE:-ghcr.io/netresearch/ci-mirror/mariadb:10.11}" \
         --character-set-server=utf8mb4 \
         --collation-server=utf8mb4_unicode_ci >/dev/null || {
             echo "e2e: MariaDB container did not start." >&2
