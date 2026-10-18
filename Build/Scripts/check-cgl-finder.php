@@ -25,8 +25,11 @@ $tree = [
     'ext_localconf.php'             => true,
     'Resources/Public/Php/Kept.php' => true,
     // Excluded by the shared list.
-    '.Build/vendor/acme/B.php'   => false,
-    '.Build/public/index.php'    => false,
+    '.Build/vendor/acme/B.php' => false,
+    '.Build/public/index.php'  => false,
+    // Covered by no exclude but .Build itself (vendor and public are
+    // excluded by name, so the two cases above would pass without it).
+    '.Build/bin/L.php'           => false,
     '.build/vendor/acme/C.php'   => false,
     '.build/bin/D.php'           => false,
     '.ddev/commands/web/E.php'   => false,
