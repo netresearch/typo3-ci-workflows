@@ -1251,12 +1251,12 @@ Add this package to your extension's `require-dev`:
 ```json
 {
     "require-dev": {
-        "netresearch/typo3-ci-workflows": "^1.1"
+        "netresearch/typo3-ci-workflows": "^2.0"
     }
 }
 ```
 
-This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows.
+This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows. The `Build/` paths are examples, not a requirement: `runTests.sh` also finds, for instance, a `.php-cs-fixer.dist.php` in the repository root.
 
 ## Rector
 
