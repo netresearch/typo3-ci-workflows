@@ -1,0 +1,84 @@
+#!/usr/bin/env php
+<?php
+
+/*
+ * Asserts the strictness flags of a project's PHPUnit configuration files.
+ *
+ * The files are copied from config/phpunit/ of netresearch/typo3-ci-workflows
+ * and adapted per project, so a byte comparison with the template would fail
+ * on every legitimate change. This check reads only the attributes of the
+ * <phpunit> element that the shared profile fixes.
+ *
+ * Usage: check-phpunit-config [--strict] <file> [<file> ...]
+ *
+ *   --strict  also assert the strict profile.
+ *
+ * Exit 0 when every file carries every flag of the profile, 1 when one is
+ * missing or has another value, 2 on a usage error or an unreadable file.
+ */
+
+declare(strict_types=1);
+
+const BASELINE = [
+    'failOnRisky'   => 'true',
+    'failOnWarning' => 'true',
+];
+
+const STRICT = [
+    'beStrictAboutOutputDuringTests' => 'true',
+    'requireCoverageMetadata'        => 'true',
+    'beStrictAboutCoverageMetadata'  => 'true',
+    'failOnDeprecation'              => 'true',
+    'failOnNotice'                   => 'true',
+    'failOnPhpunitDeprecation'       => 'true',
+    'failOnEmptyTestSuite'           => 'true',
+];
+
+$args   = array_slice($argv, 1);
+$strict = in_array('--strict', $args, true);
+$files  = array_values(array_filter($args, static fn (string $a): bool => $a !== '--strict'));
+
+foreach ($files as $file) {
+    if (str_starts_with($file, '-')) {
+        fwrite(STDERR, "Unknown option {$file}" . PHP_EOL);
+        exit(2);
+    }
+}
+if ($files === []) {
+    fwrite(STDERR, 'Usage: check-phpunit-config [--strict] <file> [<file> ...]' . PHP_EOL);
+    exit(2);
+}
+
+$expected = $strict ? BASELINE + STRICT : BASELINE;
+$failures = 0;
+
+foreach ($files as $file) {
+    $xml = @file_get_contents($file);
+    if ($xml === false) {
+        fwrite(STDERR, "{$file}: cannot read the file" . PHP_EOL);
+        exit(2);
+    }
+
+    $doc = new DOMDocument();
+    if (!@$doc->loadXML($xml) || $doc->documentElement?->nodeName !== 'phpunit') {
+        fwrite(STDERR, "{$file}: not a PHPUnit configuration (no <phpunit> root element)" . PHP_EOL);
+        exit(2);
+    }
+
+    $root = $doc->documentElement;
+    foreach ($expected as $attribute => $value) {
+        if (!$root->hasAttribute($attribute)) {
+            ++$failures;
+            fwrite(STDERR, "{$file}: {$attribute}=\"{$value}\" is missing" . PHP_EOL);
+        } elseif ($root->getAttribute($attribute) !== $value) {
+            ++$failures;
+            fwrite(STDERR, "{$file}: {$attribute} is \"{$root->getAttribute($attribute)}\", expected \"{$value}\"" . PHP_EOL);
+        }
+    }
+}
+
+if ($failures > 0) {
+    exit(1);
+}
+
+printf('%d PHPUnit configuration(s) carry the %s profile' . PHP_EOL, count($files), $strict ? 'strict' : 'baseline');

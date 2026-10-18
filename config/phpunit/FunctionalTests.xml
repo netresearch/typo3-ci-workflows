@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Template for an extension's Build/FunctionalTests.xml.
+
+    Copy it to Build/FunctionalTests.xml and adjust:
+      - the vendor directory, if composer.json sets another vendor-dir than
+        .Build/vendor (bootstrap, xsi:noNamespaceSchemaLocation, cacheDirectory);
+      - the test suites and the source set.
+
+    The database comes from the environment (typo3DatabaseDriver and the
+    other typo3Database* variables), as the shared CI workflow sets them.
+
+    vendor/bin/check-phpunit-config asserts failOnRisky and failOnWarning.
+    Its strict option also asserts beStrictAboutOutputDuringTests,
+    requireCoverageMetadata, beStrictAboutCoverageMetadata,
+    failOnDeprecation, failOnNotice, failOnPhpunitDeprecation and
+    failOnEmptyTestSuite.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="../.Build/vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="../.Build/vendor/typo3/testing-framework/Resources/Core/Build/FunctionalTestsBootstrap.php"
+         cacheDirectory="../.Build/.phpunit.cache"
+         backupGlobals="true"
+         colors="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         displayDetailsOnPhpunitDeprecations="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         displayDetailsOnTestsThatTriggerErrors="true"
+         displayDetailsOnTestsThatTriggerNotices="true"
+         displayDetailsOnTestsThatTriggerWarnings="true">
+    <testsuites>
+        <testsuite name="functional">
+            <directory>../Tests/Functional/</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory suffix=".php">../Classes/</directory>
+        </include>
+    </source>
+
+    <php>
+        <ini name="display_errors" value="1"/>
+        <env name="TYPO3_CONTEXT" value="Testing"/>
+    </php>
+</phpunit>

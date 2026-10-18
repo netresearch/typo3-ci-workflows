@@ -177,6 +177,12 @@ jobs:
         # directories are no longer skipped by default.
         run: php -dzend.assertions=1 Build/Scripts/check-cgl-finder.php
 
+      - name: Check the PHPUnit templates and their flag check
+        # bin/check-phpunit-config is what consumers run against their copies
+        # of config/phpunit/. The templates must pass its baseline, and its
+        # strict profile must name each flag the templates leave out.
+        run: bash Build/Scripts/check-phpunit-config.sh bin/check-phpunit-config
+
       - name: Check the method-chain fixer
         # The fixer is registered by the shared config factory, so a defect in
         # it reaches every consumer that opts in. Fixtures, no container: input,
@@ -432,6 +438,7 @@ jobs:
           shellcheck -x Build/Scripts/check-opengrep-severity.sh
           shellcheck -x Build/Scripts/check-opengrep-exec-use.sh
           shellcheck -x Build/Scripts/check-ter-comment.sh
+          shellcheck -x Build/Scripts/check-phpunit-config.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses

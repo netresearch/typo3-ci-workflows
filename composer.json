@@ -4,7 +4,8 @@
     "type": "library",
     "license": "MIT",
     "bin": [
-        "assets/Build/Scripts/runTests.sh"
+        "assets/Build/Scripts/runTests.sh",
+        "bin/check-phpunit-config"
     ],
     "autoload": {
         "psr-4": {
