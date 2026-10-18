@@ -1351,7 +1351,7 @@ An extension includes `config/phpstan/phpstan.neon` in its own `Build/phpstan.ne
 - `assertSame($n, count($x))` should be `assertCount($n, $x)`;
 - a class or method named in a `@covers` or `@coversDefaultClass` annotation must exist (the `#[CoversClass]` attribute is not checked);
 - a mocked method must exist on the mocked type;
-- `setUp()` and `tearDown()` must call the parent method when the base class declares it, as `UnitTestCase` and `FunctionalTestCase` of `typo3/testing-framework` do;
+- in a test class, `setUp()` and `tearDown()` must call `parent::setUp()` and `parent::tearDown()` when an ancestor other than PHPUnit's `TestCase` declares them, as `UnitTestCase` and `FunctionalTestCase` of `typo3/testing-framework` do;
 - a data provider must be declared correctly.
 
 `saschaegerer/phpstan-typo3` gives TYPO3 APIs real return types, for example for `GeneralUtility::makeInstance()`. An extension that did not use it before gets findings where it relied on `mixed`, and has to regenerate its baseline.
