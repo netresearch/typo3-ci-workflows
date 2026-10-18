@@ -33,12 +33,36 @@
  * The $projectRoot parameter (v1.1+) auto-configures:
  *   - paths: Classes/, Configuration/, Resources/ (if exists), ext_*.php (via glob)
  *   - skip: ext_emconf.php
- *   - phpstanConfig: Build/phpstan.neon
+ *   - phpstanConfig: config/phpstan/phpstan-rector.neon of this package
  *   - phpVersion: 80200
  *
  * Pass '' or omit $projectRoot for v1.0 backward-compatible behavior
  * (extension must set paths/skip/phpstanConfig/phpVersion manually).
  * Note: sets and skips (code-quality rules) always apply regardless of $projectRoot.
+ *
+ * A third argument sets options; each one requires $projectRoot. An unknown
+ * option or value throws, so a typo cannot pass as the default:
+ *
+ *   $configure($rectorConfig, __DIR__ . '/..', [
+ *       'tests' => true,   // add Tests/ to the paths
+ *       'php'   => '8.3',  // the lowest PHP version the extension supports
+ *       'typo3' => 13,     // the lowest TYPO3 major version it supports
+ *   ]);
+ *
+ *   - tests: Tests/ joins the paths when the directory exists.
+ *   - php:   8.2 to 8.5. Sets phpVersion() and adds the matching
+ *            LevelSetList::UP_TO_PHP_* set. Without it: 8.2.
+ *   - typo3: 12, 13 or 14. Adds Typo3LevelSetList::UP_TO_TYPO3_<n>. With 14,
+ *            MigratePluginContentElementAndPluginSubtypesRector is skipped.
+ *            TYPO3 14 registers every plugin as a content element, and the
+ *            rule's edits no longer fit its API: in configurePlugin() it adds
+ *            an argument that TYPO3 14 only accepts as "CType", and in an
+ *            addPlugin() call without a second argument (now $flexForm) it
+ *            writes "CType" as the FlexForm. It also writes an upgrade wizard with an
+ *            empty list_type mapping into Classes/Updates/; a normal run
+ *            writes that file, a --dry-run does not show it. Records with a
+ *            list_type from an earlier TYPO3 version still need a migration
+ *            with a real mapping.
  */
 
 declare(strict_types=1);
@@ -52,8 +76,44 @@ use Rector\DeadCode\Rector\Property\RemoveUselessVarTagRector;
 use Rector\Php80\Rector\Class_\ClassPropertyAssignToConstructorPromotionRector;
 use Rector\Set\ValueObject\LevelSetList;
 use Rector\Set\ValueObject\SetList;
+use Ssch\TYPO3Rector\Set\Typo3LevelSetList;
+use Ssch\TYPO3Rector\TYPO313\v4\MigratePluginContentElementAndPluginSubtypesRector;
 
-return static function (RectorConfig $rectorConfig, string $projectRoot = ''): void {
+/**
+ * @param array{tests?: bool, php?: string, typo3?: int} $options
+ */
+return static function (RectorConfig $rectorConfig, string $projectRoot = '', array $options = []): void {
+    $phpLevels = [
+        '8.2' => [80200, LevelSetList::UP_TO_PHP_82],
+        '8.3' => [80300, LevelSetList::UP_TO_PHP_83],
+        '8.4' => [80400, LevelSetList::UP_TO_PHP_84],
+        '8.5' => [80500, LevelSetList::UP_TO_PHP_85],
+    ];
+    $typo3Levels = [
+        12 => Typo3LevelSetList::UP_TO_TYPO3_12,
+        13 => Typo3LevelSetList::UP_TO_TYPO3_13,
+        14 => Typo3LevelSetList::UP_TO_TYPO3_14,
+    ];
+
+    $unknown = array_diff(array_keys($options), ['tests', 'php', 'typo3']);
+    if ($unknown !== []) {
+        throw new InvalidArgumentException('Unknown Rector option(s): ' . implode(', ', $unknown) . '. Known: tests, php, typo3.');
+    }
+    if ($options !== [] && $projectRoot === '') {
+        throw new InvalidArgumentException('Rector options require $projectRoot.');
+    }
+    if (isset($options['tests']) && !is_bool($options['tests'])) {
+        throw new InvalidArgumentException('Rector option "tests" must be a bool.');
+    }
+    $php = $options['php'] ?? '8.2';
+    if (!is_string($php) || !isset($phpLevels[$php])) {
+        throw new InvalidArgumentException('Rector option "php" must be one of ' . implode(', ', array_keys($phpLevels)) . ', got ' . var_export($php, true) . '.');
+    }
+    $typo3 = $options['typo3'] ?? null;
+    if ($typo3 !== null && (!is_int($typo3) || !isset($typo3Levels[$typo3]))) {
+        throw new InvalidArgumentException('Rector option "typo3" must be one of ' . implode(', ', array_keys($typo3Levels)) . ', got ' . var_export($typo3, true) . '.');
+    }
+
     $rectorConfig->importNames();
     $rectorConfig->removeUnusedImports();
 
@@ -62,6 +122,9 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
         $paths = [$projectRoot . '/Classes', $projectRoot . '/Configuration'];
         if (is_dir($projectRoot . '/Resources')) {
             $paths[] = $projectRoot . '/Resources';
+        }
+        if (($options['tests'] ?? false) && is_dir($projectRoot . '/Tests')) {
+            $paths[] = $projectRoot . '/Tests';
         }
         $paths = array_merge($paths, glob($projectRoot . '/ext_*.php') ?: []);
         $rectorConfig->paths($paths);
@@ -81,7 +144,16 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
             __DIR__ . '/../phpstan/phpstan-rector.neon',
         );
 
-        $rectorConfig->phpVersion(80200);
+        [$phpVersion, $phpLevelSet] = $phpLevels[$php];
+        $rectorConfig->phpVersion($phpVersion);
+        $rectorConfig->sets([$phpLevelSet]);
+
+        if ($typo3 !== null) {
+            $rectorConfig->sets([$typo3Levels[$typo3]]);
+        }
+        if ($typo3 === 14) {
+            $rectorConfig->skip([MigratePluginContentElementAndPluginSubtypesRector::class]);
+        }
     }
 
     // Common code-quality rule sets.

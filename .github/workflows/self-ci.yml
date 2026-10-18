@@ -236,6 +236,11 @@ jobs:
         # STRICT_BOOLEANS did in Rector 2.6.0.
         run: php -dzend.assertions=1 Build/Scripts/check-rector-set-constants.php
 
+      - name: Check the rector config factory's options
+        # tests, php and typo3: what each one adds to paths, sets, skips and
+        # the PHP version, and that an unknown option or value throws.
+        run: php -dzend.assertions=1 Build/Scripts/check-rector-options.php
+
       - name: Smoke test rector boots with the shared config
         run: |
           FIXTURE=$(mktemp -d)
