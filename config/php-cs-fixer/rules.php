@@ -117,6 +117,15 @@ return [
 
     // Whitespace
     'whitespace_after_comma_in_array' => ['ensure_single_space' => true],
+    // The token list of @Symfony. @PER-CS3x0 comes after it and sets this
+    // rule to ['tokens' => ['use']], which would stop the fixer from
+    // collapsing runs of blank lines anywhere outside the import block.
+    'no_extra_blank_lines' => [
+        'tokens' => [
+            'attribute', 'case', 'continue', 'curly_brace_block', 'default', 'extra',
+            'parenthesis_brace_block', 'square_brace_block', 'switch', 'throw', 'use',
+        ],
+    ],
 
     // Style preferences
     'single_line_throw' => false,
