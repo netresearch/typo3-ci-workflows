@@ -1311,6 +1311,20 @@ It needs the installed package, so it cannot run in the repo-checks job of `ci.y
 
 The exit code is 0 when every file carries the profile, 1 when a flag is missing or not `"true"` (each one is named), and 2 for a file that cannot be read or is not a PHPUnit configuration.
 
+## Editor and lint templates
+
+Two more templates for files every extension keeps:
+
+| Template | Copy to | Content |
+|---|---|---|
+| `config/editorconfig/.editorconfig` | `.editorconfig` | UTF-8, LF, final newline, no trailing whitespace, 4 spaces; 2 spaces for JSON, YAML and XLIFF (`*.xlf`, `*.xliff`); tabs in a `Makefile`; trailing whitespace kept in Markdown. The `[*]` section is what all 17 extensions in the org with an `.editorconfig` set. |
+| `config/phplint/.phplint.yml` | `Build/.phplint.yml` | `overtrue/phplint` 9.6.2 or later over the repository root, excluding the top-level `.Build/` and `vendor/`, with the cache in `.Build/.phplint.cache`. Run it from the repository root as `phplint --configuration Build/.phplint.yml`. |
+
+Two details of the phplint template matter when you compare it with an older copy:
+
+- It uses `cache-dir`. From 9.6.2, phplint ignores a `cache` key in the configuration file and writes the cache to `./.phplint.cache` in the repository root.
+- Its excludes are anchored regular expressions. A plain string matches anywhere in the path, so `vendor` also skips `Classes/Payment/vendorApi/`, and `.Build` skips a file named `Query.BuildHelper.php`.
+
 ## Code Style
 
 `config/php-cs-fixer/config.php` builds the shared PHP-CS-Fixer configuration. A third argument adds project rules on top of the shared set:
