@@ -56,9 +56,9 @@
  *            MigratePluginContentElementAndPluginSubtypesRector is skipped.
  *            TYPO3 14 registers every plugin as a content element, and the
  *            rule's edits no longer fit its API: in configurePlugin() it adds
- *            an argument that TYPO3 14 only accepts as "CType", and in
- *            addPlugin(), whose second parameter is now $flexForm, it writes
- *            "CType" as the FlexForm. It also writes an upgrade wizard with an
+ *            an argument that TYPO3 14 only accepts as "CType", and in an
+ *            addPlugin() call without a second argument (now $flexForm) it
+ *            writes "CType" as the FlexForm. It also writes an upgrade wizard with an
  *            empty list_type mapping into Classes/Updates/; a normal run
  *            writes that file, a --dry-run does not show it. Records with a
  *            list_type from an earlier TYPO3 version still need a migration
