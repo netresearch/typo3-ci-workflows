@@ -19,7 +19,7 @@
  *
  *   $finder = PhpCsFixer\Finder::create()
  *       ->in(__DIR__ . '/..')
- *       ->exclude(['.Build', 'config', 'node_modules', 'var'])
+ *       ->exclude(['.Build', '.build', '.ddev', '.pnpm-store', 'config', 'node_modules', 'public', 'var'])
  *       ->notPath('ext_emconf.php');
  *
  *   $config = (new PhpCsFixer\Config())

@@ -1268,6 +1268,16 @@ return $createConfig($header, __DIR__ . '/..', [
 ]);
 ```
 
+The factory scans the project root and excludes `.Build`, `.build`, `.ddev`, `.pnpm-store`, `config`, `node_modules`, `public`, `var` and `ext_emconf.php`. PHP-CS-Fixer itself excludes every directory named `vendor`. The dot directories are listed because PHP-CS-Fixer 4 no longer skips dot directories by default (`PHP_CS_FIXER_FUTURE_MODE=1` shows that behaviour today). `public` is TYPO3's web directory when `composer.json` sets no `extra.typo3/cms.web-dir`.
+
+A fourth argument excludes more directories. A plain name excludes a directory of that name at any depth. A name with a slash is a path below the project root:
+
+```php
+return $createConfig($header, __DIR__ . '/..', [], ['packages', 'Tests/Fixtures/generated']);
+```
+
+`Build/Scripts/check-cgl-finder.php` checks the list in both modes.
+
 ### `Netresearch/blank_line_before_comment`
 
 Separates a comment on a line of its own from the code above it. Inside an array or an argument list the rule is off — a comment there explains the entry below, and a blank line would split a list that belongs together.
