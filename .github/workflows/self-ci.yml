@@ -289,25 +289,33 @@ jobs:
       - name: Smoke test the shared PHPStan configs load
         # Both entry points include phpstan-base.neon. Loads each one from a
         # fixture, as a consumer does, and checks that the base parameters
-        # arrive and the bootstrap file resolves.
+        # arrive and the bootstrap file resolves; then that the rule
+        # configuration reaches phpstan.neon and none of it reaches
+        # phpstan-rector.neon, whose PHPStan does not know the ergebnis schema.
         run: |
           FIXTURE=$(mktemp -d)
           printf '<?php\n' > "$FIXTURE/ext_emconf.php"
           REPO="$PWD"
           for NEON in phpstan.neon phpstan-rector.neon; do
             (cd "$FIXTURE" && "$REPO/vendor/bin/phpstan" dump-parameters --json --memory-limit=1G \
-              -c "$REPO/config/phpstan/$NEON") > "$FIXTURE/params.json"
+              -c "$REPO/config/phpstan/$NEON") > "$FIXTURE/$NEON.json"
             jq -e '.level == 10 and .treatPhpDocTypesAsCertain == false
-              and (.excludePaths.analyseAndScan | length) == 3' "$FIXTURE/params.json" > /dev/null \
+              and .inferPrivatePropertyTypeFromConstructor == true
+              and (.excludePaths.analyseAndScan | length) == 3' "$FIXTURE/$NEON.json" > /dev/null \
               || { echo "$NEON: base parameters missing" >&2; exit 1; }
-            BOOTSTRAP=$(jq -r '.bootstrapFiles[] | select(endswith("/config/phpstan/stubs/phpunit-attributes.php"))' "$FIXTURE/params.json")
+            BOOTSTRAP=$(jq -r '.bootstrapFiles[] | select(endswith("/config/phpstan/stubs/phpunit-attributes.php"))' "$FIXTURE/$NEON.json")
             if [ -z "$BOOTSTRAP" ] || [ ! -f "$BOOTSTRAP" ]; then
               echo "$NEON: bootstrap file stubs/phpunit-attributes.php missing or unresolved" >&2
               exit 1
             fi
           done
-          if jq -e '.checkMissingCallableSignature == true and .ergebnis.allRules == false' "$FIXTURE/params.json" > /dev/null; then
-            echo "phpstan-rector.neon carries the rule configuration of phpstan.neon" >&2
+          # reportUnmatchedIgnoredErrors is left out: it is true by PHPStan's
+          # default, so it cannot tell the two files apart.
+          RULES='[.checkMissingCallableSignature, .checkUninitializedProperties, (.ergebnis.allRules == false)]'
+          jq -e "$RULES | all" "$FIXTURE/phpstan.neon.json" > /dev/null \
+            || { echo "phpstan.neon: rule configuration missing" >&2; exit 1; }
+          if jq -e "$RULES | any" "$FIXTURE/phpstan-rector.neon.json" > /dev/null; then
+            echo "phpstan-rector.neon carries rule configuration of phpstan.neon" >&2
             exit 1
           fi
           echo "PHPStan config smoke test: OK"
