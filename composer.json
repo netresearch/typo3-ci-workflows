@@ -30,7 +30,7 @@
         "phpstan/phpstan-deprecation-rules": "^2.0",
         "phpstan/phpstan-phpunit": "^2.0",
         "phpstan/phpstan-strict-rules": "^2.0",
-        "rector/rector": "^2.7",
+        "rector/rector": "^2.6.5",
         "saschaegerer/phpstan-typo3": "^2.0 || ^3.0",
         "ssch/typo3-rector": "^3.15.1",
         "typo3/testing-framework": ">=8.3.3 <11"
