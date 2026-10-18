@@ -154,6 +154,12 @@ gh api repos/netresearch/REPO/hooks --method POST \
 | [`greetings.yml`](#greetings) | Greet first-time contributors | issue, PR |
 | [`docs.yml`](#documentation) | Render and verify TYPO3 documentation | push, PR |
 
+### CI image mirror
+
+[`ci-mirror.yml`](.github/workflows/ci-mirror.yml) is not a reusable workflow. It runs in this repository every Monday and on `workflow_dispatch`, and copies the database images the shared workflows and `runTests.sh` use to `ghcr.io/netresearch/ci-mirror/<name>:<tag>`, for `linux/amd64` and `linux/arm64`. The source is ECR Public (`public.ecr.aws/docker/library/`), with Docker Hub as fallback per image; both are pulled anonymously. After each copy the job compares both platform manifest digests with the source and fails on a difference.
+
+The images are listed in [`Build/ci-mirror-images.txt`](Build/ci-mirror-images.txt): `mariadb` 10.11, 11.4, 11.8, 12.3; `mysql` 8.0, 8.4, 9.0, 9.6; `postgres` 12 to 17 (`-alpine`); `alpine:3.20`. Self-CI fails when the list misses a tag the code can request, or holds one nothing requests.
+
 ---
 
 ## CI

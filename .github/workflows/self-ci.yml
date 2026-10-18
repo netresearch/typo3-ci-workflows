@@ -353,6 +353,9 @@ jobs:
           shellcheck -x assets/Build/Scripts/runTests.stub.sh
           shellcheck -x Build/Scripts/check-runner-variables.sh
           shellcheck -x Build/Scripts/check-composer-version-guard.sh
+          shellcheck -x Build/Scripts/mirror-ci-images.sh
+          shellcheck -x Build/Scripts/check-ci-mirror.sh
+          shellcheck -x Build/Scripts/check-ci-mirror-list.sh
           shellcheck -x Build/Scripts/check-runner-detection.sh
           shellcheck -x Build/Scripts/check-runner-network-cleanup.sh
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
@@ -378,6 +381,24 @@ jobs:
         # a value, this one whether the value is read out of the right file.
         # Fixture extensions, no container, no PHP.
         run: bash Build/Scripts/check-runner-detection.sh assets/Build/Scripts/runTests.sh
+
+      - name: Check the CI image mirror lists every image the code requests
+        # ci-mirror.yml copies Build/ci-mirror-images.txt to GHCR. A tag the
+        # code can request and the list misses is a pull of a tag that does
+        # not exist; an entry nothing requests is a stale copy. The check
+        # reads the db-image defaults, the provisioning default and
+        # runTests.sh's version allow-lists from the files themselves.
+        run: >-
+          bash Build/Scripts/check-ci-mirror-list.sh Build/ci-mirror-images.txt
+          .github/workflows/ci.yml .github/workflows/e2e.yml
+          assets/Build/Scripts/e2e-provision.sh assets/Build/Scripts/runTests.sh
+
+      - name: Check the CI image mirror's failure paths
+        # ci-mirror.yml runs on a schedule only, so no pull request executes
+        # it. This runs the mirror script against a stand-in crane: skip when
+        # up to date, fallback to the second source, a copy whose platform
+        # digests differ, a source without arm64, no usable source.
+        run: bash Build/Scripts/check-ci-mirror.sh Build/Scripts/mirror-ci-images.sh
 
       - name: Check every exit removes the runner's network
         # Only the end of the script and SIGINT removed the network, so an
