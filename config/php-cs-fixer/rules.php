@@ -90,7 +90,13 @@ return [
         'import_functions' => true,
     ],
     'no_unused_imports' => true,
-    'ordered_imports'   => ['sort_algorithm' => 'alpha'],
+    // A rule entry replaces the whole configuration of the base sets, so
+    // imports_order must be restated: without it, `use function` and
+    // `use const` lines are sorted in between the class imports.
+    'ordered_imports' => [
+        'imports_order'  => ['class', 'function', 'const'],
+        'sort_algorithm' => 'alpha',
+    ],
 
     // Function declarations
     'function_declaration' => [

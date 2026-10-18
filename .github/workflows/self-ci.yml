@@ -177,6 +177,10 @@ jobs:
         # directories are no longer skipped by default.
         run: php -dzend.assertions=1 Build/Scripts/check-cgl-finder.php
 
+      - name: Check the import order of the shared php-cs-fixer rules
+        # Class imports, then `use function`, then `use const`.
+        run: php -dzend.assertions=1 Build/Scripts/check-cgl-import-order.php
+
       - name: Check the PHPUnit templates and their flag check
         # bin/check-phpunit-config is what consumers run against their copies
         # of config/phpunit/. The templates must pass its baseline, and its
