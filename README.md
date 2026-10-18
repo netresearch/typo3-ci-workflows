@@ -1333,21 +1333,25 @@ An extension includes `config/phpstan/phpstan.neon` in its own `Build/phpstan.ne
 
 | Parameter | Effect |
 |---|---|
-| `level: 10` | The highest level: `mixed` is reported wherever a typed value is needed. |
+| `level: 10` | The highest level. Level 9 reports an explicit `mixed` where a specific type is required; level 10 does the same for values with no declared type at all (implicit `mixed`). |
 | `checkMissingCallableSignature: true` | A `callable` or `Closure` type without a signature (`callable(int): string`) is reported. |
 | `checkUninitializedProperties: true` | A typed property that the constructor leaves unset is reported. |
-| `reportUnmatchedIgnoredErrors: true` | An `ignoreErrors` entry that matches nothing is reported, so stale entries surface. |
+| `reportUnmatchedIgnoredErrors: true` | PHPStan's default, restated: an `ignoreErrors` entry that matches nothing is reported. It changes only an extension that had set it to `false`. The shared `ignoreErrors` entries carry `reportUnmatched: false`, so they never fire it. |
 | `treatPhpDocTypesAsCertain: false` | PHPDoc types do not make a later check "always true", so defensive checks are not reported. |
 
 **`ergebnis/phpstan-rules`**, with `allRules: false` and six rules switched on: `declareStrictTypes`, `noCompact`, `noErrorSuppression` (no `@`), `noEval`, `noReturnByReference` and `testCaseWithSuffix` (a test class name ends in `Test`). The other rules are off because they conflict with TYPO3 patterns, such as extending `ActionController`; the comments in `phpstan.neon` list them.
 
-**Extensions** that `phpstan/extension-installer` registers: `phpstan-strict-rules`, `phpstan-deprecation-rules`, `phpstan-phpunit`, `saschaegerer/phpstan-typo3`, `phpat/phpat` and `ergebnis/phpstan-rules`. `phpstan-phpunit` adds rules on test code, among them:
+**Extensions** that `phpstan/extension-installer` registers, among them `phpstan-strict-rules`, `phpstan-deprecation-rules`, `phpstan-phpunit`, `saschaegerer/phpstan-typo3`, `phpat/phpat` and `ergebnis/phpstan-rules`. Two more, `bnf/phpstan-psr-container` and `composer/pcre`, arrive as dependencies and add type information only.
+
+`phpstan-strict-rules` reports, among others, loose comparisons (`==`, `!=`), non-boolean conditions, `empty()`, the short ternary `?:`, a missing parent constructor call, `in_array()` and similar calls without strict mode, useless casts and dynamic properties. `phpstan-deprecation-rules` reports every use of a deprecated API, TYPO3's included; the shared `ignoreErrors` entries for `Classes/Updates/` exist for the upgrade wizards that must use them. `phpat/phpat` reports nothing until an extension defines architecture tests.
+
+`phpstan-phpunit` adds rules on test code, among them:
 
 - `assertSame(true, …)`, `assertSame(false, …)` and `assertSame(null, …)` should be `assertTrue()`, `assertFalse()` and `assertNull()`;
 - `assertSame($n, count($x))` should be `assertCount($n, $x)`;
 - a class or method named in a `@covers` or `@coversDefaultClass` annotation must exist (the `#[CoversClass]` attribute is not checked);
 - a mocked method must exist on the mocked type;
-- `setUp()` and `tearDown()` must call the parent method;
+- `setUp()` and `tearDown()` must call the parent method when the base class declares it, as `UnitTestCase` and `FunctionalTestCase` of `typo3/testing-framework` do;
 - a data provider must be declared correctly.
 
 `saschaegerer/phpstan-typo3` gives TYPO3 APIs real return types, for example for `GeneralUtility::makeInstance()`. An extension that did not use it before gets findings where it relied on `mixed`, and has to regenerate its baseline.
