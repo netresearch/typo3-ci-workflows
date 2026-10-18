@@ -171,6 +171,12 @@ jobs:
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-cgl.php
 
+      - name: Check which files the php-cs-fixer config factory scans
+        # The factory's exclude list reaches every consumer. Runs the finder
+        # in PHP-CS-Fixer 3's default mode and in future mode, where dot
+        # directories are no longer skipped by default.
+        run: php -dzend.assertions=1 Build/Scripts/check-cgl-finder.php
+
       - name: Check the method-chain fixer
         # The fixer is registered by the shared config factory, so a defect in
         # it reaches every consumer that opts in. Fixtures, no container: input,
