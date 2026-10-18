@@ -21,28 +21,42 @@ function cglProbe(string $source): string
         exit(1);
     }
 
-    file_put_contents($root . '/Classes/Probe.php', $source);
-    file_put_contents($root . '/.php-cs-fixer.php', sprintf(
+    $probe  = $root . '/Classes/Probe.php';
+    $config = $root . '/.php-cs-fixer.php';
+
+    $cleanUp = static function () use ($root, $probe, $config): void {
+        unlink($probe);
+        unlink($config);
+        rmdir($root . '/Classes');
+        rmdir($root);
+    };
+
+    file_put_contents($probe, $source);
+    file_put_contents($config, sprintf(
         "<?php\n\$factory = require %s;\n\nreturn \$factory('Test header', %s);\n",
         var_export($package . '/config/php-cs-fixer/config.php', true),
         var_export($root, true),
     ));
 
     $process = proc_open(
-        [PHP_BINARY, $package . '/vendor/bin/php-cs-fixer', 'fix', '--config=' . $root . '/.php-cs-fixer.php', '--allow-risky=yes', '--using-cache=no', '--quiet'],
+        [PHP_BINARY, $package . '/vendor/bin/php-cs-fixer', 'fix', '--config=' . $config, '--allow-risky=yes', '--using-cache=no', '--quiet'],
         [1 => ['pipe', 'w'], 2 => ['redirect', 1]],
         $pipes,
     );
+
+    if ($process === false) {
+        $cleanUp();
+        fwrite(STDERR, 'Cannot start php-cs-fixer' . PHP_EOL);
+        exit(1);
+    }
+
     $output = stream_get_contents($pipes[1]);
     fclose($pipes[1]);
     $exitCode = proc_close($process);
 
-    $fixed = (string) file_get_contents($root . '/Classes/Probe.php');
+    $fixed = (string) file_get_contents($probe);
 
-    unlink($root . '/Classes/Probe.php');
-    unlink($root . '/.php-cs-fixer.php');
-    rmdir($root . '/Classes');
-    rmdir($root);
+    $cleanUp();
 
     if ($exitCode !== 0) {
         fwrite(STDERR, "php-cs-fixer exited with {$exitCode}:" . PHP_EOL . $output . PHP_EOL);
