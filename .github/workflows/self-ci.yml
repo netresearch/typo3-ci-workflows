@@ -286,6 +286,32 @@ jobs:
           fi
           echo "rector boot smoke test: OK"
 
+      - name: Smoke test the shared PHPStan configs load
+        # Both entry points include phpstan-base.neon. Loads each one from a
+        # fixture, as a consumer does, and checks that the base parameters
+        # arrive and the bootstrap file resolves.
+        run: |
+          FIXTURE=$(mktemp -d)
+          printf '<?php\n' > "$FIXTURE/ext_emconf.php"
+          REPO="$PWD"
+          for NEON in phpstan.neon phpstan-rector.neon; do
+            (cd "$FIXTURE" && "$REPO/vendor/bin/phpstan" dump-parameters --json --memory-limit=1G \
+              -c "$REPO/config/phpstan/$NEON") > "$FIXTURE/params.json"
+            jq -e '.level == 10 and .treatPhpDocTypesAsCertain == false
+              and (.excludePaths.analyseAndScan | length) == 3' "$FIXTURE/params.json" > /dev/null \
+              || { echo "$NEON: base parameters missing" >&2; exit 1; }
+            BOOTSTRAP=$(jq -r '.bootstrapFiles[] | select(endswith("/config/phpstan/stubs/phpunit-attributes.php"))' "$FIXTURE/params.json")
+            if [ -z "$BOOTSTRAP" ] || [ ! -f "$BOOTSTRAP" ]; then
+              echo "$NEON: bootstrap file stubs/phpunit-attributes.php missing or unresolved" >&2
+              exit 1
+            fi
+          done
+          if jq -e '.checkMissingCallableSignature == true and .ergebnis.allRules == false' "$FIXTURE/params.json" > /dev/null; then
+            echo "phpstan-rector.neon carries the rule configuration of phpstan.neon" >&2
+            exit 1
+          fi
+          echo "PHPStan config smoke test: OK"
+
   lint-json:
     name: Lint JSON
     runs-on: ubuntu-latest

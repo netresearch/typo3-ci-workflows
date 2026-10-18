@@ -8,31 +8,16 @@
 # shared phpstan.neon trips a Nette\Schema\ValidationException
 # ("Unexpected item 'parameters › ergebnis'") when Rector loads it.
 #
-# This file mirrors the type-inference bits Rector actually needs (level,
-# treatPhpDocTypesAsCertain, excludePaths) and skips the ergebnis schema
-# entirely. The shared config/rector/rector.php points
-# `$rectorConfig->phpstanConfig()` here by default.
+# This file includes phpstan-base.neon, which holds the parameters Rector
+# needs (level, the type-inference flags, excludePaths, bootstrapFiles) and
+# which phpstan.neon includes as well, and nothing else. The shared
+# config/rector/rector.php points `$rectorConfig->phpstanConfig()` here by
+# default.
 #
 # Extensions normally do NOT need to include this file directly — they
 # inherit it through the shared rector.php. If an extension wants to
 # tighten Rector's type inference further, it can add its own neon and
 # call `$rectorConfig->phpstanConfig()` explicitly (which appends).
 
-parameters:
-    level: 10
-
-    treatPhpDocTypesAsCertain: false
-    inferPrivatePropertyTypeFromConstructor: true
-
-    excludePaths:
-        # Both vendor-dir spellings in use across the org; wildcard patterns
-        # skip PHPStan's path-existence check, so the unused variant is
-        # harmless.
-        - %currentWorkingDirectory%/.Build/*
-        - %currentWorkingDirectory%/.build/*
-        - %currentWorkingDirectory%/ext_emconf.php
-
-    bootstrapFiles:
-        # Relative to THIS file — works for any consuming vendor-dir; the
-        # previous absolute form hardcoded .Build and broke .build repos.
-        - stubs/phpunit-attributes.php
+includes:
+    - phpstan-base.neon
