@@ -1328,29 +1328,38 @@ Cost: the fixer is linear in file size and mildly superlinear in the number of c
 
 `Build/Scripts/check-break-long-method-chain.php` holds the fixtures, including idempotence and the structural property that a break never lands in front of an argument separator.
 
-## Git Worktree + captainhook Workaround
+## CaptainHook
 
-When using [git worktrees](https://git-scm.com/docs/git-worktree), `.git` is a file (not a directory), which causes `captainhook/hook-installer` to fail during `composer install`.
+This package requires `captainhook/hook-installer` and allows its Composer plugin. On every `composer install` and `composer update` the plugin installs the Git hooks that a CaptainHook configuration defines. It reads the configuration from `extra.captainhook.config` in your `composer.json`, a path relative to the directory Composer runs in, and falls back to `captainhook.json`.
 
-### Problem
+`config/captainhook/captainhook.json` is a template: a Conventional Commits check on the commit message, lint, CGL and PHPStan before a commit, and unit tests before a push. It calls the Composer scripts `ci:test:php:lint`, `ci:test:php:cgl`, `ci:test:php:phpstan` and `ci:test:php:unit`, so your extension has to define them. Copy the template to `Build/captainhook.json` and point the plugin at it:
 
-```
-captainhook/hook-installer fails: .git/hooks is not a directory
-```
-
-### Solutions
-
-**Solution 1: `--no-plugins`** (simplest)
-
-```bash
-composer install --no-plugins
+```json
+{
+    "extra": {
+        "captainhook": {
+            "config": "Build/captainhook.json"
+        }
+    }
+}
 ```
 
-This skips all Composer plugins including captainhook *and* `phpstan/extension-installer`. PHPStan plugins will not auto-register.
+The plugin installs nothing, and prints a notice instead, in these cases:
 
-**Solution 2: Explicit PHPStan includes** (recommended with Solution 1)
+| Situation | Notice |
+|---|---|
+| No configuration at the configured path | `CaptainHook configuration not found` |
+| `CI=true` in the environment, as on GitHub Actions | `disabling plugin due to CI-environment` |
+| The checkout is an additional Git worktree | `ARRRRR! We ARRR in a worktree, install is skipped!` |
+| The plugin is switched off | `plugin is disabled` |
 
-After `--no-plugins`, include the explicit plugin file in your `Build/phpstan.neon`:
+An extension that does not use Git hooks switches the plugin off. Either set `extra.captainhook.disable-plugin` to `true` in `composer.json`, or set the environment variable `CAPTAINHOOK_DISABLE=true` for one run. Without one of the two, every `composer install` prints the "configuration not found" notice.
+
+### Git worktrees
+
+In a worktree, `.git` is a file and not a directory. The plugin skips the install there with the notice above. Before 1.0.5, `captainhook/hook-installer` threw `invalid .git path` instead when the worktree's git directory is not named `.git`, as in a worktree of a bare repository or of one created with `--separate-git-dir`. The exception also stopped the remaining Composer plugins, so `phpstan/extension-installer` did not register the PHPStan extensions. This package requires 1.0.5 or later.
+
+`composer install --no-plugins` also skips the plugin, but it skips `phpstan/extension-installer` as well, so the PHPStan extensions are no longer registered. Include them explicitly in your `Build/phpstan.neon` in that case:
 
 ```neon
 includes:
@@ -1358,17 +1367,7 @@ includes:
     - phpstan-baseline.neon
 ```
 
-This file lists all PHPStan plugin neon files that `extension-installer` would normally auto-load.
-
-**Solution 3: Create hooks directory first**
-
-```bash
-# For git worktrees, .git is a file pointing to the real git dir.
-# Create a hooks dir where captainhook expects it:
-GITDIR=$(git rev-parse --git-dir)
-mkdir -p "${GITDIR}/hooks"
-composer install
-```
+`includes-no-extension-installer.neon` lists the PHPStan extension files that `phpstan/extension-installer` would otherwise register.
 
 ## Security
 
