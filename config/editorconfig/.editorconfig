@@ -20,7 +20,7 @@ trim_trailing_whitespace = false
 [*.{json,yaml,yml}]
 indent_size = 2
 
-[*.xlf]
+[*.{xlf,xliff}]
 indent_size = 2
 
 [Makefile]

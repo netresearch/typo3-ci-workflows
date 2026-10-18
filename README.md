@@ -1317,10 +1317,13 @@ Two more templates for files every extension keeps:
 
 | Template | Copy to | Content |
 |---|---|---|
-| `config/editorconfig/.editorconfig` | `.editorconfig` | UTF-8, LF, final newline, no trailing whitespace, 4 spaces; 2 spaces for JSON, YAML and XLIFF; tabs in a `Makefile`; trailing whitespace kept in Markdown. The `[*]` section is what all 17 extensions in the org with an `.editorconfig` set. |
-| `config/phplint/.phplint.yml` | `Build/.phplint.yml` | `overtrue/phplint` 9 over the repository root, excluding `.Build` and `vendor`, with the cache in `.Build/.phplint.cache`. Run it as `phplint --configuration Build/.phplint.yml`. |
+| `config/editorconfig/.editorconfig` | `.editorconfig` | UTF-8, LF, final newline, no trailing whitespace, 4 spaces; 2 spaces for JSON, YAML and XLIFF (`*.xlf`, `*.xliff`); tabs in a `Makefile`; trailing whitespace kept in Markdown. The `[*]` section is what all 17 extensions in the org with an `.editorconfig` set. |
+| `config/phplint/.phplint.yml` | `Build/.phplint.yml` | `overtrue/phplint` 9.6.2 or later over the repository root, excluding the top-level `.Build/` and `vendor/`, with the cache in `.Build/.phplint.cache`. Run it from the repository root as `phplint --configuration Build/.phplint.yml`. |
 
-The phplint template uses `cache-dir`. phplint 9 still reads the older `cache` key but marks it deprecated, and version 10 removes it.
+Two details of the phplint template matter when you compare it with an older copy:
+
+- It uses `cache-dir`. From 9.6.2, phplint ignores a `cache` key in the configuration file and writes the cache to `./.phplint.cache` in the repository root.
+- Its excludes are anchored regular expressions. A plain string matches anywhere in the path, so `vendor` also skips `Classes/Payment/vendorApi/`, and `.Build` skips a file named `Query.BuildHelper.php`.
 
 ## Code Style
 
