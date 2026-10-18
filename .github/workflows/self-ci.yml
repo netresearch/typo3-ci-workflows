@@ -437,6 +437,8 @@ jobs:
           shellcheck -x Build/Scripts/check-forbidden-licenses.sh
           shellcheck -x Build/Scripts/check-opengrep-severity.sh
           shellcheck -x Build/Scripts/check-opengrep-exec-use.sh
+          shellcheck -x Build/Scripts/check-opengrep-pinned-rules.sh
+          shellcheck -x Build/Scripts/refresh-opengrep-rules.sh
           shellcheck -x Build/Scripts/check-ter-comment.sh
           shellcheck -x Build/Scripts/check-phpunit-config.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
@@ -541,6 +543,15 @@ jobs:
         # rule: the misfire must pass, every sink must fail, and a nosemgrep
         # comment naming the registry id must still suppress the replacement.
         run: bash Build/Scripts/check-opengrep-exec-use.sh .github/workflows/security.yml
+
+      - name: Check Opengrep's pinned rule set
+        # `--config auto` loaded whatever the registry served, and one
+        # changed rule failed every caller without a change of theirs
+        # (#292). This runs the fetch step against the pinned commits: the
+        # pinned set must assemble, a missing or dropped rule file and a
+        # wrong digest must fail, and the scan step must run the pinned set
+        # for `--config auto` under the registry's rule ids.
+        run: bash Build/Scripts/check-opengrep-pinned-rules.sh .github/workflows/security.yml
 
       - name: Check the TER upload comment is found and checked
         # The CHANGELOG section was looked up under level-2 headings only, so a
