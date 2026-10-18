@@ -220,7 +220,30 @@ jobs:
               fwrite(STDERR, "Rector config must return a callable" . PHP_EOL);
               exit(1);
           }
-          echo "rector config factory: OK" . PHP_EOL;
+
+          // A set constant Rector deprecates is one Rector removes later, and
+          // its removal kills the Rector job of every consumer at once (that
+          // happened with STRICT_BOOLEANS in Rector 2.6.0). Fail on the
+          // deprecation, while the constant still exists.
+          // Comments are dropped first: they name removed constants on purpose.
+          $code = implode("", array_map(
+              static fn (PhpToken $t): string => $t->is([T_COMMENT, T_DOC_COMMENT]) ? "" : $t->text,
+              PhpToken::tokenize(file_get_contents("config/rector/rector.php")),
+          ));
+          preg_match_all('/\b((?:Level)?SetList)::([A-Z0-9_]+)/', $code, $refs, PREG_SET_ORDER);
+          if ($refs === []) {
+              fwrite(STDERR, "Found no set constant in config/rector/rector.php" . PHP_EOL);
+              exit(1);
+          }
+          foreach ($refs as [, $class, $constant]) {
+              $fqcn = "Rector\\Set\\ValueObject\\" . $class;
+              $doc = (new ReflectionClassConstant($fqcn, $constant))->getDocComment();
+              if ($doc !== false && str_contains($doc, "@deprecated")) {
+                  fwrite(STDERR, "config/rector/rector.php uses the deprecated {$class}::{$constant}" . PHP_EOL);
+                  exit(1);
+              }
+          }
+          echo "rector config factory: OK (" . count($refs) . " set constants, none deprecated)" . PHP_EOL;
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-rector.php
 
