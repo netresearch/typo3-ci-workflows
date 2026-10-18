@@ -41,6 +41,7 @@ strip_prefix() {
             FAILED=1
             ;;
     esac
+    return 0
 }
 
 for wf in "${CI}" "${E2E}"; do

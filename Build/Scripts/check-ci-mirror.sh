@@ -71,6 +71,7 @@ index() {
             {digest: $arm, platform: {os: "linux", architecture: "arm64", variant: "v8"}},
             {digest: "sha256:s390x", platform: {os: "linux", architecture: "s390x"}}
         ]}'
+    return $?
 }
 
 # setup <case>: fresh registry with both sources holding a and b.
@@ -84,20 +85,23 @@ setup() {
         index sha256:b-amd sha256:b-arm >"${STUB_DIR}/reg/${src}_lib_b_1"
     done
     printf '# comment\na:1\n\nb:1  # trailing comment\n' >"${STUB_DIR}/list"
+    return 0
 }
 
 run() {
     CRANE="${TMP}/crane" MIRROR_DEST=dst/m \
         MIRROR_SOURCES="ecr/lib hub/lib" bash "${SCRIPT}" "${STUB_DIR}/list" >"${STUB_DIR}/out" 2>&1
+    return $?
 }
 
 dest_ok() {
     jq -e --arg amd "${2}" --arg arm "${3}" \
         '(.manifests | length) == 2 and .manifests[0].digest == $amd and .manifests[1].digest == $arm' \
         "${STUB_DIR}/reg/dst_m_${1}_1" >/dev/null 2>&1
+    return $?
 }
 
-calls() { grep -c "${1}" "${STUB_DIR}/calls" || true; }
+calls() { grep -c "${1}" "${STUB_DIR}/calls" || true; return 0; }
 
 echo "case: fresh copy from the primary source"
 setup fresh
