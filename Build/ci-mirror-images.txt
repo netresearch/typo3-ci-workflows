@@ -1,0 +1,30 @@
+# Images that .github/workflows/ci-mirror.yml copies to
+# ghcr.io/netresearch/ci-mirror/<name>:<tag>, one <name>:<tag> per line.
+#
+# This list is derived from the code: Build/Scripts/check-ci-mirror-list.sh
+# compares it with the db-image defaults of ci.yml and e2e.yml, the
+# E2E_MARIADB_IMAGE default of e2e-provision.sh, the version allow-lists of
+# runTests.sh and its alpine tag, and fails on a missing or an unused entry.
+
+# runTests.sh -d mariadb; e2e.yml default 11.4; e2e-provision.sh default 10.11
+mariadb:10.11
+mariadb:11.4
+mariadb:11.8
+mariadb:12.3
+
+# runTests.sh -d mysql; ci.yml default 9.6
+mysql:8.0
+mysql:8.4
+mysql:9.0
+mysql:9.6
+
+# runTests.sh -d postgres
+postgres:12-alpine
+postgres:13-alpine
+postgres:14-alpine
+postgres:15-alpine
+postgres:16-alpine
+postgres:17-alpine
+
+# runTests.sh IMAGE_ALPINE
+alpine:3.20

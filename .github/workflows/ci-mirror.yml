@@ -1,0 +1,63 @@
+name: CI image mirror
+
+# Copies the database and helper images the shared workflows and runTests.sh
+# use to ghcr.io/netresearch/ci-mirror/<name>:<tag>, so that CI jobs pull
+# from a registry without a third-party anonymous quota. Both public sources
+# throttle shared runner IPs: Docker Hub by pull count, ECR Public by a data
+# quota (`toomanyrequests: Data limit exceeded`, t3x-nr-llm, 2026-10-18).
+#
+# The list is Build/ci-mirror-images.txt; self-ci checks it against the code.
+# Only linux/amd64 (runners) and linux/arm64 (local development on Apple
+# machines) are copied. Sources are pulled anonymously, ECR Public first and
+# Docker Hub for an image whose ECR copy fails; their platform manifests are
+# the same Docker official images.
+#
+# Never on pull_request: the job pushes with packages: write.
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror images to GHCR
+    if: github.repository == 'netresearch/typo3-ci-workflows'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install crane
+        run: |
+          set -euo pipefail
+          # Checksum from the release's checksums.txt.
+          curl --retry 3 --retry-delay 2 --retry-all-errors --fail --proto '=https' --proto-redir '=https' -sLO "https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0  go-containerregistry_Linux_x86_64.tar.gz" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar xzf go-containerregistry_Linux_x86_64.tar.gz -C "$RUNNER_TEMP/bin" crane
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: crane auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"
+
+      - name: Mirror and verify
+        run: bash Build/Scripts/mirror-ci-images.sh Build/ci-mirror-images.txt
