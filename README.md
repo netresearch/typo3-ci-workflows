@@ -1254,6 +1254,34 @@ Add this package to your extension's `require-dev`:
 
 This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows.
 
+## Rector
+
+`config/rector/rector.php` returns a function that applies the shared Rector configuration. With the project root as second argument it also sets the paths (`Classes/`, `Configuration/`, `Resources/` and `ext_*.php`), skips `ext_emconf.php`, points Rector at `config/phpstan/phpstan-rector.neon` and sets PHP 8.2. A third argument sets options:
+
+```php
+$configure = require __DIR__ . '/../.Build/vendor/netresearch/typo3-ci-workflows/config/rector/rector.php';
+
+return static function (RectorConfig $rectorConfig) use ($configure): void {
+    $configure($rectorConfig, __DIR__ . '/..', [
+        'tests' => true,
+        'php'   => '8.3',
+        'typo3' => 13,
+    ]);
+};
+```
+
+| Option | Values | Effect |
+|---|---|---|
+| `tests` | `true`, `false` | `Tests/` joins the paths when the directory exists. Without the option an extension has to re-declare every path to add it, because `paths()` replaces the list. |
+| `php` | `'8.2'` to `'8.5'` | The lowest PHP version the extension supports: sets `phpVersion()` and adds the matching `LevelSetList::UP_TO_PHP_*` set. Default `'8.2'`. |
+| `typo3` | `12`, `13`, `14` | The lowest TYPO3 major version the extension supports: adds `Typo3LevelSetList::UP_TO_TYPO3_<n>`. With `14` the rule `MigratePluginContentElementAndPluginSubtypesRector` is skipped. |
+
+An unknown option or value throws an `InvalidArgumentException`, and so does an option without the project root.
+
+Why `14` skips the plugin rule: TYPO3 14 registers every plugin as a content element and rejects any other plugin type in `ExtensionUtility::configurePlugin()`. For an extension that supports only TYPO3 14, the rule adds an explicit plugin type argument and writes an upgrade wizard with an empty `list_type` mapping into `Classes/Updates/`. A normal run writes that file; a `--dry-run` does not show it. Records with a `list_type` from an earlier TYPO3 version still need a migration with a real mapping.
+
+`Build/Scripts/check-rector-options.php` checks each option.
+
 ## Code Style
 
 `config/php-cs-fixer/config.php` builds the shared PHP-CS-Fixer configuration. A third argument adds project rules on top of the shared set:
