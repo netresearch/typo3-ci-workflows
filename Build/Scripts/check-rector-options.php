@@ -81,9 +81,30 @@ $cases  = [
         ['tests' => false],
         static fn (array $r): bool => !in_array('Tests', $r['paths'], true),
     ],
+    'php 8.2 sets the version and the level set' => [
+        ['php' => '8.2'],
+        static fn (array $r): bool => $r['php'] === 80200 && in_array(LevelSetList::UP_TO_PHP_82, $r['sets'], true)
+            && !in_array(LevelSetList::UP_TO_PHP_83, $r['sets'], true),
+    ],
+    'php 8.3 sets the version and the level set' => [
+        ['php' => '8.3'],
+        static fn (array $r): bool => $r['php'] === 80300 && in_array(LevelSetList::UP_TO_PHP_83, $r['sets'], true)
+            && !in_array(LevelSetList::UP_TO_PHP_84, $r['sets'], true),
+    ],
+    'php 8.4 sets the version and the level set' => [
+        ['php' => '8.4'],
+        static fn (array $r): bool => $r['php'] === 80400 && in_array(LevelSetList::UP_TO_PHP_84, $r['sets'], true)
+            && !in_array(LevelSetList::UP_TO_PHP_85, $r['sets'], true),
+    ],
     'php 8.5 sets the version and the level set' => [
         ['php' => '8.5'],
         static fn (array $r): bool => $r['php'] === 80500 && in_array(LevelSetList::UP_TO_PHP_85, $r['sets'], true),
+    ],
+    'typo3 12 adds its level set and keeps the plugin rule' => [
+        ['typo3' => 12],
+        static fn (array $r): bool => in_array(Typo3LevelSetList::UP_TO_TYPO3_12, $r['sets'], true)
+            && !in_array(Typo3LevelSetList::UP_TO_TYPO3_13, $r['sets'], true)
+            && !in_array($plugin, $r['skip'], true),
     ],
     'typo3 13 adds its level set and keeps the plugin rule' => [
         ['typo3' => 13],

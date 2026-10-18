@@ -33,7 +33,7 @@
  * The $projectRoot parameter (v1.1+) auto-configures:
  *   - paths: Classes/, Configuration/, Resources/ (if exists), ext_*.php (via glob)
  *   - skip: ext_emconf.php
- *   - phpstanConfig: Build/phpstan.neon
+ *   - phpstanConfig: config/phpstan/phpstan-rector.neon of this package
  *   - phpVersion: 80200
  *
  * Pass '' or omit $projectRoot for v1.0 backward-compatible behavior
@@ -53,13 +53,16 @@
  *   - php:   8.2 to 8.5. Sets phpVersion() and adds the matching
  *            LevelSetList::UP_TO_PHP_* set. Without it: 8.2.
  *   - typo3: 12, 13 or 14. Adds Typo3LevelSetList::UP_TO_TYPO3_<n>. With 14,
- *            MigratePluginContentElementAndPluginSubtypesRector is skipped:
- *            TYPO3 14 registers every plugin as a content element and rejects
- *            any other plugin type, so the rule only adds an explicit argument
- *            and writes an upgrade wizard with an empty list_type mapping into
- *            Classes/Updates/. A normal run writes that file, a --dry-run
- *            does not show it. Records with a list_type from an earlier TYPO3
- *            version still need a migration with a real mapping.
+ *            MigratePluginContentElementAndPluginSubtypesRector is skipped.
+ *            TYPO3 14 registers every plugin as a content element, and the
+ *            rule's edits no longer fit its API: in configurePlugin() it adds
+ *            an argument that TYPO3 14 only accepts as "CType", and in
+ *            addPlugin(), whose second parameter is now $flexForm, it writes
+ *            "CType" as the FlexForm. It also writes an upgrade wizard with an
+ *            empty list_type mapping into Classes/Updates/; a normal run
+ *            writes that file, a --dry-run does not show it. Records with a
+ *            list_type from an earlier TYPO3 version still need a migration
+ *            with a real mapping.
  */
 
 declare(strict_types=1);

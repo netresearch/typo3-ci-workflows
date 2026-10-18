@@ -1278,7 +1278,7 @@ return static function (RectorConfig $rectorConfig) use ($configure): void {
 
 An unknown option or value throws an `InvalidArgumentException`, and so does an option without the project root.
 
-Why `14` skips the plugin rule: TYPO3 14 registers every plugin as a content element and rejects any other plugin type in `ExtensionUtility::configurePlugin()`. For an extension that supports only TYPO3 14, the rule adds an explicit plugin type argument and writes an upgrade wizard with an empty `list_type` mapping into `Classes/Updates/`. A normal run writes that file; a `--dry-run` does not show it. Records with a `list_type` from an earlier TYPO3 version still need a migration with a real mapping.
+Why `14` skips the plugin rule: TYPO3 14 registers every plugin as a content element, and the rule's edits no longer fit its API. In `ExtensionUtility::configurePlugin()` it adds a plugin type argument that TYPO3 14 only accepts as `CType`. In `ExtensionManagementUtility::addPlugin()`, whose second parameter is `$flexForm` in TYPO3 14, it writes `CType` as the FlexForm. It also writes an upgrade wizard with an empty `list_type` mapping into `Classes/Updates/`; a normal run writes that file, a `--dry-run` does not show it. Records with a `list_type` from an earlier TYPO3 version still need a migration with a real mapping.
 
 `Build/Scripts/check-rector-options.php` checks each option.
 
