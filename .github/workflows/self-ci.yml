@@ -220,49 +220,15 @@ jobs:
               fwrite(STDERR, "Rector config must return a callable" . PHP_EOL);
               exit(1);
           }
-
-          // A set constant Rector deprecates is one Rector removes later, and
-          // its removal kills the Rector job of every consumer at once (that
-          // happened with STRICT_BOOLEANS in Rector 2.6.0). Fail on the
-          // deprecation, while the constant still exists.
-          // Comments are dropped first: they name removed constants on purpose.
-          // Every class whose name ends in SetList is checked, resolved
-          // through the file's use imports, aliases included.
-          $code = implode("", array_map(
-              static fn (PhpToken $t): string => $t->is([T_COMMENT, T_DOC_COMMENT]) ? "" : $t->text,
-              PhpToken::tokenize(file_get_contents("config/rector/rector.php")),
-          ));
-          $imports = [];
-          preg_match_all('/^use\s+([A-Za-z0-9_\\\\]+)(?:\s+as\s+([A-Za-z0-9_]+))?\s*;/m', $code, $uses, PREG_SET_ORDER);
-          foreach ($uses as $use) {
-              $imports[$use[2] ?? substr(strrchr("\\" . $use[1], "\\"), 1)] = ltrim($use[1], "\\");
-          }
-          preg_match_all('/(\\\\?[A-Za-z0-9_\\\\]+)::([A-Z][A-Z0-9_]*)\b/', $code, $refs, PREG_SET_ORDER);
-          $checked = 0;
-          foreach ($refs as [, $name, $constant]) {
-              $fqcn = str_starts_with($name, "\\") ? ltrim($name, "\\") : ($imports[$name] ?? $name);
-              if (!str_ends_with($fqcn, "SetList") || $constant === "class") {
-                  continue;
-              }
-              try {
-                  $doc = (new ReflectionClassConstant($fqcn, $constant))->getDocComment();
-              } catch (ReflectionException $e) {
-                  fwrite(STDERR, "config/rector/rector.php uses {$name}::{$constant}, which does not exist: {$e->getMessage()}" . PHP_EOL);
-                  exit(1);
-              }
-              ++$checked;
-              if ($doc !== false && str_contains($doc, "@deprecated")) {
-                  fwrite(STDERR, "config/rector/rector.php uses the deprecated {$fqcn}::{$constant}" . PHP_EOL);
-                  exit(1);
-              }
-          }
-          if ($checked === 0) {
-              fwrite(STDERR, "Found no set-list constant in config/rector/rector.php" . PHP_EOL);
-              exit(1);
-          }
-          echo "rector config factory: OK ({$checked} set-list constants, none deprecated)" . PHP_EOL;
+          echo "rector config factory: OK" . PHP_EOL;
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-rector.php
+
+      - name: Check the rector config uses no deprecated set constant
+        # A deprecated set constant is one Rector removes later, and its
+        # removal kills the Rector job of every consumer at once, as
+        # STRICT_BOOLEANS did in Rector 2.6.0.
+        run: php -dzend.assertions=1 Build/Scripts/check-rector-set-constants.php
 
       - name: Smoke test rector boots with the shared config
         run: |
