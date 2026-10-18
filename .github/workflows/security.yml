@@ -299,7 +299,51 @@ jobs:
           # under GitHub Actions' default `bash -e` shell.
           ARGS=()
           read -r -a ARGS <<< "$OPENGREP_CONFIG" || :
-          opengrep scan "${ARGS[@]}" --sarif --output opengrep.sarif .
+
+          # The registry rule php.lang.security.exec-use.exec-use matches
+          # any callee whose name STARTS with one of the sink names, in any
+          # case, since semgrep/semgrep-rules#4081 made its regex
+          # case-insensitive: `ExecutionIdentity::interactive()` and
+          # `ExecuteTaskRequest::fromRequest()` fail the job. The scan
+          # excludes that rule and runs the replacement below, whose regex
+          # matches the whole callee name (an optional leading `\` for a
+          # fully qualified call). The replacement is written for this
+          # workflow: the registry rules are under the Semgrep Rules License
+          # v1.0, which does not allow distributing them, so no rule text is
+          # copied here. Opengrep prefixes a local rule's id with its file
+          # path; the id still ends in the registry id, so a
+          # `nosemgrep: php.lang.security.exec-use.exec-use` comment keeps
+          # suppressing it. Remove the rule file, `--exclude-rule` and the
+          # second `--config` once the registry rule anchors its regex.
+          RULES="${RUNNER_TEMP}/opengrep-rules"
+          mkdir -p "$RULES"
+          cat > "$RULES/exec-use.yaml" <<'YAML'
+          rules:
+            - id: php.lang.security.exec-use.exec-use
+              languages: [php]
+              severity: ERROR
+              message: >-
+                $SINK() runs an operating-system command built from a
+                non-literal value. Make sure no untrusted input can reach it.
+              metadata:
+                cwe:
+                  - "CWE-78: OS Command Injection"
+                category: security
+                technology: [php]
+                confidence: LOW
+                source: netresearch/typo3-ci-workflows security.yml
+              patterns:
+                - pattern: $SINK(...);
+                - pattern-not: $SINK("...", ...);
+                - metavariable-regex:
+                    metavariable: $SINK
+                    regex: ^\\?(?i:exec|passthru|proc_open|popen|shell_exec|system|pcntl_exec)$
+          YAML
+
+          opengrep scan "${ARGS[@]}" \
+            --exclude-rule php.lang.security.exec-use.exec-use \
+            --config "$RULES/exec-use.yaml" \
+            --sarif --output opengrep.sarif .
 
       - name: Drop nosemgrep-suppressed findings from the SARIF
         # Opengrep honours `nosemgrep` comments for its exit status — a file

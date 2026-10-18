@@ -366,6 +366,7 @@ jobs:
           shellcheck -x Build/Scripts/check-release-publication-status.sh
           shellcheck -x Build/Scripts/check-forbidden-licenses.sh
           shellcheck -x Build/Scripts/check-opengrep-severity.sh
+          shellcheck -x Build/Scripts/check-opengrep-exec-use.sh
           shellcheck -x Build/Scripts/check-ter-comment.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
@@ -461,6 +462,14 @@ jobs:
         # binary with the workflow's own step and runs the scan step with the
         # input's default against one fixture finding per severity.
         run: bash Build/Scripts/check-opengrep-severity.sh .github/workflows/security.yml
+
+      - name: Check Opengrep's exec-use replacement
+        # The registry's php.lang.security.exec-use.exec-use matches every
+        # callee starting with a sink name, so `ExecutionIdentity::x()` failed
+        # every caller. This runs the scan step against a stand-in for that
+        # rule: the misfire must pass, every sink must fail, and a nosemgrep
+        # comment naming the registry id must still suppress the replacement.
+        run: bash Build/Scripts/check-opengrep-exec-use.sh .github/workflows/security.yml
 
       - name: Check the TER upload comment is found and checked
         # The CHANGELOG section was looked up under level-2 headings only, so a
