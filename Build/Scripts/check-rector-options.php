@@ -15,6 +15,7 @@ use Rector\Config\RectorConfig;
 use Rector\Configuration\Option;
 use Rector\Configuration\Parameter\SimpleParameterProvider;
 use Rector\Set\ValueObject\LevelSetList;
+use Rector\TypeDeclaration\Rector\Class_\TypedPropertyFromCreateMockAssignRector;
 use Ssch\TYPO3Rector\Set\Typo3LevelSetList;
 use Ssch\TYPO3Rector\TYPO313\v4\MigratePluginContentElementAndPluginSubtypesRector;
 
@@ -76,6 +77,13 @@ $cases  = [
     'tests adds Tests/' => [
         ['tests' => true],
         static fn (array $r): bool => $r['paths'] === ['Classes', 'Configuration', 'Tests', 'ext_emconf.php', 'ext_localconf.php'],
+    ],
+    // The rule replaces `private Foo $foo` with `private MockObject $foo` when
+    // the property is assigned createMock(). Skipped whatever the options,
+    // because an extension can add Tests/ to the paths itself.
+    'the mock property rule is skipped' => [
+        [],
+        static fn (array $r): bool => in_array(TypedPropertyFromCreateMockAssignRector::class, $r['skip'], true),
     ],
     'tests false keeps Tests/ out' => [
         ['tests' => false],

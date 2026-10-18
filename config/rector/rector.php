@@ -76,6 +76,7 @@ use Rector\DeadCode\Rector\Property\RemoveUselessVarTagRector;
 use Rector\Php80\Rector\Class_\ClassPropertyAssignToConstructorPromotionRector;
 use Rector\Set\ValueObject\LevelSetList;
 use Rector\Set\ValueObject\SetList;
+use Rector\TypeDeclaration\Rector\Class_\TypedPropertyFromCreateMockAssignRector;
 use Ssch\TYPO3Rector\Set\Typo3LevelSetList;
 use Ssch\TYPO3Rector\TYPO313\v4\MigratePluginContentElementAndPluginSubtypesRector;
 
@@ -194,5 +195,12 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = '', ar
 
         // Removing private method params can break internal API contracts
         RemoveUnusedPrivateMethodParameterRector::class,
+
+        // In a TestCase, replaces the type of a property that is assigned
+        // createMock() with plain MockObject, also when the property already
+        // has a class type: `private Foo $foo` becomes `private MockObject
+        // $foo`, and passing it where a Foo is expected no longer type-checks.
+        // Only an intersection type (Foo&MockObject) is left alone.
+        TypedPropertyFromCreateMockAssignRector::class,
     ]);
 };

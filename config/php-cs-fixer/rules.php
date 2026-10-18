@@ -99,8 +99,14 @@ return [
     ],
 
     // Modern syntax
+    //
+    // The configuration of @PER-CS3x0, repeated here because @PHP8x2Migration
+    // above sets this rule to ['after_heredoc' => true] and a later set
+    // replaces the whole configuration: without this entry only arrays would
+    // get a trailing comma.
     'trailing_comma_in_multiline' => [
-        'elements' => ['arrays', 'arguments', 'parameters'],
+        'after_heredoc' => true,
+        'elements'      => ['arguments', 'array_destructuring', 'arrays', 'match', 'parameters'],
     ],
 
     // Whitespace
