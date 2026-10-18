@@ -92,12 +92,16 @@ return static function (RectorConfig $rectorConfig, string $projectRoot = ''): v
     // that release. Rector's own deprecation says the set was "mostly risky and
     // not practical" and points at codeQuality and codingStyle instead, both of
     // which are already listed below — so nothing is lost by dropping it.
+    //
+    // SetList::EARLY_RETURN and SetList::INSTANCEOF are absent for the same
+    // reason before it bites: Rector deprecates both, and from Rector 2.6.5
+    // (the floor in composer.json) their set files register no rules. Of
+    // their 15 rules, 11 moved into the code quality, type declaration and
+    // dead code sets listed below; Rector deprecated the other 4.
     $rectorConfig->sets([
         SetList::CODE_QUALITY,
         SetList::CODING_STYLE,
         SetList::DEAD_CODE,
-        SetList::EARLY_RETURN,
-        SetList::INSTANCEOF,
         SetList::PRIVATIZATION,
         SetList::TYPE_DECLARATION,
         LevelSetList::UP_TO_PHP_82,

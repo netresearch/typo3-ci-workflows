@@ -224,6 +224,12 @@ jobs:
           PHPEOF
           php -dzend.assertions=1 /tmp/smoke-rector.php
 
+      - name: Check the rector config uses no deprecated set constant
+        # A deprecated set constant is one Rector removes later, and its
+        # removal kills the Rector job of every consumer at once, as
+        # STRICT_BOOLEANS did in Rector 2.6.0.
+        run: php -dzend.assertions=1 Build/Scripts/check-rector-set-constants.php
+
       - name: Smoke test rector boots with the shared config
         run: |
           FIXTURE=$(mktemp -d)
