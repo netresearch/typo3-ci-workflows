@@ -69,6 +69,7 @@ e2e_probe_status() {
         (( attempt < attempts )) && sleep "${delay}"
     done
     printf '%s' "${code}"
+    return 0
 }
 
 # Remove a directory the e2e containers wrote into. They run as root, so a
