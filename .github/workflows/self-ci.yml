@@ -437,6 +437,7 @@ jobs:
           shellcheck -x Build/Scripts/check-runner-network-cleanup.sh
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
+          shellcheck -x Build/Scripts/check-e2e-provision-probe.sh
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
@@ -495,6 +496,13 @@ jobs:
         # it was inert, including the exception handlers, and the file parses
         # either way — so this runs it and looks at $GLOBALS (#229).
         run: bash Build/Scripts/check-e2e-provision-config.sh assets/Build/Scripts/e2e-provision.sh
+
+      - name: Check that provisioning asks a failing page again
+        # The frontend and backend probes asked once, and a name lookup in the
+        # podman network that failed with "Try again" right after start-up made
+        # 8 of 20 E2E cells of the passkeys extensions fail their setup on a
+        # 500 the next request no longer gave. Stand-in container, no network.
+        run: bash Build/Scripts/check-e2e-provision-probe.sh assets/Build/Scripts/e2e-provision.sh
 
       - name: Check that a suite with nothing to run fails
         # The fallback chain used to end in a notice and a green job, which is

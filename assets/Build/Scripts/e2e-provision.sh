@@ -44,6 +44,33 @@
 # Requires from runTests.sh: CONTAINER_BIN, CONTAINER_COMMON_PARAMS, NETWORK,
 # SUFFIX, CI_PARAMS, IMAGE_PHP, IMAGE_APACHE, ROOT_DIR and wait_for.
 
+# Print the HTTP status a page of the instance answers, asking again while it
+# is not 200. On GitHub's runners a name lookup inside the podman network can
+# fail with "Try again" (EAI_AGAIN) just after the containers came up: Apache
+# then answers "DNS lookup failure for: phpfpm", or TYPO3 cannot resolve the
+# database host, and either way the page is a 500 that the next request no
+# longer gives. With one attempt, 8 of 20 E2E cells of t3x-nr-passkeys-fe and
+# -be failed their setup that way. A page that stays broken still fails, after
+# ${E2E_PROBE_ATTEMPTS} attempts, with the last status it gave.
+e2e_probe_status() {
+    local check_name="${1}"
+    local url="${2}"
+    local attempts="${E2E_PROBE_ATTEMPTS:-10}"
+    local delay="${E2E_PROBE_DELAY:-3}"
+    local attempt code=""
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
+            --name "${check_name}-${SUFFIX}" \
+            --network ${NETWORK} \
+            ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
+            "${url}" 2>/dev/null)
+        [[ "${code}" == "200" ]] && break
+        echo "e2e: ${url} answered ${code:-nothing} (attempt ${attempt} of ${attempts})" >&2
+        (( attempt < attempts )) && sleep "${delay}"
+    done
+    printf '%s' "${code}"
+}
+
 # Remove a directory the e2e containers wrote into. They run as root, so a
 # plain `rm -rf` hits "Permission denied" on their files: it fails quietly, the
 # directory survives, and the next `composer create-project` aborts with
@@ -453,11 +480,7 @@ HTACCESS
     # instance is broken, and letting the suite run against it turns one setup
     # fault into a page of failing assertions that name the wrong thing.
     local code
-    code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
-        --name curl-check-${SUFFIX} \
-        --network ${NETWORK} \
-        ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
-        "${instance_url}:80/" 2>/dev/null)
+    code=$(e2e_probe_status curl-check "${instance_url}:80/")
     echo "Frontend: HTTP ${code:-none}"
     if [[ "${code}" != "200" ]]; then
         # 000 is curl's "no reply at all" — the container went away or never
@@ -470,16 +493,13 @@ HTACCESS
 
     # The frontend answering is not the whole instance. A suite that drives the
     # backend meets it first at /typo3/login, and that request can fail on its
-    # own — observed once as Apache's "DNS lookup failure for: phpfpm" after
-    # this check had passed for `/`. Asking for both here turns such a state
-    # into one setup error instead of a page of assertions blaming whichever
+    # own — observed as Apache's "DNS lookup failure for: phpfpm" after this
+    # check had passed for `/`. Waiting for both here means the suite starts
+    # against an instance whose backend has answered, and a backend that never
+    # does is one setup error instead of a page of assertions blaming whichever
     # specification happened to run first.
     local backend_code
-    backend_code=$(${CONTAINER_BIN} run --rm ${CI_PARAMS} \
-        --name curl-check-be-${SUFFIX} \
-        --network ${NETWORK} \
-        ${IMAGE_PHP} curl -sS --connect-timeout 5 --max-time 20 -o /dev/null -w '%{http_code}' \
-        "${instance_url}:80/typo3/login" 2>/dev/null)
+    backend_code=$(e2e_probe_status curl-check-be "${instance_url}:80/typo3/login")
     echo "Backend: HTTP ${backend_code:-none}"
     if [[ "${backend_code}" != "200" ]]; then
         echo "e2e: the backend login page answered ${backend_code:-nothing}, not 200." >&2
