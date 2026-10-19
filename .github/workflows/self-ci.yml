@@ -498,10 +498,10 @@ jobs:
         run: bash Build/Scripts/check-e2e-provision-config.sh assets/Build/Scripts/e2e-provision.sh
 
       - name: Check that provisioning asks a failing page again
-        # The frontend and backend probes asked once, and a name lookup in the
-        # podman network that failed with "Try again" right after start-up made
-        # 8 of 20 E2E cells of the passkeys extensions fail their setup on a
-        # 500 the next request no longer gave. Stand-in container, no network.
+        # The frontend probe asked once, and a name lookup in the podman network
+        # that failed with "Try again" right after start-up, or an Apache not
+        # serving yet, failed the setup on a status a later request no longer
+        # gave. Stand-in container, no network.
         run: bash Build/Scripts/check-e2e-provision-probe.sh assets/Build/Scripts/e2e-provision.sh
 
       - name: Check that a suite with nothing to run fails

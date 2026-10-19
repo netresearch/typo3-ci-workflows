@@ -48,10 +48,10 @@
 # is not 200. On GitHub's runners a name lookup inside the podman network can
 # fail with "Try again" (EAI_AGAIN) just after the containers came up: Apache
 # then answers "DNS lookup failure for: phpfpm", or TYPO3 cannot resolve the
-# database host, and either way the page is a 500 that the next request no
-# longer gives. With one attempt, 8 of 20 E2E cells of t3x-nr-passkeys-fe and
-# -be failed their setup that way. A page that stays broken still fails, after
-# ${E2E_PROBE_ATTEMPTS} attempts, with the last status it gave.
+# database host, and either way the page is a 500 that a later request no
+# longer gives. With one attempt, the frontend check also failed on a 000 from
+# an Apache that was not serving yet. A page that stays broken still fails,
+# after ${E2E_PROBE_ATTEMPTS} attempts, with the last status it gave.
 e2e_probe_status() {
     local check_name="${1}"
     local url="${2}"
@@ -473,7 +473,7 @@ HTACCESS
         }
     wait_for apache-e2e-${SUFFIX} 80 20
 
-    # One place builds the address the instance is reached at; both checks below
+    # One place builds the address the instance is reached at; the check below
     # and TYPO3_BASE_URL take it from here.
     local instance_url="http://apache-e2e-${SUFFIX}"
 
@@ -492,22 +492,12 @@ HTACCESS
         return 1
     fi
 
-    # The frontend answering is not the whole instance. A suite that drives the
-    # backend meets it first at /typo3/login, and that request can fail on its
-    # own — observed as Apache's "DNS lookup failure for: phpfpm" after this
-    # check had passed for `/`. Waiting for both here means the suite starts
-    # against an instance whose backend has answered, and a backend that never
-    # does is one setup error instead of a page of assertions blaming whichever
-    # specification happened to run first.
-    local backend_code
-    backend_code=$(e2e_probe_status curl-check-be "${instance_url}:80/typo3/login")
-    echo "Backend: HTTP ${backend_code:-none}"
-    if [[ "${backend_code}" != "200" ]]; then
-        echo "e2e: the backend login page answered ${backend_code:-nothing}, not 200." >&2
-        echo "     The frontend is up, so this is the backend alone: a broken" >&2
-        echo "     install, or PHP-FPM not reachable from Apache." >&2
-        return 1
-    fi
+    # There is no separate check of /typo3/login. One existed from 2.0.0 to
+    # 2.0.3 and failed the setup whenever PHP-FPM or the database host was
+    # briefly unresolvable, although the suite survives that: in a measurement
+    # over 68 E2E cells of t3x-rte_ckeditor_image and t3x-nr-passkeys-fe, it
+    # still failed 2 of 34 setups with retries, while 34 of 34 passed without
+    # it, 15 of them with the same lookup failure logged during the suite.
 
     TYPO3_BASE_URL="${instance_url}"
     export TYPO3_BASE_URL

@@ -4,10 +4,11 @@
 #
 # The probe asked once and aborted on the first answer that was not 200. On
 # GitHub's runners a name lookup inside the podman network can fail with
-# "Try again" just after the containers came up, so the backend login page
-# answered 500 once and 200 on the next request, and 8 of 20 E2E cells of
-# t3x-nr-passkeys-fe and -be failed their setup on it. The probe now asks
-# again, and still fails for a page that keeps failing.
+# "Try again" just after the containers came up, and Apache can answer
+# nothing yet, so a page gave 500 or 000 once and 200 on a later request. In a
+# measurement over 34 E2E cells of t3x-rte_ckeditor_image and
+# t3x-nr-passkeys-fe, one attempt failed 18 setups. The probe now asks again,
+# and still fails for a page that keeps failing.
 #
 # This sources the provisioner and calls e2e_probe_status with a stand-in
 # container binary that answers from a list of status codes. No container.
@@ -55,7 +56,7 @@ expect() {
     tr ' ' '\n' <<< "${codes}" > "${WORK}/codes"
     echo 0 > "${WORK}/calls"
     local got_code got_calls
-    got_code=$(e2e_probe_status curl-check-be "http://apache:80/typo3/login" 2>"${WORK}/stderr")
+    got_code=$(e2e_probe_status curl-check "http://apache:80/" 2>"${WORK}/stderr")
     got_calls=$(cat "${WORK}/calls")
     if [[ "${got_code}" != "${want_code}" || "${got_calls}" != "${want_calls}" ]]; then
         echo "check-e2e-provision-probe: ${name}: got status ${got_code:-none} after ${got_calls} request(s), want ${want_code} after ${want_calls}" >&2
@@ -71,7 +72,7 @@ expect "always 500" "500" 500 4
 # A failed attempt has to say so: it is the only trace of the transient.
 tr ' ' '\n' <<< "500 200" > "${WORK}/codes"
 echo 0 > "${WORK}/calls"
-e2e_probe_status curl-check-be "http://apache:80/typo3/login" >/dev/null 2>"${WORK}/stderr"
+e2e_probe_status curl-check "http://apache:80/" >/dev/null 2>"${WORK}/stderr"
 if ! grep -qF 'answered 500 (attempt 1 of 4)' "${WORK}/stderr"; then
     echo "check-e2e-provision-probe: a failed attempt printed no line naming its status" >&2
     STATUS=1
