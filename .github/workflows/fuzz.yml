@@ -110,7 +110,7 @@ jobs:
     # chicken-and-egg between workflow change and SHA bump.
     name: Preflight (event gate)
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 5
     outputs:
       run: ${{ steps.gate.outputs.run }}
       has-fuzz: ${{ steps.detect.outputs.has-fuzz }}
