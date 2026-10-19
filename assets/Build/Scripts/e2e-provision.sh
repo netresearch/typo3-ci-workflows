@@ -72,6 +72,47 @@ e2e_probe_status() {
     return 0
 }
 
+# Print the end of the Apache and PHP-FPM container logs and of every TYPO3
+# log file of the instance, to stderr. A failed page check is otherwise only a
+# status code: the instance directory is kept on a failed run, but a CI runner
+# discards it, so the message that names the cause (Apache's "DNS lookup
+# failure for: phpfpm", a TYPO3 exception) has to reach the job log here.
+e2e_print_instance_logs() {
+    local lines="${E2E_LOG_LINES:-60}"
+    local container log
+    for container in apache-e2e-${SUFFIX} phpfpm-e2e-${SUFFIX}; do
+        echo "--- last ${lines} lines of the ${container} log ---" >&2
+        ${CONTAINER_BIN} logs --tail "${lines}" "${container}" >&2 2>&1 || echo "(no log of ${container})" >&2
+    done
+    for log in "${E2E_ROOT}"/var/log/*.log; do
+        [[ -f "${log}" ]] || continue
+        echo "--- last ${lines} lines of var/log/${log##*/} ---" >&2
+        tail -n "${lines}" "${log}" >&2
+    done
+    return 0
+}
+
+# Require HTTP 200 from the frontend of the instance at the given address.
+# Assert the status, do not just print it. A 403 or a 500 here means the
+# instance is broken, and letting the suite run against it turns one setup
+# fault into a page of failing assertions that name the wrong thing.
+e2e_require_frontend() {
+    local instance_url="${1}"
+    local code
+    code=$(e2e_probe_status curl-check "${instance_url}:80/")
+    echo "Frontend: HTTP ${code:-none}"
+    if [[ "${code}" != "200" ]]; then
+        # 000 is curl's "no reply at all" — the container went away or never
+        # served; anything else is an HTTP answer from a broken instance.
+        echo "e2e: the frontend answered ${code:-nothing}, not 200. Running the suite" >&2
+        echo "     now would report test failures for an instance that is not" >&2
+        echo "     serving; 000 means nothing answered on that address." >&2
+        e2e_print_instance_logs
+        return 1
+    fi
+    return 0
+}
+
 # Remove a directory the e2e containers wrote into. They run as root, so a
 # plain `rm -rf` hits "Permission denied" on their files: it fails quietly, the
 # directory survives, and the next `composer create-project` aborts with
@@ -477,20 +518,7 @@ HTACCESS
     # and TYPO3_BASE_URL take it from here.
     local instance_url="http://apache-e2e-${SUFFIX}"
 
-    # Assert the status, do not just print it. A 403 or a 500 here means the
-    # instance is broken, and letting the suite run against it turns one setup
-    # fault into a page of failing assertions that name the wrong thing.
-    local code
-    code=$(e2e_probe_status curl-check "${instance_url}:80/")
-    echo "Frontend: HTTP ${code:-none}"
-    if [[ "${code}" != "200" ]]; then
-        # 000 is curl's "no reply at all" — the container went away or never
-        # served; anything else is an HTTP answer from a broken instance.
-        echo "e2e: the frontend answered ${code:-nothing}, not 200. Running the suite" >&2
-        echo "     now would report test failures for an instance that is not" >&2
-        echo "     serving; 000 means nothing answered on that address." >&2
-        return 1
-    fi
+    e2e_require_frontend "${instance_url}" || return 1
 
     # There is no separate check of /typo3/login. One existed from 2.0.0 to
     # 2.0.3 and failed the setup whenever PHP-FPM or the database host was
