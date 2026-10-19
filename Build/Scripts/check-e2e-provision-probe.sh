@@ -25,8 +25,13 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 # The stand-in prints the next code from ${WORK}/codes and counts its calls.
+# `logs` prints one line naming the container instead.
 cat > "${WORK}/container" <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1}" == "logs" ]]; then
+    echo "stub log of ${*: -1}"
+    exit 0
+fi
 n=$(( $(cat "${STUB_DIR}/calls") + 1 ))
 echo "${n}" > "${STUB_DIR}/calls"
 code=$(sed -n "${n}p" "${STUB_DIR}/codes")
@@ -78,8 +83,36 @@ if ! grep -qF 'answered 500 (attempt 1 of 4)' "${WORK}/stderr"; then
     STATUS=1
 fi
 
+# A frontend that keeps failing stops the setup and prints the instance logs:
+# both containers and every TYPO3 log. One that answers prints none of them.
+export E2E_ROOT="${WORK}/instance"
+mkdir -p "${E2E_ROOT}/var/log"
+echo "Core: Exception handler (WEB): probe exception" > "${E2E_ROOT}/var/log/typo3_probe.log"
+tr ' ' '\n' <<< "200" > "${WORK}/codes"
+echo 0 > "${WORK}/calls"
+if ! e2e_require_frontend "http://apache" 2>"${WORK}/logs" >/dev/null; then
+    echo "check-e2e-provision-probe: a frontend answering 200 failed the setup" >&2
+    STATUS=1
+fi
+if grep -qF "stub log of" "${WORK}/logs"; then
+    echo "check-e2e-provision-probe: a frontend answering 200 printed the instance logs" >&2
+    STATUS=1
+fi
+tr ' ' '\n' <<< "500" > "${WORK}/codes"
+echo 0 > "${WORK}/calls"
+if e2e_require_frontend "http://apache" 2>"${WORK}/logs" >/dev/null; then
+    echo "check-e2e-provision-probe: a frontend answering 500 did not fail the setup" >&2
+    STATUS=1
+fi
+for want in "stub log of apache-e2e-probe" "stub log of phpfpm-e2e-probe" "probe exception"; do
+    if ! grep -qF "${want}" "${WORK}/logs"; then
+        echo "check-e2e-provision-probe: the instance logs printed on stderr lack \"${want}\"" >&2
+        STATUS=1
+    fi
+done
+
 if [[ "${STATUS}" -eq 0 ]]; then
-    echo "check-e2e-provision-probe: the page probe asks again and gives up after ${E2E_PROBE_ATTEMPTS} attempts."
+    echo "check-e2e-provision-probe: the page probe asks again and gives up after ${E2E_PROBE_ATTEMPTS} attempts, and prints the instance logs."
 fi
 
 exit "${STATUS}"
