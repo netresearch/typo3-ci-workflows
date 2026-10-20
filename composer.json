@@ -5,6 +5,7 @@
     "license": "MIT",
     "bin": [
         "assets/Build/Scripts/runTests.sh",
+        "bin/check-phplint-config",
         "bin/check-phpunit-config"
     ],
     "autoload": {

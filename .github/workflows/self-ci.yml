@@ -196,6 +196,11 @@ jobs:
         # strict profile must name each flag the templates leave out.
         run: bash Build/Scripts/check-phpunit-config.sh bin/check-phpunit-config
 
+      - name: Check the phplint template and its settings check
+        # bin/check-phplint-config is what consumers run against their copy of
+        # config/phplint/.phplint.yml. The template must pass it.
+        run: bash Build/Scripts/check-phplint-config.sh bin/check-phplint-config
+
       - name: Check the method-chain fixer
         # The fixer is registered by the shared config factory, so a defect in
         # it reaches every consumer that opts in. Fixtures, no container: input,
@@ -455,6 +460,7 @@ jobs:
           shellcheck -x Build/Scripts/refresh-opengrep-rules.sh
           shellcheck -x Build/Scripts/check-ter-comment.sh
           shellcheck -x Build/Scripts/check-phpunit-config.sh
+          shellcheck -x Build/Scripts/check-phplint-config.sh
           shellcheck -x --severity=error assets/Build/Scripts/e2e-provision.sh
 
       - name: Check the runner defines what it uses
