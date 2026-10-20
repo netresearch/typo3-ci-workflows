@@ -1256,7 +1256,7 @@ Add this package to your extension's `require-dev`:
 }
 ```
 
-This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows. The `Build/` paths are examples, not a requirement: `runTests.sh` also finds, for instance, a `.php-cs-fixer.dist.php` in the repository root.
+This brings in all dev-dependencies (PHPStan, PHP-CS-Fixer, Rector, Infection, testing-framework, etc.) with a single requirement. It also ships PHP for tests: the PHPat layer rules ([Architecture rules (PHPat)](#architecture-rules-phpat)) and the `TypedArray` helper ([Test helper: TypedArray](#test-helper-typedarray)), autoloaded from `src/`. Your extension only needs tool configuration files (`Build/phpstan.neon`, `Build/.php-cs-fixer.php`, etc.) and the reusable GitHub Actions workflows. The `Build/` paths are examples, not a requirement: `runTests.sh` also finds, for instance, a `.php-cs-fixer.dist.php` in the repository root.
 
 ## Rector
 
@@ -1347,7 +1347,7 @@ An extension includes `config/phpstan/phpstan.neon` in its own `Build/phpstan.ne
 
 **Extensions** that `phpstan/extension-installer` registers, among them `phpstan-strict-rules`, `phpstan-deprecation-rules`, `phpstan-phpunit`, `saschaegerer/phpstan-typo3`, `phpat/phpat` and `ergebnis/phpstan-rules`. Two more, `bnf/phpstan-psr-container` and `composer/pcre`, arrive as dependencies and add type information only.
 
-`phpstan-strict-rules` reports, among others, loose comparisons (`==`, `!=`), non-boolean conditions, `empty()`, the short ternary `?:`, a missing parent constructor call, `in_array()` and similar calls without strict mode, useless casts and dynamic properties. `phpstan-deprecation-rules` reports every use of a deprecated API, TYPO3's included; the shared `ignoreErrors` entries for `Classes/Updates/` exist for the upgrade wizards that must use them. `phpat/phpat` reports nothing until an extension defines architecture tests.
+`phpstan-strict-rules` reports, among others, loose comparisons (`==`, `!=`), non-boolean conditions, `empty()`, the short ternary `?:`, a missing parent constructor call, `in_array()` and similar calls without strict mode, useless casts and dynamic properties. `phpstan-deprecation-rules` reports every use of a deprecated API, TYPO3's included; the shared `ignoreErrors` entries for `Classes/Updates/` exist for the upgrade wizards that must use them. `phpat/phpat` reports nothing until an extension registers an architecture test; [Architecture rules (PHPat)](#architecture-rules-phpat) describes the shared layer rules.
 
 `phpstan-phpunit` adds rules on test code, among them:
 
@@ -1359,6 +1359,125 @@ An extension includes `config/phpstan/phpstan.neon` in its own `Build/phpstan.ne
 - a data provider must be declared correctly.
 
 `saschaegerer/phpstan-typo3` gives TYPO3 APIs real return types, for example for `GeneralUtility::makeInstance()`. An extension that did not use it before gets findings where it relied on `mixed`, and has to regenerate its baseline.
+
+## Architecture rules (PHPat)
+
+The trait `Netresearch\Typo3CiWorkflows\Architecture\LayerRules` holds the layer dependency rules that the extensions using this package assert in their own PHPat tests. A test class uses it and names the extension's root namespace:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Vendor\MyExtension\Tests\Architecture;
+
+use Netresearch\Typo3CiWorkflows\Architecture\LayerRules;
+use Netresearch\Typo3CiWorkflows\Architecture\Layers;
+
+final class ArchitectureTest
+{
+    use LayerRules;
+
+    private function layers(): Layers
+    {
+        return Layers::below('Vendor\MyExtension');
+    }
+}
+```
+
+PHPat finds a test class only as a service tagged `phpat.test` in the PHPStan configuration, so register it in `Build/phpstan.neon` (the class has to be autoloadable, for example through `autoload-dev`):
+
+```neon
+services:
+    -
+        class: Vendor\MyExtension\Tests\Architecture\ArchitectureTest
+        tags: [phpat.test]
+```
+
+Each layer has conventional namespaces below the root. A second argument replaces them for a layer, relative to the root:
+
+```php
+return Layers::below('Vendor\MyExtension', [
+    Layers::EVENT_LISTENER => 'Backend\EventListener',
+    Layers::REPOSITORY => ['Domain\Repository', 'Persistence'],
+]);
+```
+
+| Layer | Conventional namespaces |
+|---|---|
+| `Layers::DOMAIN` | `Domain` |
+| `Layers::REPOSITORY` | `Domain\Repository`, `Repository` |
+| `Layers::SERVICE` | `Service` |
+| `Layers::EVENT` | `Event` |
+| `Layers::EVENT_LISTENER` | `EventListener`, `Listener` |
+| `Layers::CONTROLLER` | `Controller` |
+| `Layers::COMMAND` | `Command` |
+| `Layers::MIDDLEWARE` | `Middleware` |
+| `Layers::VIEW_HELPER` | `ViewHelpers`, `ViewHelper` |
+| `Layers::HOOK` | `Hook`, `Hooks` |
+| `Layers::FORM` | `Form` |
+| `Layers::UTILITY` | `Utility`, `Utils` |
+
+An unknown layer, an empty list, and a namespace in two layers throw an `InvalidArgumentException`.
+
+The rules, each a method of the trait:
+
+| Rule | The layer … must not depend on … |
+|---|---|
+| `testLayerDomainDoesNotDependOnOuterLayers` | domain: service, controller, command, middleware, event listener, view helper, hook, form |
+| `testLayerServiceDoesNotDependOnPresentation` | service: controller, command, middleware, event listener, form |
+| `testLayerEventDoesNotDependOnServiceOrController` | event: service, controller |
+| `testLayerEventListenerDoesNotDependOnPresentation` | event listener: controller, middleware, form |
+| `testLayerFormDoesNotDependOnPresentation` | form: controller, middleware, event listener |
+| `testLayerControllerDoesNotDependOnCommand` | controller: command |
+| `testLayerCommandDoesNotDependOnController` | command: controller |
+| `testLayerMiddlewareDoesNotDependOnController` | middleware: controller |
+| `testLayerViewHelperDoesNotDependOnController` | view helper: controller |
+| `testLayerHookDoesNotDependOnController` | hook: controller |
+| `testLayerRepositoryDoesNotDependOnController` | repository: controller |
+| `testLayerUtilityDoesNotDependOnController` | utility: controller |
+
+A layer the extension does not have keeps its conventional namespace. No class matches it, so its rules pass, and they apply as soon as a class of that layer is added. A layer namespace inside another layer's namespace, such as event listeners in `Service\EventListener`, is not reported for depending on itself.
+
+To drop a rule, hide its method; PHPat runs only public methods:
+
+```php
+use LayerRules {
+    testLayerControllerDoesNotDependOnCommand as private;
+}
+```
+
+The `testLayer` prefix keeps the trait's methods apart from an extension's own rules in the same class, such as a `testServicesDoNotDependOnControllers` it already has. A method of the class with the same name as a trait method replaces it without a warning.
+
+The trait covers layer direction only. Rules on single classes, `final` and `readonly` stay in the extension's own test class. `Tests/Unit/Architecture/LayerRulesTest.php` runs PHPStan over the fixture extensions in `Tests/Fixtures/Architecture`.
+
+## Test helper: TypedArray
+
+`Netresearch\Typo3CiWorkflows\Testing\TypedArray` reads typed values out of an untyped array in a test: TCA, `$GLOBALS['TYPO3_CONF_VARS']`, a parsed YAML file. A path is a dotted string, or a list of keys where a key contains a dot:
+
+```php
+use Netresearch\Typo3CiWorkflows\Testing\TypedArray;
+
+$tca = TypedArray::fromGlobals('TCA');
+self::assertSame('input', $tca->string('tx_myext_item.columns.title.config.type'));
+self::assertSame(10, $tca->int('tx_myext_item.ctrl.sortby'));
+self::assertCount(2, $tca->list('tx_myext_item.columns.type.config.items'));
+
+$features = TypedArray::fromGlobals('TYPO3_CONF_VARS');
+self::assertTrue($features->bool(['SYS', 'features', 'security.backend.enforceReferrer']));
+
+$services = TypedArray::fromYamlFile(__DIR__ . '/../../Configuration/Services.yaml');
+self::assertTrue($services->bool('services._defaults.autowire'));
+
+$data = TypedArray::fromArray($decoded, 'response body');
+```
+
+The reads are `string()`, `int()`, `bool()`, `array()` and `list()`. Nothing is converted: `"1"` is neither an int nor a bool, and `list()` wants the keys 0, 1, 2, …. A value of another type, a missing key or a scalar on the way throws an `UnexpectedValueException` that names the source, the full path and the type found:
+
+```
+$GLOBALS['TCA']: "tx_myext_item.ctrl.sortby" is string, expected int.
+$GLOBALS['TCA']: no value at "tx_myext_item.columns.title.config.renderType", because "tx_myext_item.columns.title.config" has no key "renderType".
+```
 
 ## Code Style
 
