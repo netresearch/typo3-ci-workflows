@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The package's own unit tests, for the PHP code in src/ that consumers load
+    at runtime (the PHPat layer rules and TypedArray). Run from the repository
+    root: vendor/bin/phpunit -c Tests/phpunit.xml
+
+    The flags are the strict profile of bin/check-phpunit-config.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="../vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="../vendor/autoload.php"
+         cacheDirectory="../var/.phpunit.cache"
+         colors="true"
+         executionOrder="defects"
+         beStrictAboutOutputDuringTests="true"
+         beStrictAboutCoverageMetadata="true"
+         requireCoverageMetadata="true"
+         failOnDeprecation="true"
+         failOnEmptyTestSuite="true"
+         failOnNotice="true"
+         failOnPhpunitDeprecation="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         displayDetailsOnTestsThatTriggerErrors="true"
+         displayDetailsOnTestsThatTriggerNotices="true"
+         displayDetailsOnTestsThatTriggerWarnings="true">
+    <testsuites>
+        <testsuite name="unit">
+            <directory>Unit/</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory suffix=".php">../src/Architecture/</directory>
+            <directory suffix=".php">../src/Testing/</directory>
+        </include>
+    </source>
+</phpunit>

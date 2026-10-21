@@ -1,0 +1,30 @@
+# Runs the LayerRules trait over the fixture extensions in this directory.
+# Started by Tests/Unit/Architecture/LayerRulesTest.php, which sets
+# LAYER_RULES_TMP to a fresh directory so that no result cache carries over.
+parameters:
+    level: 0
+    tmpDir: %env.LAYER_RULES_TMP%
+    paths:
+        - .
+    # Only PHPat findings are expected. ergebnis/phpstan-rules switches all of
+    # its rules on unless told otherwise, and a new rule in a release would
+    # fail the test for a reason that has nothing to do with the trait.
+    ergebnis:
+        allRules: false
+
+services:
+    -
+        class: Netresearch\Typo3CiWorkflows\Tests\Fixtures\Architecture\Complete\ArchitectureTest
+        tags: [phpat.test]
+    -
+        class: Netresearch\Typo3CiWorkflows\Tests\Fixtures\Architecture\Nested\ArchitectureTest
+        tags: [phpat.test]
+    -
+        class: Netresearch\Typo3CiWorkflows\Tests\Fixtures\Architecture\OptOut\ArchitectureTest
+        tags: [phpat.test]
+    -
+        class: Netresearch\Typo3CiWorkflows\Tests\Fixtures\Architecture\Partial\ArchitectureTest
+        tags: [phpat.test]
+    -
+        class: Netresearch\Typo3CiWorkflows\Tests\Fixtures\Architecture\Violations\ArchitectureTest
+        tags: [phpat.test]

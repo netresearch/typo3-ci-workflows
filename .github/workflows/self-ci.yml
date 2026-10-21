@@ -119,9 +119,15 @@ jobs:
 
       - name: PHP syntax check
         run: |
-          FILE_COUNT=$(find config/ src/ Build/ -name '*.php' | wc -l)
+          FILE_COUNT=$(find config/ src/ Build/ Tests/ -name '*.php' | wc -l)
           echo "Linting $FILE_COUNT PHP files..."
-          find config/ src/ Build/ -name '*.php' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
+          find config/ src/ Build/ Tests/ -name '*.php' -print0 | xargs -0 -P"$(nproc)" -n1 php -l
+
+      - name: Unit tests for the PHPat layer rules and TypedArray
+        # Both are PHP that consumers load at runtime from src/, unlike the
+        # configs and fixers above. The layer rule tests run PHPStan with PHPat
+        # over the fixture extensions in Tests/Fixtures/Architecture.
+        run: vendor/bin/phpunit -c Tests/phpunit.xml
 
       - name: Smoke test php-cs-fixer config factory
         run: |
