@@ -43,6 +43,11 @@ on:
         required: false
         type: number
         default: 60
+      mutation-timeout-minutes:
+        description: 'Job timeout of the mutation job in minutes. The Infection step is continue-on-error, but a job that hits its timeout is cancelled and fails the caller''s aggregate check.'
+        required: false
+        type: number
+        default: 30
 
 # CALLER REQUIREMENTS
 # ===================
@@ -296,7 +301,7 @@ jobs:
     needs: preflight
     name: Mutation Testing (Infection)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.mutation-timeout-minutes }}
     if: inputs.run-mutation-tests && needs.preflight.outputs.run == 'true'
     permissions:
       contents: read
