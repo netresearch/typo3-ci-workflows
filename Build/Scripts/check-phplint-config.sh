@@ -59,6 +59,17 @@ expect 'an unclosed regular expression fails' 1 'exclude "#^vendor/" is not an a
 sed "s|'#^vendor/#'|'~^vendor/~i'|" "${TEMPLATE}" > "${TMP}/tilde.yml"
 expect 'another delimiter with a modifier passes' 0 '1 phplint configuration(s) pass' "${TMP}/tilde.yml"
 
+# Finder's isRegex() decides what counts as a regular expression: bracket
+# pairs are delimiters, "*" is not, and "X" is no modifier it accepts.
+sed "s|'#^vendor/#'|'{^vendor/}'|" "${TEMPLATE}" > "${TMP}/braces.yml"
+expect 'a bracket-pair delimiter passes' 0 '1 phplint configuration(s) pass' "${TMP}/braces.yml"
+
+sed "s|'#^vendor/#'|'*^vendor/*'|" "${TEMPLATE}" > "${TMP}/star.yml"
+expect 'a delimiter Finder does not accept fails' 1 'exclude "*^vendor/*" is not an anchored' "${TMP}/star.yml"
+
+sed "s|'#^vendor/#'|'#^vendor/#X'|" "${TEMPLATE}" > "${TMP}/modifier.yml"
+expect 'a modifier Finder does not accept fails' 1 'exclude "#^vendor/#X" is not an anchored' "${TMP}/modifier.yml"
+
 printf 'path: ./\nexclude: vendor\n' > "${TMP}/scalar.yml"
 expect 'a single-string exclude is checked too' 1 'exclude "vendor" is not an anchored' "${TMP}/scalar.yml"
 
@@ -79,7 +90,7 @@ expect 'an unknown option is a usage error' 2 'Unknown option --strict' --strict
 
 printf '%d cases passed\n' "${PASSED}"
 # A case that stopped running would leave the count short and nothing red.
-EXPECTED=14
+EXPECTED=17
 if [[ "${FAILED}" -eq 0 && "${PASSED}" -ne "${EXPECTED}" ]]; then
     printf '  FAIL: %d cases passed, expected %d\n' "${PASSED}" "${EXPECTED}" >&2
     FAILED=1
