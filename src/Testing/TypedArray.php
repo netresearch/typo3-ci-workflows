@@ -53,11 +53,20 @@ final class TypedArray
     }
 
     /**
+     * Parses the file with the flags Symfony's YamlFileLoader uses for
+     * Services.yaml: `!php/const` resolves to the constant's value, and a
+     * custom tag such as `!tagged_iterator` becomes a
+     * `Symfony\Component\Yaml\Tag\TaggedValue`. Without the flags the first
+     * reads as null and the second fails to parse.
+     *
      * @throws UnexpectedValueException when the file does not parse to an array
      */
     public static function fromYamlFile(string $file): self
     {
-        return new self(self::rootArray(Yaml::parseFile($file), $file), $file);
+        return new self(
+            self::rootArray(Yaml::parseFile($file, Yaml::PARSE_CONSTANT | Yaml::PARSE_CUSTOM_TAGS), $file),
+            $file,
+        );
     }
 
     /**

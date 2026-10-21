@@ -1472,6 +1472,8 @@ self::assertTrue($services->bool('services._defaults.autowire'));
 $data = TypedArray::fromArray($decoded, 'response body');
 ```
 
+`fromYamlFile()` parses with the flags Symfony uses for `Services.yaml`: `!php/const` gives the constant's value, and a custom tag such as `!tagged_iterator` gives a `Symfony\Component\Yaml\Tag\TaggedValue`.
+
 The reads are `string()`, `int()`, `bool()`, `array()` and `list()`. Nothing is converted: `"1"` is neither an int nor a bool, and `list()` wants the keys 0, 1, 2, …. A value of another type, a missing key or a scalar on the way throws an `UnexpectedValueException` that names the source, the full path and the type found:
 
 ```

@@ -208,6 +208,24 @@ final class TypedArrayTest extends TestCase
     }
 
     #[Test]
+    public function fromYamlFileReadsAServicesFileWithConstantsAndCustomTags(): void
+    {
+        $file = $this->yamlFile(
+            "services:\n  _defaults:\n    autowire: true\n  Vendor\\Ext\\Foo:\n    arguments:\n"
+            . "      \$handlers: !tagged_iterator vendor.handler\n      \$level: !php/const E_ALL\n",
+        );
+        $data = TypedArray::fromYamlFile($file);
+
+        self::assertTrue($data->bool('services._defaults.autowire'));
+        self::assertSame(E_ALL, $data->int(['services', 'Vendor\Ext\Foo', 'arguments', '$level']));
+        self::assertThrows(
+            UnexpectedValueException::class,
+            $file . ': "services.Vendor\Ext\Foo.arguments.$handlers" is Symfony\Component\Yaml\Tag\TaggedValue, expected string.',
+            fn (): mixed => $data->string(['services', 'Vendor\Ext\Foo', 'arguments', '$handlers']),
+        );
+    }
+
+    #[Test]
     public function fromYamlFileRefusesAFileThatIsNoMapping(): void
     {
         $file = $this->yamlFile("just a string\n");
