@@ -1,0 +1,115 @@
+#!/usr/bin/env php
+<?php
+
+/*
+ * Asserts the settings of a project's phplint configuration that phplint
+ * itself does not report.
+ *
+ * The file is copied from config/phplint/.phplint.yml of
+ * netresearch/typo3-ci-workflows and adapted per project, so a byte
+ * comparison with the template would fail on every legitimate change. This
+ * check reads only two settings:
+ *
+ *   - no "cache" key: phplint 9.6.2 and later ignore it and write the cache
+ *     to ./.phplint.cache; the key is "cache-dir".
+ *   - every "exclude" entry is a delimited regular expression anchored with
+ *     "^": a plain string matches anywhere in the path, so "vendor" also
+ *     skips Classes/Payment/vendorApi/.
+ *
+ * Usage: check-phplint-config <file> [<file> ...]
+ *
+ * Exit 0 when every file passes, 1 when a setting is wrong (each one is
+ * named), 2 on a usage error or a file that cannot be read or parsed.
+ */
+
+declare(strict_types=1);
+
+use Symfony\Component\Finder\Iterator\PathFilterIterator;
+use Symfony\Component\Yaml\Exception\ParseException;
+use Symfony\Component\Yaml\Yaml;
+
+// Composer 2.2+ sets the autoloader path for a bin proxy; the other two cover
+// a run from this package's own checkout and a direct call into vendor/.
+$autoloaders = [
+    $GLOBALS['_composer_autoload_path'] ?? null,
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../autoload.php',
+];
+foreach ($autoloaders as $autoloader) {
+    if (is_string($autoloader) && is_file($autoloader)) {
+        require $autoloader;
+        break;
+    }
+}
+if (!class_exists(Yaml::class) || !class_exists(PathFilterIterator::class)) {
+    fwrite(STDERR, 'symfony/yaml and symfony/finder are not installed; run composer install first' . PHP_EOL);
+    exit(2);
+}
+
+$files = array_slice($argv, 1);
+foreach ($files as $file) {
+    if (str_starts_with($file, '-')) {
+        fwrite(STDERR, "Unknown option {$file}" . PHP_EOL);
+        exit(2);
+    }
+}
+if ($files === []) {
+    fwrite(STDERR, 'Usage: check-phplint-config <file> [<file> ...]' . PHP_EOL);
+    exit(2);
+}
+
+// phplint hands each exclude to Symfony Finder's notPath(). Finder decides
+// with PathFilterIterator::isRegex() whether the string is a regular
+// expression; anything else it quotes into a pattern that matches anywhere
+// in the path. Asking the installed Finder keeps this check in step with the
+// delimiters and modifiers it accepts. An anchored exclude is one Finder
+// takes as a regular expression whose pattern starts with "^".
+$finder = new class(new ArrayIterator([]), [], []) extends PathFilterIterator {
+    public function isAnchoredRegex(string $exclude): bool
+    {
+        return $this->isRegex($exclude) && ($exclude[1] ?? '') === '^';
+    }
+};
+
+$failures = 0;
+
+foreach ($files as $file) {
+    if (!is_file($file) || !is_readable($file)) {
+        fwrite(STDERR, "{$file}: cannot read the file" . PHP_EOL);
+        exit(2);
+    }
+
+    try {
+        $config = Yaml::parseFile($file);
+    } catch (ParseException $e) {
+        fwrite(STDERR, "{$file}: not valid YAML: {$e->getMessage()}" . PHP_EOL);
+        exit(2);
+    }
+    if (!is_array($config)) {
+        fwrite(STDERR, "{$file}: not a phplint configuration (no mapping at the top level)" . PHP_EOL);
+        exit(2);
+    }
+
+    if (array_key_exists('cache', $config)) {
+        ++$failures;
+        fwrite(STDERR, "{$file}: \"cache\" is ignored by phplint 9.6.2 and later; use \"cache-dir\"" . PHP_EOL);
+    }
+
+    $excludes = $config['exclude'] ?? [];
+    if (!is_array($excludes)) {
+        $excludes = [$excludes];
+    }
+    foreach ($excludes as $exclude) {
+        if (!is_string($exclude) || !$finder->isAnchoredRegex($exclude)) {
+            ++$failures;
+            $shown = is_string($exclude) ? $exclude : get_debug_type($exclude);
+            fwrite(STDERR, "{$file}: exclude \"{$shown}\" is not an anchored regular expression such as '#^vendor/#'" . PHP_EOL);
+        }
+    }
+}
+
+if ($failures > 0) {
+    exit(1);
+}
+
+printf('%d phplint configuration(s) pass' . PHP_EOL, count($files));

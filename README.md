@@ -1330,6 +1330,22 @@ Two details of the phplint template matter when you compare it with an older cop
 - It uses `cache-dir`. From 9.6.2, phplint ignores a `cache` key in the configuration file and writes the cache to `./.phplint.cache` in the repository root.
 - Its excludes are anchored regular expressions. A plain string matches anywhere in the path, so `vendor` also skips `Classes/Payment/vendorApi/`, and `.Build` skips a file named `Query.BuildHelper.php`.
 
+phplint reports neither of the two, so the Composer bin `check-phplint-config` asserts them on a project's copy: no `cache` key, and each `exclude` entry a delimited regular expression that starts with `^` (`'#^vendor/#'`). The other settings stay the project's. Chain it into the CGL script for the same reason as `check-phpunit-config`:
+
+```json
+{
+    "scripts": {
+        "ci:test:php:phplint-config": "check-phplint-config Build/.phplint.yml",
+        "ci:test:php:cgl": [
+            "@ci:test:php:phplint-config",
+            "php-cs-fixer check --config Build/.php-cs-fixer.dist.php"
+        ]
+    }
+}
+```
+
+The exit code is 0 when the file passes, 1 when a setting is wrong (each one is named), and 2 for a file that cannot be read or is not YAML.
+
 ## PHPStan
 
 An extension includes `config/phpstan/phpstan.neon` in its own `Build/phpstan.neon` and adds its `paths`; the header of that file shows the include. The shared file turns on more than the usual tool list, so an extension that switches to it meets new findings. They come from three places.
