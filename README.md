@@ -1158,6 +1158,7 @@ jobs:
 | `run-mutation-tests` | boolean | `false` | Run mutation tests with Infection |
 | `mutation-min-msi` | number | `50` | Minimum Mutation Score Indicator |
 | `mutation-min-covered-msi` | number | `60` | Minimum Covered MSI |
+| `mutation-timeout-minutes` | number | `30` | Job timeout of the mutation job |
 
 ---
 
