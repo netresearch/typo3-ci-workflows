@@ -225,7 +225,11 @@ jobs:
 | `db-image` | string | `ghcr.io/netresearch/ci-mirror/mysql:9.6` | Docker image for database service. The default comes from our [mirror](#ci-image-mirror) of the Docker official images on GHCR. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov, under the flags `unit`, `functional` and `acceptance`. Custom `*-test-command` overrides run unchanged and must write `coverage-unit.xml` / `coverage-functional.xml` / `coverage-acceptance.xml` themselves — the upload uses `fail_ci_if_error: false`, so a missing report passes silently. |
 | `upload-test-results` | boolean | `false` | Upload per-test JUnit reports to [Codecov Test Analytics](https://docs.codecov.com/docs/test-analytics) (flaky-test detection, per-test durations). Custom `*-test-command` overrides must emit `junit-unit.xml` / `junit-functional.xml` themselves. |
-| `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (branch + path coverage, matches local `XDEBUG_MODE=coverage`) or `pcov` (line-only, ~3-10× faster) |
+| `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (matches local `XDEBUG_MODE=coverage`, and the only driver for branch and path coverage) or `pcov` (line-only, ~3-10× faster) |
+| `path-coverage` | boolean | `true` | Pass `--path-coverage` to the built-in unit, functional and acceptance runs when `upload-coverage` is on and `coverage-tool` is `xdebug`. A custom `*-test-command` gets `PHPUNIT_PATH_COVERAGE=true` and passes the flag itself |
+| `unit-timeout-minutes` | number | `15` | Job timeout of the unit test job |
+| `functional-timeout-minutes` | number | `30` | Job timeout of the functional test jobs |
+| `acceptance-timeout-minutes` | number | `15` | Job timeout of the acceptance test job |
 | `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |
 | `lowest-deps` | boolean | `false` | Run one extra cell with the lowest installable dependencies (`composer update --prefer-lowest --prefer-stable`; with `roave/security-advisories`, the lowest release without a known advisory) on the lowest php/typo3 cell of the matrix. See [Lowest and pinned dependencies](#lowest-and-pinned-dependencies). |
 | `pin-packages` | string | `''` | Space-separated `vendor/package:constraint` pairs applied in that extra cell only (e.g. `guzzlehttp/guzzle:^7.10`). Set alone, it runs the cell with the newest versions of everything else. |
