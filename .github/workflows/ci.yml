@@ -182,15 +182,42 @@ on:
         default: false
       coverage-tool:
         description: >-
-          Coverage driver. "xdebug" (default) delivers branch + path
-          coverage and matches the local `composer ci:test:php:*:coverage`
-          scripts which set XDEBUG_MODE=coverage -- choosing xdebug here
-          eliminates "green locally, red in CI" drift around
-          beStrictAboutCoverageMetadata. "pcov" is line-only but ~3-10x
-          faster; set it explicitly when CI runtime matters more than
-          coverage fidelity.
+          Coverage driver. "xdebug" (default) matches the local
+          `composer ci:test:php:*:coverage` scripts which set
+          XDEBUG_MODE=coverage -- choosing xdebug here eliminates "green
+          locally, red in CI" drift around beStrictAboutCoverageMetadata --
+          and is the only driver that can collect branch and path coverage
+          (see path-coverage). "pcov" is line-only but ~3-10x faster; set it
+          explicitly when CI runtime matters more than coverage fidelity.
         type: string
         default: xdebug
+      path-coverage:
+        description: >-
+          Collect branch and path coverage (PHPUnit --path-coverage) in the
+          built-in unit, functional and acceptance invocations. Applies only
+          when upload-coverage is on and coverage-tool is xdebug. A custom
+          *-test-command runs unchanged; it receives PHPUNIT_PATH_COVERAGE=true
+          in its environment and must pass --path-coverage itself. Path
+          coverage makes a run slower; raise unit-timeout-minutes,
+          functional-timeout-minutes or acceptance-timeout-minutes where that
+          matters. Off by default: Xdebug 3.5.0 to 3.5.3 and the 3.6 development
+          branch crash with a segmentation fault under --path-coverage on
+          netresearch/t3x-nr-llm's suites, where 3.4.7 does not, and 3.4 does
+          not support PHP 8.5.
+        type: boolean
+        default: false
+      unit-timeout-minutes:
+        description: Job timeout of the unit test job in minutes
+        type: number
+        default: 15
+      functional-timeout-minutes:
+        description: Job timeout of the functional test jobs in minutes
+        type: number
+        default: 30
+      acceptance-timeout-minutes:
+        description: Job timeout of the acceptance test job in minutes
+        type: number
+        default: 15
       upload-test-results:
         description: >-
           Upload per-test JUnit reports to Codecov Test Analytics (flaky-test
@@ -1201,7 +1228,7 @@ jobs:
     name: Unit Tests
     if: ${{ inputs.run-unit-tests && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.unit-timeout-minutes }}
     permissions:
       contents: read
     strategy:
@@ -1293,8 +1320,14 @@ jobs:
           UNIT_TEST_COMMAND: ${{ inputs.unit-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
+          PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          COVERAGE_ARGS=()
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
+            COVERAGE_ARGS+=(--path-coverage)
+            export PHPUNIT_PATH_COVERAGE=true
+          fi
           EXTRA_ARGS=()
           if [[ "$UPLOAD_TEST_RESULTS" == "true" ]]; then
             EXTRA_ARGS+=(--log-junit=junit-unit.xml)
@@ -1303,7 +1336,7 @@ jobs:
             bash -euo pipefail -c "$UNIT_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:unit'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:unit -- --coverage-clover=coverage-unit.xml "${EXTRA_ARGS[@]}"
+              composer ci:test:php:unit -- --coverage-clover=coverage-unit.xml "${COVERAGE_ARGS[@]}" "${EXTRA_ARGS[@]}"
             else
               composer ci:test:php:unit -- --no-coverage "${EXTRA_ARGS[@]}"
             fi
@@ -1349,7 +1382,7 @@ jobs:
     name: Acceptance Tests
     if: ${{ inputs.run-acceptance-tests && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ inputs.acceptance-timeout-minutes }}
     permissions:
       contents: read
     strategy:
@@ -1440,13 +1473,19 @@ jobs:
         env:
           ACCEPTANCE_TEST_COMMAND: ${{ inputs.acceptance-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          COVERAGE_ARGS=()
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
+            COVERAGE_ARGS+=(--path-coverage)
+            export PHPUNIT_PATH_COVERAGE=true
+          fi
           if [[ -n "$ACCEPTANCE_TEST_COMMAND" ]]; then
             bash -euo pipefail -c "$ACCEPTANCE_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:acceptance'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:acceptance -- --coverage-clover=coverage-acceptance.xml
+              composer ci:test:php:acceptance -- --coverage-clover=coverage-acceptance.xml "${COVERAGE_ARGS[@]}"
             else
               composer ci:test:php:acceptance -- --no-coverage
             fi
@@ -1469,7 +1508,7 @@ jobs:
     name: Functional Tests
     if: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.functional-timeout-minutes }}
     permissions:
       contents: read
     strategy:
@@ -1586,8 +1625,14 @@ jobs:
           typo3DatabaseName: typo3_test
           typo3DatabaseUsername: ${{ inputs.functional-test-db == 'postgres' && 'postgres' || 'root' }}
           typo3DatabasePassword: root
+          PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          COVERAGE_ARGS=()
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
+            COVERAGE_ARGS+=(--path-coverage)
+            export PHPUNIT_PATH_COVERAGE=true
+          fi
           EXTRA_ARGS=()
           if [[ "$UPLOAD_TEST_RESULTS" == "true" ]]; then
             EXTRA_ARGS+=(--log-junit=junit-functional.xml)
@@ -1596,7 +1641,7 @@ jobs:
             bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml "${EXTRA_ARGS[@]}"
+              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml "${COVERAGE_ARGS[@]}" "${EXTRA_ARGS[@]}"
             else
               composer ci:test:php:functional -- --no-coverage "${EXTRA_ARGS[@]}"
             fi
@@ -1636,7 +1681,7 @@ jobs:
     name: Functional Tests SQLite
     if: ${{ inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.functional-timeout-minutes }}
     permissions:
       contents: read
     strategy:
@@ -1727,8 +1772,14 @@ jobs:
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
           typo3DatabaseDriver: pdo_sqlite
+          PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
+          COVERAGE_ARGS=()
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
+            COVERAGE_ARGS+=(--path-coverage)
+            export PHPUNIT_PATH_COVERAGE=true
+          fi
           EXTRA_ARGS=()
           if [[ "$UPLOAD_TEST_RESULTS" == "true" ]]; then
             EXTRA_ARGS+=(--log-junit=junit-functional.xml)
@@ -1737,7 +1788,7 @@ jobs:
             bash -euo pipefail -c "$FUNCTIONAL_TEST_COMMAND"
           elif echo "$SCRIPTS" | grep -q 'ci:test:php:functional'; then
             if [[ "$UPLOAD_COVERAGE" == "true" ]]; then
-              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml "${EXTRA_ARGS[@]}"
+              composer ci:test:php:functional -- --coverage-clover=coverage-functional.xml "${COVERAGE_ARGS[@]}" "${EXTRA_ARGS[@]}"
             else
               composer ci:test:php:functional -- --no-coverage "${EXTRA_ARGS[@]}"
             fi
