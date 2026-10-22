@@ -1324,7 +1324,7 @@ jobs:
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           COVERAGE_ARGS=()
-          if [[ "$PATH_COVERAGE" == "true" ]]; then
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
             COVERAGE_ARGS+=(--path-coverage)
             export PHPUNIT_PATH_COVERAGE=true
           fi
@@ -1477,7 +1477,7 @@ jobs:
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           COVERAGE_ARGS=()
-          if [[ "$PATH_COVERAGE" == "true" ]]; then
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
             COVERAGE_ARGS+=(--path-coverage)
             export PHPUNIT_PATH_COVERAGE=true
           fi
@@ -1629,7 +1629,7 @@ jobs:
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           COVERAGE_ARGS=()
-          if [[ "$PATH_COVERAGE" == "true" ]]; then
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
             COVERAGE_ARGS+=(--path-coverage)
             export PHPUNIT_PATH_COVERAGE=true
           fi
@@ -1776,7 +1776,7 @@ jobs:
         run: |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           COVERAGE_ARGS=()
-          if [[ "$PATH_COVERAGE" == "true" ]]; then
+          if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
             COVERAGE_ARGS+=(--path-coverage)
             export PHPUNIT_PATH_COVERAGE=true
           fi
