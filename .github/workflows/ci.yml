@@ -199,10 +199,13 @@ on:
           *-test-command runs unchanged; it receives PHPUNIT_PATH_COVERAGE=true
           in its environment and must pass --path-coverage itself. Path
           coverage makes a run slower; raise unit-timeout-minutes,
-          functional-timeout-minutes or acceptance-timeout-minutes, or set
-          this to false, where that matters.
+          functional-timeout-minutes or acceptance-timeout-minutes where that
+          matters. Off by default: Xdebug 3.5.0 to 3.5.3 and the 3.6 development
+          branch crash with a segmentation fault under --path-coverage on
+          netresearch/t3x-nr-llm's suites, where 3.4.7 does not, and 3.4 does
+          not support PHP 8.5.
         type: boolean
-        default: true
+        default: false
       unit-timeout-minutes:
         description: Job timeout of the unit test job in minutes
         type: number

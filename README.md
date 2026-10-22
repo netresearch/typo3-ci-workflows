@@ -226,7 +226,7 @@ jobs:
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov, under the flags `unit`, `functional` and `acceptance`. Custom `*-test-command` overrides run unchanged and must write `coverage-unit.xml` / `coverage-functional.xml` / `coverage-acceptance.xml` themselves — the upload uses `fail_ci_if_error: false`, so a missing report passes silently. |
 | `upload-test-results` | boolean | `false` | Upload per-test JUnit reports to [Codecov Test Analytics](https://docs.codecov.com/docs/test-analytics) (flaky-test detection, per-test durations). Custom `*-test-command` overrides must emit `junit-unit.xml` / `junit-functional.xml` themselves. |
 | `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (matches local `XDEBUG_MODE=coverage`, and the only driver for branch and path coverage) or `pcov` (line-only, ~3-10× faster) |
-| `path-coverage` | boolean | `true` | Pass `--path-coverage` to the built-in unit, functional and acceptance runs when `upload-coverage` is on and `coverage-tool` is `xdebug`. A custom `*-test-command` gets `PHPUNIT_PATH_COVERAGE=true` and passes the flag itself |
+| `path-coverage` | boolean | `false` | Pass `--path-coverage` to the built-in unit, functional and acceptance runs when `upload-coverage` is on and `coverage-tool` is `xdebug`. A custom `*-test-command` gets `PHPUNIT_PATH_COVERAGE=true` and passes the flag itself. Off by default because Xdebug 3.5 crashed under `--path-coverage` on the netresearch/t3x-nr-llm suites |
 | `unit-timeout-minutes` | number | `15` | Job timeout of the unit test job |
 | `functional-timeout-minutes` | number | `30` | Job timeout of the functional test jobs |
 | `acceptance-timeout-minutes` | number | `15` | Job timeout of the acceptance test job |
