@@ -239,7 +239,11 @@ jobs:
     name: SAST (Opengrep)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ !inputs.skip-opengrep && needs.preflight.outputs.run == 'true' }}
+    # A push runs even when preflight skips it: the merge_group run does not
+    # upload its SARIF (see "Upload SARIF to code scanning"), so the push to
+    # the default branch is the run that keeps its code-scanning results
+    # current.
+    if: ${{ !inputs.skip-opengrep && (needs.preflight.outputs.run == 'true' || github.event_name == 'push') }}
     permissions:
       contents: read
       security-events: write
@@ -1524,7 +1528,12 @@ jobs:
           echo "::notice::Opengrep SARIF: $((before - after)) suppressed finding(s) dropped, ${after} uploaded"
 
       - name: Upload SARIF to code scanning
-        if: always()
+        # Not on merge_group: GitHub deletes the gh-readonly-queue ref as soon
+        # as the queue merges, which races the upload and fails the run with
+        # `ref ... not found` after a clean scan. The scan above still gates
+        # the queue; the push to the default branch uploads the result.
+        # netresearch/.github codeql.yml turns its upload off the same way.
+        if: always() && github.event_name != 'merge_group'
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: opengrep.sarif
