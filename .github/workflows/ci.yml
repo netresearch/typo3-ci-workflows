@@ -288,6 +288,18 @@ on:
           with lowest-deps, the pins narrow the lowest resolution further.
         type: string
         default: ''
+      compact-jobs:
+        description: >-
+          Opt in to a compact SQLite unit/functional matrix and compatible
+          combined quality checks. The default retains the existing job graph.
+        type: boolean
+        default: false
+      upload-docs-artifact:
+        description: >-
+          Upload the authoritative documentation render as the documentation
+          artifact on pull requests.
+        type: boolean
+        default: false
 
     secrets:
       CODECOV_TOKEN:
@@ -467,12 +479,67 @@ jobs:
     timeout-minutes: 1
     outputs:
       run: ${{ steps.gate.outputs.run }}
+      compact-matrix: ${{ steps.compact.outputs.matrix }}
+      tooling-php: ${{ steps.compact.outputs.tooling-php }}
+      test-timeout: ${{ steps.compact.outputs.test-timeout }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: audit
 
+      - name: Build compact matrix
+        id: compact
+        if: inputs.compact-jobs
+        shell: bash
+        env:
+          PHP_VERSIONS: ${{ inputs.php-versions }}
+          TYPO3_VERSIONS: ${{ inputs.typo3-versions }}
+          MATRIX_EXCLUDE: ${{ inputs.matrix-exclude }}
+          CGL_PHP_VERSION: ${{ inputs.cgl-php-version }}
+          RECTOR_PHP_VERSION: ${{ inputs.rector-php-version }}
+          RUN_UNIT: ${{ inputs.run-unit-tests }}
+          RUN_FUNCTIONAL: ${{ inputs.run-functional-tests }}
+          FUNCTIONAL_DB: ${{ inputs.functional-test-db }}
+          UNIT_TIMEOUT: ${{ inputs.unit-timeout-minutes }}
+          FUNCTIONAL_TIMEOUT: ${{ inputs.functional-timeout-minutes }}
+        run: |
+          set -euo pipefail
+          if [[ "$RUN_UNIT" != true || "$RUN_FUNCTIONAL" != true || "$FUNCTIONAL_DB" != sqlite ]]; then
+            echo '::error::compact-jobs requires unit and functional tests with functional-test-db: sqlite. Disable compact-jobs for other layouts.'
+            exit 1
+          fi
+          if ! plan=$(jq -cen --argjson php "$PHP_VERSIONS" --argjson typo3 "$TYPO3_VERSIONS" \
+            --argjson exclude "$MATRIX_EXCLUDE" --arg cgl "$CGL_PHP_VERSION" --arg rector "$RECTOR_PHP_VERSION" \
+            --arg unit "$UNIT_TIMEOUT" --arg functional "$FUNCTIONAL_TIMEOUT" '
+              def versions:
+                type == "array" and length > 0
+                and all(.[]; type == "string" and length > 0)
+                and (length == (unique | length));
+              if ($php | versions) and ($typo3 | versions)
+                and ($exclude | type == "array" and all(.[];
+                  type == "object" and length > 0 and all(to_entries[];
+                    (.key == "php" or .key == "typo3") and (.value | type == "string"))))
+              then . else error("compact-jobs needs nonempty unique PHP/TYPO3 string arrays and php/typo3 matrix exclusions") end
+              | (if $cgl == "" then $php[0] else $cgl end) as $tool
+              | (if $rector == "" then $php[0] else $rector end) as $rector_tool
+              | if $tool == $rector_tool then . else error("compact-jobs requires the same effective CGL and Rector PHP version") end
+              | ($unit | tonumber) as $u | ($functional | tonumber) as $f
+              | if $u > 0 and $f > 0 and $u == ($u | floor) and $f == ($f | floor) and $u + $f <= 360
+                then . else error("compact-jobs requires positive integer suite timeouts whose sum is at most 360 minutes") end
+              | [ $php[] as $p
+                  | [ $typo3[] as $t | {php:$p,typo3:$t} as $cell
+                      | select(all($exclude[]; . as $e | any($e | to_entries[]; $cell[.key] != .value)))
+                      | $cell ] as $cells
+                  | if ($cells | length) == 0 then error("compact-jobs has no retained lint carrier for PHP " + $p) else . end
+                  | $cells | to_entries[]
+                  | .value + {lint:(.key == 0),primary:(.key == 0 and .value.php == $php[0])}
+                ] as $cells
+              | {matrix:$cells,tool:$tool,timeout:($u+$f)}'); then
+            echo '::error::Invalid compact CI configuration; keep the standard layout until its inputs are supported.'
+            exit 1
+          fi
+          jq -r '"matrix=\(.matrix|tojson)","tooling-php=\(.tool)","test-timeout=\(.timeout)"' <<< "$plan" >> "$GITHUB_OUTPUT"
       - id: gate
         shell: bash
         env:
@@ -584,7 +651,7 @@ jobs:
   lint:
     needs: preflight
     name: Lint
-    if: ${{ inputs.run-lint && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-lint && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -610,7 +677,7 @@ jobs:
           coverage: none
 
       - name: PHP syntax check
-        run: |
+        run: &ci-lint |
           FILE_COUNT=$(find . -name '*.php' -not -path './.Build/*' -not -path './vendor/*' | wc -l)
           echo "Linting $FILE_COUNT PHP files..."
           if [[ "$FILE_COUNT" -eq 0 ]]; then
@@ -621,7 +688,7 @@ jobs:
 
       - name: Check ext_emconf.php for strict_types
         if: ${{ matrix.php == fromJSON(inputs.php-versions)[0] }}
-        run: |
+        run: &ci-strict-types |
           if [[ -f ext_emconf.php ]]; then
             if grep -Eq '^[[:space:]]*declare[[:space:]]*\([[:space:]]*strict_types[[:space:]]*=[[:space:]]*1[[:space:]]*\)[[:space:]]*;?' ext_emconf.php; then
               echo "::error file=ext_emconf.php::ext_emconf.php must NOT contain declare(strict_types=1) — TER cannot parse it with strict_types enabled. Remove the declaration from this file."
@@ -635,7 +702,7 @@ jobs:
 
       - name: Check .gitattributes for export-ignore
         if: ${{ matrix.php == fromJSON(inputs.php-versions)[0] }}
-        run: |
+        run: &ci-export-ignore |
           if [[ ! -f .gitattributes ]]; then
             echo "::warning::.gitattributes file is missing. For TER publishing, add .gitattributes with export-ignore rules to exclude dev files (tests, CI configs) from the release archive."
           elif ! grep -Ev '^[[:space:]]*#|^[[:space:]]*$' .gitattributes | grep -q 'export-ignore'; then
@@ -649,7 +716,7 @@ jobs:
   cgl:
     needs: preflight
     name: Code Style
-    if: ${{ inputs.run-cgl && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-cgl && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -684,7 +751,7 @@ jobs:
           restore-keys: ${{ runner.os }}-composer-cgl-
 
       - name: Install dependencies
-        run: |
+        run: &ci-tool-install |
           composer config --no-plugins audit.block-insecure false
           eval "$COMPOSER_RETRY"
           composer_retry install --prefer-dist --no-progress
@@ -692,7 +759,7 @@ jobs:
       - name: Run code style check
         env:
           CGL_COMMAND: ${{ inputs.cgl-command }}
-        run: |
+        run: &ci-cgl |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$CGL_COMMAND" ]]; then
             bash -euo pipefail -c "$CGL_COMMAND"
@@ -1072,7 +1139,7 @@ jobs:
   rector:
     needs: preflight
     name: Rector
-    if: ${{ inputs.run-rector && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-rector && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -1115,7 +1182,7 @@ jobs:
       - name: Run Rector
         env:
           RECTOR_COMMAND: ${{ inputs.rector-command }}
-        run: |
+        run: &ci-rector |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$RECTOR_COMMAND" ]]; then
             bash -euo pipefail -c "$RECTOR_COMMAND"
@@ -1189,7 +1256,7 @@ jobs:
   repo-checks:
     needs: preflight
     name: Repo checks
-    if: ${{ inputs.run-repo-checks && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-repo-checks && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -1213,7 +1280,7 @@ jobs:
       - name: Run repository checks
         env:
           REPO_CHECKS_COMMAND: ${{ inputs.repo-checks-command }}
-        run: |
+        run: &ci-repo-checks |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           if [[ -n "$REPO_CHECKS_COMMAND" ]]; then
             bash -euo pipefail -c "$REPO_CHECKS_COMMAND"
@@ -1226,7 +1293,7 @@ jobs:
   unit-tests:
     needs: preflight
     name: Unit Tests
-    if: ${{ inputs.run-unit-tests && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-unit-tests && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.unit-timeout-minutes }}
     permissions:
@@ -1273,7 +1340,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
-        run: |
+        run: &ci-remove-dev-deps |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
           import json, os, sys, subprocess
@@ -1302,7 +1369,7 @@ jobs:
         env:
           TYPO3_VERSION: ${{ matrix.typo3 }}
           TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
-        run: |
+        run: &ci-test-install |
           PACKAGES=$(echo "$TYPO3_PACKAGES" | jq -r '.[]') || {
             echo "::error::Failed to parse typo3-packages input: $TYPO3_PACKAGES"
             exit 1
@@ -1316,12 +1383,12 @@ jobs:
           composer_install_cell
 
       - name: Run unit tests
-        env:
+        env: &ci-unit-env
           UNIT_TEST_COMMAND: ${{ inputs.unit-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
           PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
-        run: |
+        run: &ci-unit |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           COVERAGE_ARGS=()
           if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
@@ -1679,7 +1746,7 @@ jobs:
   functional-tests-sqlite:
     needs: preflight
     name: Functional Tests SQLite
-    if: ${{ inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-functional-tests && inputs.functional-test-db == 'sqlite' && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.functional-timeout-minutes }}
     permissions:
@@ -1767,13 +1834,13 @@ jobs:
           composer_install_cell
 
       - name: Run functional tests
-        env:
+        env: &ci-functional-env
           FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
           typo3DatabaseDriver: pdo_sqlite
           PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
-        run: |
+        run: &ci-functional-sqlite |
           SCRIPTS=$(composer run-script --list 2>/dev/null || true)
           COVERAGE_ARGS=()
           if [[ "${PATH_COVERAGE:-}" == "true" ]]; then
@@ -2220,7 +2287,7 @@ jobs:
   detect-docs:
     needs: preflight
     name: Detect Documentation
-    if: ${{ inputs.run-docs && needs.preflight.outputs.run == 'true' }}
+    if: ${{ !inputs.compact-jobs && inputs.run-docs && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -2239,7 +2306,7 @@ jobs:
 
       - id: detect
         shell: bash
-        run: |
+        run: &ci-detect-docs |
           if [ -f Documentation/guides.xml ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Documentation/guides.xml found — the docs render will validate it."
@@ -2255,13 +2322,13 @@ jobs:
   # on docs.typo3.org. Reuses docs.yml as the single source of truth for the
   # render image and logic.
   docs:
-    needs: detect-docs
-    if: ${{ needs.detect-docs.outputs.present == 'true' }}
+    needs: [detect-docs, compact-quality]
+    if: ${{ !cancelled() && inputs.run-docs && ((inputs.compact-jobs && needs.compact-quality.outputs.docs-present == 'true') || (!inputs.compact-jobs && needs.detect-docs.outputs.present == 'true')) }}
     permissions:
       contents: read
     uses: ./.github/workflows/docs.yml
     with:
-      upload-artifact: false
+      upload-artifact: ${{ inputs.upload-docs-artifact }}
 
   # One stable check name for the whole workflow, so a branch ruleset has
   # something it can require on EVERY event.
@@ -2299,6 +2366,8 @@ jobs:
       - lowest-deps
       - detect-docs
       - docs
+      - compact-quality
+      - compact-tests
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -2318,7 +2387,46 @@ jobs:
         shell: bash
         env:
           RESULTS: ${{ toJSON(needs) }}
+          INPUTS: ${{ toJSON(inputs) }}
         run: |
+          set -euo pipefail
+          if ! compact=$(jq -er '."compact-jobs" | if type == "boolean" then tostring else error("missing or invalid compact mode") end' <<< "$INPUTS"); then
+            echo '::error::CI gate could not determine the requested execution mode.'
+            exit 1
+          fi
+          if [[ "$compact" == true ]]; then
+            if ! jq -e --argjson inputs "$INPUTS" '
+              def result($name; $expected):
+                if .[$name].result == $expected then .
+                else error("CI gate: " + $name + " expected " + $expected + ", got " + (.[$name].result // "missing")) end;
+              def enabled($name; $on): result($name; if $on then "success" else "skipped" end);
+              reduce ["preflight","lint","cgl","phpstan","phpstan-unpinned","rector","fractor","repo-checks","unit-tests","acceptance-tests","functional-tests","functional-tests-sqlite","lowest-deps","detect-docs","docs","compact-quality","compact-tests"][] as $name
+                (.; if has($name) then . else error("CI gate: missing expected family " + $name) end)
+              |
+              result("preflight"; "success")
+              | if .preflight.outputs.run == "false" then
+                  if all(to_entries[] | select(.key != "preflight"); .value.result == "skipped") then .
+                  else error("CI gate: deduplicated or path-gated work unexpectedly ran") end
+                elif .preflight.outputs.run == "true" then
+                  result("compact-quality"; "success") | result("compact-tests"; "success")
+                  | reduce ["lint","cgl","rector","repo-checks","unit-tests","functional-tests","functional-tests-sqlite","detect-docs"][] as $name (.; result($name; "skipped"))
+                  | enabled("phpstan"; $inputs."run-phpstan")
+                  | enabled("phpstan-unpinned"; ($inputs."run-phpstan" and $inputs."run-phpstan-unpinned"))
+                  | enabled("fractor"; $inputs."run-fractor")
+                  | enabled("acceptance-tests"; $inputs."run-acceptance-tests")
+                  | enabled("lowest-deps"; ($inputs."lowest-deps" or $inputs."pin-packages" != ""))
+                  | if $inputs."run-docs" then
+                      if ."compact-quality".outputs."docs-present" == "true" then result("docs"; "success")
+                      elif ."compact-quality".outputs."docs-present" == "false" then result("docs"; "skipped")
+                      else error("CI gate: documentation detection is missing or invalid") end
+                    else result("docs"; "skipped") end
+                else error("CI gate: preflight did not report an explicit run decision") end
+              | true
+            ' <<< "$RESULTS" > /dev/null; then
+              echo '::error::Compact CI did not satisfy its complete expected job set.'
+              exit 1
+            fi
+          fi
           bad=$(jq -r '
             to_entries[]
             | select(.value.result != "success" and .value.result != "skipped")
@@ -2328,4 +2436,285 @@ jobs:
             exit 1
           fi
           jq -r 'to_entries[] | "  \(.key): \(.value.result)"' <<<"$RESULTS"
-          echo "All jobs succeeded or were skipped."
+          echo "All required jobs succeeded or were explicitly not applicable."
+
+  compact-quality:
+    name: Quality checks (compact)
+    needs: preflight
+    if: ${{ inputs.compact-jobs && needs.preflight.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      docs-present: ${{ steps.docs.outputs.present }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ needs.preflight.outputs.tooling-php }}
+          extensions: ${{ inputs.php-extensions }}
+          tools: composer:v2
+          coverage: none
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - name: Cache Composer dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-compact-quality-${{ needs.preflight.outputs.tooling-php }}-${{ hashFiles('composer.json') }}
+          restore-keys: ${{ runner.os }}-composer-compact-quality-${{ needs.preflight.outputs.tooling-php }}-
+      - name: Install dependencies
+        id: install
+        if: inputs.run-cgl || inputs.run-rector
+        run: *ci-tool-install
+      - name: Run code style check
+        id: cgl
+        if: ${{ !cancelled() && inputs.run-cgl && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          CGL_COMMAND: ${{ inputs.cgl-command }}
+        run: *ci-cgl
+      - name: Run Rector
+        id: rector
+        if: ${{ !cancelled() && inputs.run-rector && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          RECTOR_COMMAND: ${{ inputs.rector-command }}
+        run: *ci-rector
+      - name: Run repository checks
+        id: repo
+        if: ${{ !cancelled() && inputs.run-repo-checks && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          REPO_CHECKS_COMMAND: ${{ inputs.repo-checks-command }}
+        run: *ci-repo-checks
+      - name: Detect Documentation
+        id: docs
+        if: ${{ !cancelled() && inputs.run-docs && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: *ci-detect-docs
+      - name: Evaluate quality results
+        if: always()
+        env:
+          CHECKOUT_RESULT: ${{ steps.checkout.outcome }}
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          CGL_RESULT: ${{ steps.cgl.outcome }}
+          RECTOR_RESULT: ${{ steps.rector.outcome }}
+          REPO_RESULT: ${{ steps.repo.outcome }}
+          DOCS_RESULT: ${{ steps.docs.outcome }}
+          RUN_CGL: ${{ inputs.run-cgl }}
+          RUN_RECTOR: ${{ inputs.run-rector }}
+          RUN_REPO: ${{ inputs.run-repo-checks }}
+          RUN_DOCS: ${{ inputs.run-docs }}
+        run: |
+          set -euo pipefail
+          expect() {
+            if [[ "$2" != "$3" ]]; then
+              echo "::error::Compact quality $1: expected $3, got '$2'."
+              exit 1
+            fi
+          }
+          expect checkout "$CHECKOUT_RESULT" success
+          if [[ "$RUN_CGL" == true || "$RUN_RECTOR" == true ]]; then
+            expect install "$INSTALL_RESULT" success
+          else
+            expect install "$INSTALL_RESULT" skipped
+          fi
+          for check in CGL RECTOR REPO DOCS; do
+            enabled="RUN_$check"
+            outcome="${check}_RESULT"
+            expected=skipped
+            [[ "${!enabled}" == true ]] && expected=success
+            expect "$check" "${!outcome}" "$expected"
+          done
+  compact-tests:
+    name: Tests (PHP ${{ matrix.php }}, TYPO3 ${{ matrix.typo3 }})
+    needs: preflight
+    if: ${{ inputs.compact-jobs && needs.preflight.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(needs.preflight.outputs.test-timeout) }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.preflight.outputs.compact-matrix) }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
+        with:
+          egress-policy: audit
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup PHP
+        id: php
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: ${{ inputs.php-extensions }}, pdo_sqlite
+          tools: composer:v2
+          ini-values: zend.assertions=1
+          coverage: ${{ inputs.upload-coverage && inputs.coverage-tool || 'none' }}
+      - name: PHP syntax check
+        id: lint
+        if: ${{ !cancelled() && inputs.run-lint && matrix.lint && steps.php.outcome == 'success' }}
+        continue-on-error: true
+        run: *ci-lint
+      - name: Validate packaging metadata
+        id: metadata
+        if: ${{ !cancelled() && inputs.run-lint && matrix.primary && steps.checkout.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          STRICT_TYPES_COMMAND: *ci-strict-types
+          EXPORT_IGNORE_COMMAND: *ci-export-ignore
+        run: |
+          bash -euo pipefail -c "$STRICT_TYPES_COMMAND"
+          bash -euo pipefail -c "$EXPORT_IGNORE_COMMAND"
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - name: Cache Composer dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-compact-tests-${{ matrix.php }}-${{ matrix.typo3 }}-${{ hashFiles('composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-compact-tests-${{ matrix.php }}-${{ matrix.typo3 }}-
+            ${{ runner.os }}-composer-compact-tests-${{ matrix.php }}-
+      - name: Remove incompatible dev deps
+        env:
+          REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
+          TYPO3_VERSION: ${{ matrix.typo3 }}
+        run: *ci-remove-dev-deps
+      - name: Install TYPO3
+        id: install
+        env:
+          TYPO3_VERSION: ${{ matrix.typo3 }}
+          TYPO3_PACKAGES: ${{ inputs.typo3-packages }}
+        run: *ci-test-install
+      - name: Run unit tests
+        id: unit
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: ${{ inputs.unit-timeout-minutes }}
+        env: *ci-unit-env
+        run: *ci-unit
+      - name: Upload unit coverage to Codecov
+        if: ${{ !cancelled() && inputs.upload-coverage && steps.unit.outcome == 'success' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-unit.xml
+          flags: unit
+          fail_ci_if_error: false
+      - name: Upload unit test results to Codecov
+        if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-unit.xml') != '' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit-unit.xml
+          flags: unit
+          fail_ci_if_error: false
+      - name: Run functional tests
+        id: functional
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: ${{ inputs.functional-timeout-minutes }}
+        env: *ci-functional-env
+        run: *ci-functional-sqlite
+      - name: Upload functional coverage to Codecov
+        if: ${{ !cancelled() && inputs.upload-coverage && steps.functional.outcome == 'success' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-functional.xml
+          flags: functional
+          fail_ci_if_error: false
+      - name: Upload functional test results to Codecov
+        if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-functional.xml') != '' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit-functional.xml
+          flags: functional
+          fail_ci_if_error: false
+      - name: Verify test reports
+        id: reports
+        if: ${{ !cancelled() && (inputs.upload-coverage || inputs.upload-test-results) && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          UNIT_RESULT: ${{ steps.unit.outcome }}
+          FUNCTIONAL_RESULT: ${{ steps.functional.outcome }}
+          UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
+        run: |
+          set -euo pipefail
+          for suite in unit functional; do
+            result=UNIT_RESULT
+            [[ "$suite" == functional ]] && result=FUNCTIONAL_RESULT
+            [[ "${!result}" == success ]] || continue
+            files=()
+            [[ "$UPLOAD_COVERAGE" == true ]] && files+=("coverage-$suite.xml")
+            [[ "$UPLOAD_TEST_RESULTS" == true ]] && files+=("junit-$suite.xml")
+            for file in "${files[@]}"; do
+              if [[ ! -s "$file" ]]; then
+                echo "::error::Successful $suite suite did not produce nonempty $file."
+                exit 1
+              fi
+            done
+          done
+      - name: Evaluate test results
+        if: always()
+        env:
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          LINT_RESULT: ${{ steps.lint.outcome }}
+          METADATA_RESULT: ${{ steps.metadata.outcome }}
+          UNIT_RESULT: ${{ steps.unit.outcome }}
+          FUNCTIONAL_RESULT: ${{ steps.functional.outcome }}
+          REPORT_RESULT: ${{ steps.reports.outcome }}
+          RUN_REPORTS: ${{ inputs.upload-coverage || inputs.upload-test-results }}
+          RUN_LINT: ${{ inputs.run-lint }}
+          LINT_CELL: ${{ matrix.lint }}
+          PRIMARY_CELL: ${{ matrix.primary }}
+        run: |
+          set -euo pipefail
+          expect() {
+            if [[ "$2" != "$3" ]]; then
+              echo "::error::Compact test $1: expected $3, got '$2'."
+              exit 1
+            fi
+          }
+          expect install "$INSTALL_RESULT" success
+          expect unit "$UNIT_RESULT" success
+          expect functional "$FUNCTIONAL_RESULT" success
+          lint_expected=skipped
+          metadata_expected=skipped
+          if [[ "$RUN_LINT" == true ]]; then
+            [[ "$LINT_CELL" == true ]] && lint_expected=success
+            [[ "$PRIMARY_CELL" == true ]] && metadata_expected=success
+          fi
+          expect lint "$LINT_RESULT" "$lint_expected"
+          expect metadata "$METADATA_RESULT" "$metadata_expected"
+          reports_expected=skipped
+          [[ "$RUN_REPORTS" == true ]] && reports_expected=success
+          expect reports "$REPORT_RESULT" "$reports_expected"
