@@ -33,6 +33,7 @@ assert_status() {
 
 assert_yaml '.on.workflow_call.inputs["compact-jobs"].default == false' 'compact execution is opt-in'
 assert_yaml '.on.workflow_call.inputs["upload-docs-artifact"].default == false' 'docs artifact remains opt-in'
+assert_yaml '.jobs.gate.steps[] | select(.name == "Fail unless every job succeeded or was skipped") | .env.INPUTS == ("$" + "{{ toJSON(inputs) }}")' 'the native gate receives its complete input context'
 for job in compact-quality compact-tests; do
     assert_yaml ".jobs | has(\"$job\")" "$job exists"
 done

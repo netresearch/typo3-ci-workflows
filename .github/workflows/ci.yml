@@ -2387,6 +2387,7 @@ jobs:
         shell: bash
         env:
           RESULTS: ${{ toJSON(needs) }}
+          INPUTS: ${{ toJSON(inputs) }}
         run: |
           set -euo pipefail
           if ! compact=$(jq -er '."compact-jobs" | if type == "boolean" then tostring else error("missing or invalid compact mode") end' <<< "$INPUTS"); then
