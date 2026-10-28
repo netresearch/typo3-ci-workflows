@@ -2458,7 +2458,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup PHP
-        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2.36.0
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ needs.preflight.outputs.tooling-php }}
           extensions: ${{ inputs.php-extensions }}
@@ -2565,7 +2565,7 @@ jobs:
           persist-credentials: false
       - name: Setup PHP
         id: php
-        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2.36.0
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
           extensions: ${{ inputs.php-extensions }}, pdo_sqlite
@@ -2618,7 +2618,7 @@ jobs:
         run: *ci-unit
       - name: Upload unit coverage to Codecov
         if: ${{ !cancelled() && inputs.upload-coverage && steps.unit.outcome == 'success' }}
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v6.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-unit.xml
@@ -2626,7 +2626,7 @@ jobs:
           fail_ci_if_error: false
       - name: Upload unit test results to Codecov
         if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-unit.xml') != '' }}
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v6.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           report_type: test_results
@@ -2642,7 +2642,7 @@ jobs:
         run: *ci-functional-sqlite
       - name: Upload functional coverage to Codecov
         if: ${{ !cancelled() && inputs.upload-coverage && steps.functional.outcome == 'success' }}
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v6.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage-functional.xml
@@ -2650,7 +2650,7 @@ jobs:
           fail_ci_if_error: false
       - name: Upload functional test results to Codecov
         if: ${{ inputs.upload-test-results && !cancelled() && hashFiles('junit-functional.xml') != '' }}
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v6.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           report_type: test_results

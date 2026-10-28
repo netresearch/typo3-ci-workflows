@@ -130,7 +130,7 @@ step compact-tests 'Run functional tests' > "$TMP/functional.sh"
 assert_status 1 'the actual unit body returns a test failure' env UNIT_STATUS=1 bash -eo pipefail "$TMP/unit.sh"
 assert_status 0 'the actual functional body still runs independently' bash -eo pipefail "$TMP/functional.sh"
 for suite in unit functional; do
-    if ! rg -q -- "ci:test:php:$suite -- --coverage-clover=coverage-$suite.xml --path-coverage --log-junit=junit-$suite.xml" "$CALL_LOG"; then
+    if ! grep -q -- "ci:test:php:$suite -- --coverage-clover=coverage-$suite.xml --path-coverage --log-junit=junit-$suite.xml" "$CALL_LOG"; then
         fail "$suite coverage and JUnit arguments are preserved"
     fi
     pass "$suite coverage and JUnit arguments are preserved"
@@ -140,7 +140,7 @@ assert_status 1 'missing functional script is a real failure' env MISSING_SCRIPT
 export UPLOAD_COVERAGE=false UPLOAD_TEST_RESULTS=false PATH_COVERAGE=false
 : > "$CALL_LOG"
 assert_status 0 'no-coverage unit mode still runs the suite' bash -eo pipefail "$TMP/unit.sh"
-rg -q -- '^ci:test:php:unit -- --no-coverage$' "$CALL_LOG" || fail 'no-coverage arguments'
+grep -q -- '^ci:test:php:unit -- --no-coverage$' "$CALL_LOG" || fail 'no-coverage arguments'
 pass 'no-coverage arguments are preserved'
 assert_status 0 'custom unit commands still execute unchanged' env UNIT_TEST_COMMAND='printf custom > override.txt' bash -eo pipefail "$TMP/unit.sh"
 [[ "$(cat override.txt)" == custom ]] || fail 'custom command did not run'
