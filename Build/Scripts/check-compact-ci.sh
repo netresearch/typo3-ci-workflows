@@ -13,11 +13,13 @@ CASES=0
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 pass() { CASES=$((CASES + 1)); printf 'ok: %s\n' "$1"; }
 assert_yaml() {
-    jq -e "$1" <<< "$WORKFLOW_JSON" > /dev/null || fail "$2"
-    pass "$2"
+    local expression="$1" description="$2"
+    jq -e "$expression" <<< "$WORKFLOW_JSON" > /dev/null || fail "$description"
+    pass "$description"
 }
 step() {
-    jq -er --arg j "$1" --arg n "$2" \
+    local job="$1" name="$2"
+    jq -er --arg j "$job" --arg n "$name" \
         '.jobs[$j].steps[] | select(.name == $n) | .run' <<< "$WORKFLOW_JSON"
 }
 assert_status() {
