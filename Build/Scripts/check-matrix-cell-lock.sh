@@ -54,7 +54,7 @@ pass() { printf '  ok: %s\n' "${1}"; return; }
 # What GitHub runs a `run:` block with when the step names no shell.
 RUNNER_SHELL=(bash --noprofile --norc -eo pipefail)
 
-JOBS=(phpstan phpstan-unpinned unit-tests acceptance-tests functional-tests functional-tests-sqlite)
+JOBS=(phpstan phpstan-unpinned unit-tests acceptance-tests functional-tests functional-tests-sqlite compact-tests)
 
 printf 'Matrix cells with a committed composer.lock (%s)\n' "${WORKFLOW}"
 

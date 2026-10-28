@@ -234,6 +234,8 @@ jobs:
 | `lowest-deps` | boolean | `false` | Run one extra cell with the lowest installable dependencies (`composer update --prefer-lowest --prefer-stable`; with `roave/security-advisories`, the lowest release without a known advisory) on the lowest php/typo3 cell of the matrix. See [Lowest and pinned dependencies](#lowest-and-pinned-dependencies). |
 | `pin-packages` | string | `''` | Space-separated `vendor/package:constraint` pairs applied in that extra cell only (e.g. `guzzlehttp/guzzle:^7.10`). Set alone, it runs the cell with the newest versions of everything else. |
 | `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |
+| `compact-jobs` | boolean | `false` | Opt in to combined SQLite unit/functional cells, lint inside one cell per PHP, and compatible combined quality checks. See [Compact CI](#compact-ci). |
+| `upload-docs-artifact` | boolean | `false` | Upload the CI documentation render as the existing `documentation` PR artifact. |
 | `cgl-command` | string | auto-detect | Override CGL command |
 | `phpstan-command` | string | auto-detect | Override PHPStan command |
 | `rector-command` | string | auto-detect | Override Rector command |
@@ -260,6 +262,20 @@ Commands are auto-detected from composer scripts (in order):
 - **Acceptance tests:** `ci:test:php:acceptance` (+ `--no-coverage`/`--coverage-clover`)
 
 CGL and Rector run on a single PHP version — `php-versions[0]`, or `cgl-php-version` / `rector-php-version` when the respective input is set. PHPStan and tests run on the full matrix.
+
+### Compact CI
+
+`compact-jobs: true` reduces runner appointments while retaining the full PHP/TYPO3 matrix. Each cell runs unit and functional suites as separate processes with distinct coverage and JUnit reports. Functional tests still execute after a unit failure when dependencies installed successfully; the final cell verdict fails on either outcome. One retained cell per PHP also runs that PHP's syntax check. The first PHP's carrier checks `ext_emconf.php` and `.gitattributes` as before. Matrix exclusions select carriers from the remaining cells; removing every cell for one PHP is rejected.
+
+The first version supports unit and functional suites enabled with `functional-test-db: sqlite`. CGL and Rector must use the same effective PHP version. Their commands, repository checks and documentation detection share one quality job, with independent outcomes and an explicit final verdict. Custom quality commands must be compatible read-only checks; they now share a checkout. PHPStan retains its separate matrix and PHPUnit resolution, including the unpinned pass. Other optional jobs keep their existing inputs.
+
+Suite step timeouts retain `unit-timeout-minutes` and `functional-timeout-minutes`; the combined job's timeout is their sum, at most 360 minutes. Coverage and JUnit uploads retain their file names, flags and nonblocking transport-error policy. In compact mode, a successful suite must actually produce every requested report as a nonempty file. Custom suite commands must honor that existing report contract too. A missing report, unexpected skip, cancellation or failed check cannot pass the compact aggregate.
+
+For a four-PHP by two-TYPO3 consumer with CGL, Rector, repo checks, unit, functional and docs enabled, the graph uses 21 runners rather than 36: preflight, eight PHPStan cells, the unpinned analysis, eight combined test cells, quality, docs and the stable `ci / All CI checks` gate. This is a job-count reduction, not a measured speed claim. Serial suites can lengthen a cell when capacity is free. Compare test/report inventories, runner occupation and elapsed time under comparable load before adopting it.
+
+Set `upload-docs-artifact: true` to obtain the current renderer's `documentation` PR artifact from CI. A consumer can then keep its standalone docs workflow manual-only and avoid rendering the same source twice. Check required contexts and template rules before removing an automatic workflow trigger. The documentation configure/render/warning behavior is unchanged.
+
+Both inputs default off. Set `compact-jobs: false` to restore the old job graph and names; no queue, signing, DCO or review policy changes are needed. Consumers requiring individual old job names must migrate to the stable aggregate deliberately. The local executable fixture check is `bash Build/Scripts/check-compact-ci.sh .github/workflows/ci.yml`; a bounded native CI pilot is still required to validate GitHub step conditions and scheduling. A local fixture pass alone does not demonstrate hosted runtime or performance parity.
 
 > [!WARNING]
 > **Set `rector-php-version` if `php-versions` varies by event.**
