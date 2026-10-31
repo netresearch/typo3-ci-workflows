@@ -224,6 +224,7 @@ jobs:
 | `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
 | `db-image` | string | `ghcr.io/netresearch/ci-mirror/mysql:9.6` | Docker image for database service. The default comes from our [mirror](#ci-image-mirror) of the Docker official images on GHCR. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov, under the flags `unit`, `functional` and `acceptance`. Custom `*-test-command` overrides run unchanged and must write `coverage-unit.xml` / `coverage-functional.xml` / `coverage-acceptance.xml` themselves — the upload uses `fail_ci_if_error: false`, so a missing report passes silently. |
+| `functional-coverage-php-versions` | string | `''` | Compact mode only: JSON array of retained PHP versions that collect functional coverage across their TYPO3 cells. Empty inherits `upload-coverage`; `[]` disables functional coverage while the full suite still runs. A nonempty array requires `upload-coverage: true`. Unit coverage is unchanged. |
 | `upload-test-results` | boolean | `false` | Upload per-test JUnit reports to [Codecov Test Analytics](https://docs.codecov.com/docs/test-analytics) (flaky-test detection, per-test durations). Custom `*-test-command` overrides must emit `junit-unit.xml` / `junit-functional.xml` themselves. |
 | `coverage-tool` | string | `xdebug` | Coverage driver: `xdebug` (matches local `XDEBUG_MODE=coverage`, and the only driver for branch and path coverage) or `pcov` (line-only, ~3-10× faster) |
 | `path-coverage` | boolean | `false` | Pass `--path-coverage` to the built-in unit, functional and acceptance runs when `upload-coverage` is on and `coverage-tool` is `xdebug`. A custom `*-test-command` gets `PHPUNIT_PATH_COVERAGE=true` and passes the flag itself. Off by default because Xdebug 3.5 crashed under `--path-coverage` on the netresearch/t3x-nr-llm suites |
@@ -270,6 +271,20 @@ CGL and Rector run on a single PHP version — `php-versions[0]`, or `cgl-php-ve
 The first version supports unit and functional suites enabled with `functional-test-db: sqlite`. CGL and Rector must use the same effective PHP version. Their commands, repository checks and documentation detection share one quality job, with independent outcomes and an explicit final verdict. Custom quality commands must be compatible read-only checks; they now share a checkout. PHPStan retains its separate matrix and PHPUnit resolution, including the unpinned pass. Other optional jobs keep their existing inputs.
 
 Suite step timeouts retain `unit-timeout-minutes` and `functional-timeout-minutes`; the combined job's timeout is their sum, at most 360 minutes. Coverage and JUnit uploads retain their file names, flags and nonblocking transport-error policy. In compact mode, a successful suite must actually produce every requested report as a nonempty file. Custom suite commands must honor that existing report contract too. A missing report, unexpected skip, cancellation or failed check cannot pass the compact aggregate.
+
+By default, `upload-coverage: true` requires both unit and functional reports
+in every compact cell. To collect functional coverage on selected PHP versions,
+set `functional-coverage-php-versions: '["8.4"]'`: every retained PHP 8.4/TYPO3
+cell must then produce `coverage-functional.xml`, while the other cells still
+execute their complete functional suite without requesting or uploading that
+report. `[]` explicitly disables only functional coverage. Unit coverage and
+requested JUnit reports remain required as before. An absent report never
+selects coverage-off. Invalid JSON, duplicate or unretained PHP versions, an
+explicit declaration outside compact mode, or enabling functional coverage
+while global coverage is disabled fail preflight before test-matrix allocation.
+Custom commands run unchanged and must implement the declared selection and
+their own content checks; a nonempty report alone does not establish positive
+covered statements.
 
 For a four-PHP by two-TYPO3 consumer with CGL, Rector, repo checks, unit, functional and docs enabled, the graph uses 21 runners rather than 36: preflight, eight PHPStan cells, the unpinned analysis, eight combined test cells, quality, docs and the stable `ci / All CI checks` gate. This is a job-count reduction, not a measured speed claim. Serial suites can lengthen a cell when capacity is free. Compare test/report inventories, runner occupation and elapsed time under comparable load before adopting it.
 
