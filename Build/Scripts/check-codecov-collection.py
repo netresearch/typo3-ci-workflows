@@ -33,6 +33,7 @@ fixture_token = "fixture-not-a-real-token"
 WRAPPER_SHA256 = "1603474143632611c1913295378b412ed9a8deceabcd8bbd4ccd71ce7ac77790"
 ACTION_SHA256 = "d7b9f940d006bf3096bcda6f763aef0df89f9d8dd09768e35b37b4ad68d678cc"
 COLLECTOR_SHA256 = "42cae01edaeeb90fe79705c44246e10d065678ae5ab14a676c6b15e95d2ea193"
+TYPO3_VERSIONS_JSON = '["^13.4","^14.3"]'
 
 
 def reject_network(*args, **kwargs):
@@ -66,6 +67,24 @@ def require_file(path: Path, expected_digest: str):
     require(file_digest(path) == expected_digest, f"Unexpected bytes for {path.name}")
 
 
+def upload_enabled(step: dict, coverage: bool, functional_coverage: bool, outcome: str = "success", cancelled: bool = False) -> bool:
+    """Evaluate the supported native predicates, rejecting unknown expressions."""
+    # Interpret only the native predicates exercised here; unknown expressions
+    # fail rather than becoming a permissive imitation of GitHub's evaluator.
+    condition = step["if"]
+    require(condition.startswith("${{ ") and condition.endswith(" }}"), "Unexpected upload expression")
+    predicates = {
+        "!cancelled()": not cancelled,
+        "inputs.upload-coverage": coverage,
+        "matrix.functional_coverage": functional_coverage,
+        "steps.unit.outcome == 'success'": outcome == "success",
+        "steps.functional.outcome == 'success'": outcome == "success",
+    }
+    terms = [term.strip() for term in condition[4:-3].split("&&")]
+    require(all(term in predicates for term in terms), "Unsupported coverage upload condition")
+    return all(predicates[term] for term in terms)
+
+
 def check_path_and_asset_guards(root: Path, wrapper: Path, action: Path, check):
     option_directory = root / "option-input"
     option_directory.mkdir()
@@ -90,7 +109,79 @@ def check_path_and_asset_guards(root: Path, wrapper: Path, action: Path, check):
         check(f"tampered-{asset.name}-rejected-before-execution", rejected)
 
 
+def check_compact_uploads(compact, reports, invoke, collect, check):
+    """Verify pinned per-suite collection and expose discovery/flag regressions."""
+    for index, step in enumerate(compact):
+        options = step["with"]
+        tier = {"Upload unit coverage to Codecov": "unit", "Upload functional coverage to Codecov": "functional"}[step["name"]]
+        report = f"coverage-{tier}.xml"
+        require(step["uses"] == "codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5", "Unexpected action pin")
+        require(options["files"] == report and options["flags"] == tier, "Unexpected report or flag")
+        argv = invoke(options, f"compact-{index}")
+        selected = collect(argv)
+        check(f"compact-{tier}-argument-isolation", "--disable-search" in argv, argv=argv)
+        check(f"compact-{tier}-fixture-auth-only", argv.count("-t") == 1 and argv[argv.index("-t") + 1] == fixture_token)
+        check(f"compact-{tier}-exact-file-and-flag", argv.count("--file") == 1 and argv[argv.index("--file") + 1] == report and argv.count("--flag") == 1 and argv[argv.index("--flag") + 1] == tier)
+        check(f"compact-{tier}-real-collector-isolation", selected == [report], selected=selected, expected=[report])
+
+        # Deliberately remove the proposed workflow option. The actual
+        # vendor wrapper omits the flag and the real collector must expose
+        # the unrelated reports, so an isolation regression cannot pass.
+        mutant = dict(options)
+        mutant.pop("disable_search", None)
+        mutant_argv = invoke(mutant, f"mutant-{index}")
+        mutant_selected = collect(mutant_argv)
+        check(f"removed-option-{tier}-negative-control", mutant_selected != [report] and mutant_selected == sorted(reports), selected=mutant_selected, rejected_single_report_contract=True)
+
+        wrong_flag = dict(options, flags="functional" if tier == "unit" else "unit")
+        wrong_argv = invoke(wrong_flag, f"wrong-flag-{index}")
+        check(f"wrong-{tier}-flag-negative-control", collect(wrong_argv) == [report] and wrong_argv[wrong_argv.index("--flag") + 1] != tier)
+
+
+def check_planned_uploads(root: Path, planner: str, compact, invoke, collect, check):
+    """Check report inventories and upload eligibility using the real cell planner."""
+    # Every cell comes from the real extracted planner. With all reports
+    # (including functional decoys) present, the real upload conditions,
+    # wrapper and collector must still obey explicit on/off declarations.
+    versions = '["8.2","8.3","8.4","8.5"]'
+    for label, php, typo3, coverage, selection, expected in (
+        ("cowriter-inherit", versions, TYPO3_VERSIONS_JSON, True, "", (8, 8)),
+        ("textdb-inherit", versions, '["^14.3"]', False, "", (0, 0)),
+        ("llm-pr-main", versions, TYPO3_VERSIONS_JSON, True, '["8.4"]', (8, 2)),
+        ("llm-mq", '["8.2","8.4"]', TYPO3_VERSIONS_JSON, True, '["8.4"]', (4, 2)),
+        ("llm-schedule-manual", versions, TYPO3_VERSIONS_JSON, True, versions, (8, 8)),
+        ("explicit-functional-off", versions, TYPO3_VERSIONS_JSON, True, "[]", (8, 0)),
+    ):
+        output = root / f"{label}-plan"
+        environment = {
+            "PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(output),
+            "COMPACT_JOBS": "true", "PHP_VERSIONS": php, "TYPO3_VERSIONS": typo3,
+            "MATRIX_EXCLUDE": "[]", "CGL_PHP_VERSION": "", "RECTOR_PHP_VERSION": "",
+            "RUN_UNIT": "true", "RUN_FUNCTIONAL": "true", "FUNCTIONAL_DB": "sqlite",
+            "UNIT_TIMEOUT": "15", "FUNCTIONAL_TIMEOUT": "60",
+            "UPLOAD_COVERAGE": str(coverage).lower(), "FUNCTIONAL_COVERAGE_PHP_VERSIONS": selection,
+        }
+        completed = subprocess.run(["bash", "-euo", "pipefail", "-c", planner], env=environment, capture_output=True, text=True, timeout=30)
+        require(completed.returncode == 0, completed.stderr + completed.stdout)
+        matrix = json.loads(next(line.partition("=")[2] for line in output.read_text().splitlines() if line.startswith("matrix=")))
+        counts = [0, 0]
+        for cell_index, cell in enumerate(matrix):
+            require(type(cell["functional_coverage"]) is bool, "Missing explicit functional coverage decision")
+            for tier_index, step in enumerate(compact):
+                if not upload_enabled(step, coverage, cell["functional_coverage"]):
+                    continue
+                argv = invoke(step["with"], f"{label}-{cell_index}-{tier_index}")
+                require(collect(argv) == [step["with"]["files"]], "Unexpected report membership in selected cell")
+                counts[tier_index] += 1
+        check(f"{label}-actual-report-inventory", tuple(counts) == expected, selected=counts, expected=expected)
+
+    for outcome in ("failure", "skipped", "cancelled", ""):
+        check(f"functional-{outcome or 'missing'}-outcome-prevents-upload", not upload_enabled(compact[1], True, True, outcome=outcome))
+    check("cancelled-cell-prevents-both-uploads", all(not upload_enabled(step, True, True, cancelled=True) for step in compact))
+
+
 def main() -> int:
+    """Validate pinned assets and run offline upload-orchestration probes."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--workflow", type=Path, required=True)
     parser.add_argument("--wrapper", type=Path, required=True)
@@ -110,11 +201,12 @@ def main() -> int:
     definition = yaml_json(action, '{"default":.inputs.disable_search.default,"mapping":(.runs.steps[]|select(.name=="Upload coverage to Codecov")|.env.CC_DISABLE_SEARCH)}')
     require(definition == {"default": "false", "mapping": "${{ inputs.disable_search }}"}, "Unexpected input-to-environment mapping")
 
-    query = '.jobs."compact-tests".steps | map(select(.name == "Upload unit coverage to Codecov" or .name == "Upload functional coverage to Codecov")) | map({"name":.name,"uses":.uses,"with":.with})'
+    query = '.jobs."compact-tests".steps | map(select(.name == "Upload unit coverage to Codecov" or .name == "Upload functional coverage to Codecov")) | map({"name":.name,"uses":.uses,"with":.with,"if":.if})'
     compact = yaml_json(args.workflow, query)
     legacy = yaml_json(args.workflow, '[.jobs."unit-tests".steps[],.jobs."functional-tests".steps[],.jobs."functional-tests-sqlite".steps[]] | map(select(.name=="Upload coverage to Codecov")) | map({"name":.name,"with":.with})')
     require(len(compact) == 2 and len(legacy) == 3, "Unexpected upload inventory")
     require([compact[0]["name"], compact[1]["name"]] == ["Upload unit coverage to Codecov", "Upload functional coverage to Codecov"], "Unexpected compact upload order or duplicate roles")
+    planner = yaml_json(args.workflow, '.jobs.preflight.steps[] | select(.id == "compact") | .run')
     results = []
 
     def check(name: str, passed: bool, **details):
@@ -167,27 +259,8 @@ def main() -> int:
             selected = FileFinder(search_root=root, explicitly_listed_files=explicit, disable_search="--disable-search" in argv).find_files()
             return sorted(Path(item.get_filename()).name for item in selected)
 
-        for index, step in enumerate(compact):
-            options = step["with"]
-            tier = {"Upload unit coverage to Codecov": "unit", "Upload functional coverage to Codecov": "functional"}[step["name"]]
-            report = f"coverage-{tier}.xml"
-            require(step["uses"] == "codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5", "Unexpected action pin")
-            require(options["files"] == report and options["flags"] == tier, "Unexpected report or flag")
-            argv = invoke(options, f"compact-{index}")
-            selected = collect(argv)
-            check(f"compact-{tier}-argument-isolation", "--disable-search" in argv, argv=argv)
-            check(f"compact-{tier}-fixture-auth-only", argv.count("-t") == 1 and argv[argv.index("-t") + 1] == fixture_token)
-            check(f"compact-{tier}-exact-file-and-flag", argv.count("--file") == 1 and argv[argv.index("--file") + 1] == report and argv.count("--flag") == 1 and argv[argv.index("--flag") + 1] == tier)
-            check(f"compact-{tier}-real-collector-isolation", selected == [report], selected=selected, expected=[report])
-
-            # Deliberately remove the proposed workflow option. The actual
-            # vendor wrapper omits the flag and the real collector must expose
-            # the unrelated reports, so an isolation regression cannot pass.
-            mutant = dict(options)
-            mutant.pop("disable_search", None)
-            mutant_argv = invoke(mutant, f"mutant-{index}")
-            mutant_selected = collect(mutant_argv)
-            check(f"removed-option-{tier}-negative-control", mutant_selected != [report] and mutant_selected == sorted(reports), selected=mutant_selected, rejected_single_report_contract=True)
+        check_compact_uploads(compact, reports, invoke, collect, check)
+        check_planned_uploads(root, planner, compact, invoke, collect, check)
 
         for index, step in enumerate(legacy):
             argv = invoke(step["with"], f"legacy-{index}")
@@ -197,7 +270,7 @@ def main() -> int:
         check("missing-explicit-file-does-not-fall-back-to-decoys", missing == [])
         check("no-network-or-upload", not network_attempts and not network_marker.exists())
 
-    require(len(results) == 18, "A regression fixture case is missing")
+    require(len(results) == 31, "A regression fixture case is missing")
     result = {
         "workflow": str(args.workflow.resolve()),
         "vendor_action_commit": "303a32d7a59b442fa8d48b6a1cc6825c09c847a5",

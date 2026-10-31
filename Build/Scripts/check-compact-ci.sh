@@ -119,6 +119,7 @@ step gate 'Fail unless every job succeeded or was skipped' > "$TMP/gate.sh"
 export PHP_VERSIONS='["8.2","8.3","8.4","8.5"]' TYPO3_VERSIONS='["^13.4","^14.3"]'
 export MATRIX_EXCLUDE='[]' CGL_PHP_VERSION='' RECTOR_PHP_VERSION=''
 export RUN_UNIT=true RUN_FUNCTIONAL=true FUNCTIONAL_DB=sqlite UNIT_TIMEOUT=15 FUNCTIONAL_TIMEOUT=30
+export COMPACT_JOBS=true UPLOAD_COVERAGE=false FUNCTIONAL_COVERAGE_PHP_VERSIONS=''
 export GITHUB_OUTPUT="$TMP/plan-output"
 assert_status 0 'the full matrix plans successfully' bash -eo pipefail "$TMP/plan.sh"
 MATRIX="$(jq -Rn '[inputs | select(startswith("matrix=")) | ltrimstr("matrix=") | fromjson][0]' < "$GITHUB_OUTPUT")"
@@ -128,6 +129,47 @@ jq -e 'length == 8 and ([.[] | select(.lint)] | length) == 4
     and (map([.php,.typo3]) | sort) == [["8.2","^13.4"],["8.2","^14.3"],["8.3","^13.4"],["8.3","^14.3"],["8.4","^13.4"],["8.4","^14.3"],["8.5","^13.4"],["8.5","^14.3"]]' <<< "$MATRIX" > /dev/null \
     || fail 'eight complete cells and four distinct lint carriers'
 pass 'eight complete cells and four distinct lint carriers'
+jq -e 'all(.[]; .functional_coverage == false)' <<< "$MATRIX" > /dev/null \
+    || fail 'default disabled coverage plans explicit false in every cell'
+pass 'default disabled coverage plans explicit false in every cell'
+
+coverage_plan() {
+    local expected_cells="$1" expected_coverage="$2" description="$3"
+    : > "$GITHUB_OUTPUT"
+    assert_status 0 "$description plans successfully" bash -eo pipefail "$TMP/plan.sh"
+    MATRIX="$(jq -Rn '[inputs | select(startswith("matrix=")) | ltrimstr("matrix=") | fromjson][0]' < "$GITHUB_OUTPUT")"
+    jq -e --argjson cells "$expected_cells" --argjson coverage "$expected_coverage" '
+        length == $cells and all(.[]; (.functional_coverage | type) == "boolean")
+        and ([.[] | select(.functional_coverage)] | length) == $coverage
+        and all(.[] | select(.functional_coverage); .php == "8.4" or $coverage == $cells)
+    ' <<< "$MATRIX" > /dev/null || fail "$description coverage inventory"
+    pass "$description coverage inventory"
+}
+export UPLOAD_COVERAGE=true
+coverage_plan 8 8 'default Cowriter coverage'
+export FUNCTIONAL_COVERAGE_PHP_VERSIONS='["8.4"]'
+coverage_plan 8 2 'LLM PR and full main fallback'
+export PHP_VERSIONS='["8.2","8.4"]'
+coverage_plan 4 2 'LLM merge queue'
+export PHP_VERSIONS='["8.2","8.3","8.4","8.5"]'
+export FUNCTIONAL_COVERAGE_PHP_VERSIONS="$PHP_VERSIONS"
+coverage_plan 8 8 'LLM schedule and manual'
+export FUNCTIONAL_COVERAGE_PHP_VERSIONS='[]'
+coverage_plan 8 0 'explicit functional coverage off with unit coverage on'
+export UPLOAD_COVERAGE=false TYPO3_VERSIONS='["^14.3"]'
+coverage_plan 4 0 'explicit functional coverage off with global coverage off'
+export FUNCTIONAL_COVERAGE_PHP_VERSIONS=''
+coverage_plan 4 0 'default Textdb coverage'
+export TYPO3_VERSIONS='["^13.4","^14.3"]' UPLOAD_COVERAGE=true
+for invalid in 'not-json' 'null' '{}' 'true' '"8.4"' '[8.4]' '[""]' '["8.4","8.4"]' '["8.6"]' '[" 8.4"]'; do
+    assert_status 1 "invalid functional coverage selection fails: $invalid" \
+        env FUNCTIONAL_COVERAGE_PHP_VERSIONS="$invalid" bash -eo pipefail "$TMP/plan.sh"
+done
+assert_status 1 'functional coverage cannot be enabled under disabled global coverage' \
+    env UPLOAD_COVERAGE=false FUNCTIONAL_COVERAGE_PHP_VERSIONS='["8.4"]' bash -eo pipefail "$TMP/plan.sh"
+assert_status 1 'an explicit selector cannot be silently ignored in legacy mode' \
+    env COMPACT_JOBS=false FUNCTIONAL_COVERAGE_PHP_VERSIONS='[]' bash -eo pipefail "$TMP/plan.sh"
+export FUNCTIONAL_COVERAGE_PHP_VERSIONS='' UPLOAD_COVERAGE=false
 jq -Rn -e '[inputs] | index("tooling-php=8.2") != null and index("test-timeout=45") != null' < "$GITHUB_OUTPUT" > /dev/null \
     || fail 'tooling PHP and combined timeout preserve the input contract'
 pass 'tooling PHP and combined timeout preserve the input contract'
@@ -175,6 +217,15 @@ done
 assert_yaml '[.jobs["compact-tests"].steps[] | select(.uses != null and (.uses | startswith("codecov/"))) | .with.files] | sort == ["coverage-functional.xml","coverage-unit.xml","junit-functional.xml","junit-unit.xml"]' 'four report paths remain distinct'
 # shellcheck disable=SC2016 # Compare the literal GitHub expression.
 assert_yaml '(.jobs.docs.with["upload-artifact"]) == "${{ inputs.upload-docs-artifact }}"' 'the authoritative renderer can publish its existing PR artifact'
+# shellcheck disable=SC2016 # Literal native wiring is part of the contract.
+assert_yaml '.on.workflow_call.inputs["functional-coverage-php-versions"].default == ""
+    and (.jobs.preflight.steps[] | select(.id == "compact") | .if) == "${{ inputs.compact-jobs || inputs.functional-coverage-php-versions != '\'''\'' }}"' 'explicit selectors are validated even when compact mode is disabled'
+# shellcheck disable=SC2016
+assert_yaml '(.jobs["compact-tests"].steps[] | select(.name == "Run unit tests") | .env) == (.jobs["unit-tests"].steps[] | select(.name == "Run unit tests") | .env)
+    and (.jobs["compact-tests"].steps[] | select(.name == "Run functional tests") | .env.UPLOAD_COVERAGE) == "${{ matrix.functional_coverage }}"
+    and (.jobs["compact-tests"].steps[] | select(.name == "Run functional tests") | .env.PATH_COVERAGE) == "${{ matrix.functional_coverage && inputs.coverage-tool == '\''xdebug'\'' && inputs.path-coverage }}"
+    and (.jobs["compact-tests"].steps[] | select(.name == "Upload functional coverage to Codecov") | .if) == "${{ !cancelled() && matrix.functional_coverage && steps.functional.outcome == '\''success'\'' }}"
+    and (.jobs["compact-tests"].steps[] | select(.name == "Verify test reports") | .env.FUNCTIONAL_COVERAGE) == "${{ matrix.functional_coverage }}"' 'only compact functional coverage follows the explicit planned boolean'
 
 # Execute both suite bodies; composer is only the external boundary stub.
 mkdir -p "$TMP/bin" "$TMP/work"
@@ -215,6 +266,9 @@ export UPLOAD_COVERAGE=false UPLOAD_TEST_RESULTS=false PATH_COVERAGE=false
 assert_status 0 'no-coverage unit mode still runs the suite' bash -eo pipefail "$TMP/unit.sh"
 grep -q -- '^ci:test:php:unit -- --no-coverage$' "$CALL_LOG" || fail 'no-coverage arguments'
 pass 'no-coverage arguments are preserved'
+assert_status 0 'no-coverage functional mode still runs its full suite' bash -eo pipefail "$TMP/functional.sh"
+grep -q -- '^ci:test:php:functional -- --no-coverage$' "$CALL_LOG" || fail 'functional coverage-off command'
+pass 'functional coverage off changes flags without removing the suite'
 assert_status 0 'custom unit commands still execute unchanged' env UNIT_TEST_COMMAND='printf custom > override.txt' bash -eo pipefail "$TMP/unit.sh"
 [[ "$(cat override.txt)" == custom ]] || fail 'custom command did not run'
 pass 'custom command result is preserved'
@@ -250,16 +304,39 @@ assert_status 1 'metadata validation failure blocks the primary cell' env METADA
 assert_status 1 'dependency installation failure blocks' env INSTALL_RESULT=failure bash -eo pipefail "$TMP/test-verdict.sh"
 assert_status 1 'missing or failed reports block the cell' env REPORT_RESULT=failure bash -eo pipefail "$TMP/test-verdict.sh"
 assert_status 0 'only declared non-carriers may skip lint' env LINT_CELL=false PRIMARY_CELL=false LINT_RESULT=skipped METADATA_RESULT=skipped bash -eo pipefail "$TMP/test-verdict.sh"
-export UPLOAD_COVERAGE=true UPLOAD_TEST_RESULTS=true
+export UPLOAD_COVERAGE=true FUNCTIONAL_COVERAGE=true UPLOAD_TEST_RESULTS=true
 for report in coverage-unit.xml junit-unit.xml coverage-functional.xml junit-functional.xml; do
     printf '<report/>\n' > "$report"
 done
 assert_status 0 'successful suites produce all four nonempty reports' bash -eo pipefail "$TMP/reports.sh"
+for invalid in '' off; do
+    assert_status 1 "missing or invalid planned functional coverage '$invalid' cannot imply off" \
+        env FUNCTIONAL_COVERAGE="$invalid" bash -eo pipefail "$TMP/reports.sh"
+done
 : > coverage-functional.xml
 assert_status 1 'empty functional coverage is not a green upload' bash -eo pipefail "$TMP/reports.sh"
 printf '<report/>\n' > coverage-functional.xml
 rm junit-unit.xml
 assert_status 1 'missing unit JUnit is not a green upload' bash -eo pipefail "$TMP/reports.sh"
+printf '<report/>\n' > junit-unit.xml
+rm coverage-functional.xml
+assert_status 1 'missing declared-on functional coverage cannot use unit coverage instead' bash -eo pipefail "$TMP/reports.sh"
+assert_status 0 'declared-off functional coverage needs no XML while unit coverage remains mandatory' \
+    env FUNCTIONAL_COVERAGE=false bash -eo pipefail "$TMP/reports.sh"
+printf '<decoy/>\n' > coverage-functional.xml
+assert_status 0 'a decoy report cannot change the declared-off policy' \
+    env FUNCTIONAL_COVERAGE=false bash -eo pipefail "$TMP/reports.sh"
+rm junit-functional.xml
+assert_status 1 'coverage-off functional tests must still produce requested JUnit' \
+    env FUNCTIONAL_COVERAGE=false bash -eo pipefail "$TMP/reports.sh"
+printf '<report/>\n' > junit-functional.xml
+rm coverage-unit.xml
+assert_status 1 'functional coverage off never disables the unit coverage contract' \
+    env FUNCTIONAL_COVERAGE=false bash -eo pipefail "$TMP/reports.sh"
+for result in failure cancelled skipped ''; do
+    assert_status 1 "coverage-off full functional outcome '$result' still blocks" \
+        env FUNCTIONAL_COVERAGE=false FUNCTIONAL_RESULT="$result" bash -eo pipefail "$TMP/test-verdict.sh"
+done
 
 export CHECKOUT_RESULT=success CGL_RESULT=success RECTOR_RESULT=success REPO_RESULT=success DOCS_RESULT=success
 export RUN_CGL=true RUN_RECTOR=true RUN_REPO=true RUN_DOCS=true

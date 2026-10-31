@@ -180,6 +180,15 @@ on:
           silently and that tier is absent from the Codecov report.
         type: boolean
         default: false
+      functional-coverage-php-versions:
+        description: >-
+          Compact mode only: JSON array of exact retained PHP versions whose
+          functional suites collect and upload coverage. Empty inherits
+          upload-coverage for every cell; [] explicitly disables functional
+          coverage without disabling tests. A nonempty array requires
+          upload-coverage. Unit coverage remains controlled by upload-coverage.
+        type: string
+        default: ''
       coverage-tool:
         description: >-
           Coverage driver. "xdebug" (default) matches the local
@@ -490,7 +499,7 @@ jobs:
 
       - name: Build compact matrix
         id: compact
-        if: inputs.compact-jobs
+        if: ${{ inputs.compact-jobs || inputs.functional-coverage-php-versions != '' }}
         shell: bash
         env:
           PHP_VERSIONS: ${{ inputs.php-versions }}
@@ -503,15 +512,23 @@ jobs:
           FUNCTIONAL_DB: ${{ inputs.functional-test-db }}
           UNIT_TIMEOUT: ${{ inputs.unit-timeout-minutes }}
           FUNCTIONAL_TIMEOUT: ${{ inputs.functional-timeout-minutes }}
+          COMPACT_JOBS: ${{ inputs.compact-jobs }}
+          UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          FUNCTIONAL_COVERAGE_PHP_VERSIONS: ${{ inputs.functional-coverage-php-versions }}
         run: |
           set -euo pipefail
+          if [[ "$COMPACT_JOBS" != true ]]; then
+            echo '::error::functional-coverage-php-versions requires compact-jobs: true.'
+            exit 1
+          fi
           if [[ "$RUN_UNIT" != true || "$RUN_FUNCTIONAL" != true || "$FUNCTIONAL_DB" != sqlite ]]; then
             echo '::error::compact-jobs requires unit and functional tests with functional-test-db: sqlite. Disable compact-jobs for other layouts.'
             exit 1
           fi
           if ! plan=$(jq -cen --argjson php "$PHP_VERSIONS" --argjson typo3 "$TYPO3_VERSIONS" \
             --argjson exclude "$MATRIX_EXCLUDE" --arg cgl "$CGL_PHP_VERSION" --arg rector "$RECTOR_PHP_VERSION" \
-            --arg unit "$UNIT_TIMEOUT" --arg functional "$FUNCTIONAL_TIMEOUT" '
+            --arg unit "$UNIT_TIMEOUT" --arg functional "$FUNCTIONAL_TIMEOUT" \
+            --argjson coverage "$UPLOAD_COVERAGE" --arg selection "$FUNCTIONAL_COVERAGE_PHP_VERSIONS" '
               def versions:
                 type == "array" and length > 0
                 and all(.[]; type == "string" and length > 0)
@@ -522,6 +539,12 @@ jobs:
                     (.key == "php" or .key == "typo3") and (.value | type == "string"))))
               then . else error("compact-jobs needs nonempty unique PHP/TYPO3 string arrays and php/typo3 matrix exclusions") end
               | (if $cgl == "" then $php[0] else $cgl end) as $tool
+              | (if $selection == "" then [] else ($selection | fromjson) end) as $functional_php
+              | if ($functional_php | type == "array" and all(.[]; type == "string" and length > 0)
+                  and (length == (unique | length)))
+                then . else error("functional-coverage-php-versions must be a unique PHP string array") end
+              | if $coverage or ($functional_php | length) == 0 then .
+                else error("functional coverage selection requires upload-coverage: true") end
               | (if $rector == "" then $php[0] else $rector end) as $rector_tool
               | if $tool == $rector_tool then . else error("compact-jobs requires the same effective CGL and Rector PHP version") end
               | ($unit | tonumber) as $u | ($functional | tonumber) as $f
@@ -535,7 +558,11 @@ jobs:
                   | $cells | to_entries[]
                   | .value + {lint:(.key == 0),primary:(.key == 0 and .value.php == $php[0])}
                 ] as $cells
-              | {matrix:$cells,tool:$tool,timeout:($u+$f)}'); then
+              | if all($functional_php[]; . as $p | any($cells[]; .php == $p)) then .
+                else error("functional coverage selection contains a PHP version without a retained cell") end
+              | {matrix:($cells | map(. as $cell | . + {
+                  functional_coverage:($coverage and ($selection == "" or ($functional_php | index($cell.php)) != null))
+                })),tool:$tool,timeout:($u+$f)}'); then
             echo '::error::Invalid compact CI configuration; keep the standard layout until its inputs are supported.'
             exit 1
           fi
@@ -1834,7 +1861,7 @@ jobs:
           composer_install_cell
 
       - name: Run functional tests
-        env: &ci-functional-env
+        env:
           FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
@@ -2640,10 +2667,15 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         continue-on-error: true
         timeout-minutes: ${{ inputs.functional-timeout-minutes }}
-        env: *ci-functional-env
+        env:
+          FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
+          UPLOAD_COVERAGE: ${{ matrix.functional_coverage }}
+          UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
+          typo3DatabaseDriver: pdo_sqlite
+          PATH_COVERAGE: ${{ matrix.functional_coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
         run: *ci-functional-sqlite
       - name: Upload functional coverage to Codecov
-        if: ${{ !cancelled() && inputs.upload-coverage && steps.functional.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.functional_coverage && steps.functional.outcome == 'success' }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           disable_search: true
@@ -2668,15 +2700,22 @@ jobs:
           UNIT_RESULT: ${{ steps.unit.outcome }}
           FUNCTIONAL_RESULT: ${{ steps.functional.outcome }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
+          FUNCTIONAL_COVERAGE: ${{ matrix.functional_coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
         run: |
           set -euo pipefail
+          if [[ "$FUNCTIONAL_COVERAGE" != true && "$FUNCTIONAL_COVERAGE" != false ]]; then
+            echo '::error::Missing or invalid planned functional coverage decision.'
+            exit 1
+          fi
           for suite in unit functional; do
             result=UNIT_RESULT
             [[ "$suite" == functional ]] && result=FUNCTIONAL_RESULT
             [[ "${!result}" == success ]] || continue
             files=()
-            [[ "$UPLOAD_COVERAGE" == true ]] && files+=("coverage-$suite.xml")
+            coverage="$UPLOAD_COVERAGE"
+            [[ "$suite" == functional ]] && coverage="$FUNCTIONAL_COVERAGE"
+            [[ "$coverage" == true ]] && files+=("coverage-$suite.xml")
             [[ "$UPLOAD_TEST_RESULTS" == true ]] && files+=("junit-$suite.xml")
             for file in "${files[@]}"; do
               if [[ ! -s "$file" ]]; then
