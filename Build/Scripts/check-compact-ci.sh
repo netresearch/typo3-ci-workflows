@@ -7,11 +7,12 @@
 set -euo pipefail
 
 resolve_codecov_fixture_resources() {
-    local resource
+    local resource resolved
     for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
         if [[ -n "${!resource:-}" ]]; then
             # Keep venv interpreter symlinks within their environment path.
-            printf -v "$resource" '%s' "$(realpath --no-symlinks -- "${!resource}")"
+            resolved="$(realpath --no-symlinks -- "${!resource}")" || return
+            printf -v "$resource" '%s' "$resolved"
             export "${resource?}"
         fi
     done
@@ -68,6 +69,22 @@ if (
 else
     fail 'prepared resource paths changed meaning before the cwd change'
 fi
+
+for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
+    if (
+        cd "$TMP/relative-caller" || exit 1
+        export CODECOV_FIXTURE_PYTHON=.venv/bin/python CODECOV_FIXTURE_ACTION_DIR=action
+        printf -v "$resource" '%s' missing-parent/deeper/resource
+        if resolve_codecov_fixture_resources 2>/dev/null; then
+            exit 1
+        fi
+        [[ "${!resource}" == missing-parent/deeper/resource ]] || exit 1
+    ); then
+        pass "$resource rejects an invalid parent without erasing the configured value"
+    else
+        fail "$resource did not reject an invalid prepared resource"
+    fi
+done
 
 assert_yaml '.on.workflow_call.inputs["compact-jobs"].default == false' 'compact execution is opt-in'
 assert_yaml '.on.workflow_call.inputs["upload-docs-artifact"].default == false' 'docs artifact remains opt-in'
