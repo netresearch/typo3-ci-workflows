@@ -2,9 +2,29 @@
 # Execute the compact CI planner, commands and verdicts in deterministic fixtures.
 # This verifies our orchestration, not GitHub's scheduler. The native pilot is
 # still required before a consumer adopts the opt-in execution graph.
+# Codecov vendor preparation may download pinned inputs; the collection probe
+# itself rejects network access and uploads. Prepared inputs support offline use.
 set -euo pipefail
 
-WORKFLOW="${1:-.github/workflows/ci.yml}"
+resolve_codecov_fixture_resources() {
+    local resource resolved
+    for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
+        if [[ -n "${!resource:-}" ]]; then
+            if [[ ! -e "${!resource}" ]]; then
+                printf '%s must name an existing prepared resource: %s\n' "$resource" "${!resource}" >&2
+                return 1
+            fi
+            # Keep venv interpreter symlinks within their environment path.
+            resolved="$(realpath --canonicalize-existing --no-symlinks -- "${!resource}")" || return
+            printf -v "$resource" '%s' "$resolved"
+            export "${resource?}"
+        fi
+    done
+}
+resolve_codecov_fixture_resources
+
+WORKFLOW="$(realpath "${1:-.github/workflows/ci.yml}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 WORKFLOW_JSON="$(yq -o=json '.' "$WORKFLOW")"
@@ -32,6 +52,56 @@ assert_status() {
     fi
     pass "$name"
 }
+
+mkdir -p "$TMP/prepared-env/bin" "$TMP/relative-caller/action"
+touch "$TMP/prepared-env/bin/python"
+ln -s "$TMP/prepared-env" "$TMP/relative-caller/.venv"
+if (
+    cd "$TMP/relative-caller" || exit 1
+    export CODECOV_FIXTURE_PYTHON=.venv/bin/python CODECOV_FIXTURE_ACTION_DIR=action
+    resolve_codecov_fixture_resources || exit 1
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]] || exit 1
+    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]] || exit 1
+    resolve_codecov_fixture_resources || exit 1
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]] || exit 1
+    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]] || exit 1
+    unset CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR
+    resolve_codecov_fixture_resources || exit 1
+    [[ ! -v CODECOV_FIXTURE_PYTHON && ! -v CODECOV_FIXTURE_ACTION_DIR ]] || exit 1
+); then
+    pass 'prepared paths preserve relative, absolute, venv-symlink and unset behavior'
+else
+    fail 'prepared resource paths changed meaning before the cwd change'
+fi
+
+for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
+    if (
+        cd "$TMP/relative-caller" || exit 1
+        export CODECOV_FIXTURE_PYTHON=.venv/bin/python CODECOV_FIXTURE_ACTION_DIR=action
+        printf -v "$resource" '%s' missing-parent/deeper/resource
+        if resolve_codecov_fixture_resources 2>/dev/null; then
+            exit 1
+        fi
+        [[ "${!resource}" == missing-parent/deeper/resource ]] || exit 1
+    ); then
+        pass "$resource rejects an invalid parent without erasing the configured value"
+    else
+        fail "$resource did not reject an invalid prepared resource"
+    fi
+done
+
+if (
+    export CODECOV_FIXTURE_PYTHON="$TMP/prepared-env/bin/python" CODECOV_FIXTURE_ACTION_DIR="$TMP/relative-caller/action"
+    realpath() { return 57; }
+    status=0
+    resolve_codecov_fixture_resources || status=$?
+    [[ "$status" == 57 ]] || exit 1
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/prepared-env/bin/python" ]] || exit 1
+); then
+    pass 'canonicalizer failure propagates without erasing the configured value'
+else
+    fail 'canonicalizer failure was masked or erased the prepared resource'
+fi
 
 assert_yaml '.on.workflow_call.inputs["compact-jobs"].default == false' 'compact execution is opt-in'
 assert_yaml '.on.workflow_call.inputs["upload-docs-artifact"].default == false' 'docs artifact remains opt-in'
@@ -226,5 +296,8 @@ assert_status 1 'dedup cannot hide an unexpected execution' env RESULTS="$(jq '.
 STANDARD_RESULTS="$(jq 'with_entries(.value.result="success") | ."compact-quality".result="skipped" | ."compact-tests".result="skipped"' <<< "$BASE_RESULTS")"
 assert_status 0 'the default legacy graph retains its successful verdict' env INPUTS='{"compact-jobs":false}' RESULTS="$STANDARD_RESULTS" bash -eo pipefail "$TMP/gate.sh"
 assert_status 1 'default mode still blocks a cancelled old family' env INPUTS='{"compact-jobs":false}' RESULTS="$(jq '."unit-tests".result="cancelled"' <<< "$STANDARD_RESULTS")" bash -eo pipefail "$TMP/gate.sh"
+
+bash "$SCRIPT_DIR/check-codecov-collection.sh" "$WORKFLOW"
+pass 'pinned Codecov arguments and real collection preserve report membership'
 
 printf 'Compact CI: %s checks passed.\n' "$CASES"
