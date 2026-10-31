@@ -149,6 +149,7 @@ gh api repos/netresearch/REPO/hooks --method POST \
 | [`auto-merge-deps.yml`](#auto-merge-dependency-prs) | Auto-merge Dependabot/Renovate PRs | PR |
 | [`pr-quality.yml`](#pr-quality-gates) | PR size check + auto-approve for solo maintainers | PR |
 | [`labeler.yml`](#labeler) | Automatic PR labeling based on file paths | PR |
+| [`crowdin-translations.yml`](#crowdin-translations) | Bring Crowdin translations in through a signed pull request | schedule |
 | [`stale.yml`](#stale-issues) | Mark and close stale issues and PRs | schedule |
 | [`lock.yml`](#lock-threads) | Lock old inactive issues and PRs | schedule |
 | [`greetings.yml`](#greetings) | Greet first-time contributors | issue, PR |
@@ -951,6 +952,56 @@ Existing hand-written `## [Unreleased]` entries stay where they are until
 someone moves them into fragments or into a release by hand.
 
 ---
+
+## Crowdin Translations
+
+The crowdin.com GitHub integration commits unsigned, without a sign-off and with `[ci skip]`, so its pull requests can never merge into a branch with a `required_signatures` ruleset. [`crowdin-translations.yml`](.github/workflows/crowdin-translations.yml) reads the integration's service branch and opens one pull request from `crowdin/translations` instead. It needs no Crowdin credential, and a repository without the service branch is left alone.
+
+### Minimal caller
+
+```yaml
+# .github/workflows/crowdin-translations.yml
+name: Crowdin Translations
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  translations:
+    uses: netresearch/typo3-ci-workflows/.github/workflows/crowdin-translations.yml@main
+    permissions:
+      contents: read
+    secrets:
+      app-id: ${{ secrets.PROJECT_APP_ID }}
+      app-private-key: ${{ secrets.PROJECT_APP_PRIVATE_KEY }}
+```
+
+Trigger it on a schedule. `on: push` to the service branch never fires, because GitHub drops the event of a head commit carrying `[ci skip]`.
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `source-branch` | string | `l10n_main` | Service branch the integration pushes to |
+| `target-branch` | string | `crowdin/translations` | Branch the signed commit goes to, replaced on every content change |
+| `translation-paths` | string | language files, without `t3` | Python regular expression a path must match in full to be taken |
+
+### Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `app-id` | yes | GitHub App with Contents and Pull requests write access |
+| `app-private-key` | yes | Private key of that App |
+
+### What a run does
+
+The content is a three-way merge of the service branch into the default branch, so licence headers and reviewed wording on the default branch survive. Where both sides changed the same lines, the default branch wins and the pull request names the file. A file that cannot be merged, is not well-formed XML or holds a `trans-unit` id twice keeps its default-branch version and is named too.
+
+The commit is created through the Git data API with the App token. GitHub signs it, its trailer carries the App's sign-off, and unlike a commit made with `GITHUB_TOKEN` it starts the required checks. The run fails before touching a branch if GitHub reports the commit as unverified. Once that pull request exists, or nothing is left to bring over, the workflow closes the integration's unsigned pull request. The integration opens a new one on its next sync, and the next run closes that as well. A person still reviews and merges the signed pull request.
 
 ## Publish to TER
 
