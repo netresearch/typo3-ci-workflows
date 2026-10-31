@@ -30,6 +30,9 @@ sanitized_auth_keys = [key for key in os.environ if key.startswith(auth_prefixes
 for auth_key in sanitized_auth_keys:
     del os.environ[auth_key]
 fixture_token = "fixture-not-a-real-token"
+WRAPPER_SHA256 = "1603474143632611c1913295378b412ed9a8deceabcd8bbd4ccd71ce7ac77790"
+ACTION_SHA256 = "d7b9f940d006bf3096bcda6f763aef0df89f9d8dd09768e35b37b4ad68d678cc"
+COLLECTOR_SHA256 = "42cae01edaeeb90fe79705c44246e10d065678ae5ab14a676c6b15e95d2ea193"
 
 
 def reject_network(*args, **kwargs):
@@ -43,18 +46,48 @@ socket.socket.connect = reject_network
 from codecov_cli.services.upload.file_finder import FileFinder  # noqa: E402
 
 
-def git_blob(path: Path) -> str:
-    data = path.read_bytes()
-    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def yaml_json(path: Path, query: str):
-    return json.loads(subprocess.check_output(["yq", "-o=json", query, str(path)], text=True))
+    filename = path.resolve(strict=True)
+    with filename.open("rb") as source:
+        output = subprocess.check_output(["yq", "-o=json", query, "--", "-"], stdin=source, text=True)
+    return json.loads(output)
 
 
 def require(condition: bool, message: str):
     if not condition:
         raise AssertionError(message)
+
+
+def require_file(path: Path, expected_digest: str):
+    require(file_digest(path) == expected_digest, f"Unexpected bytes for {path.name}")
+
+
+def check_path_and_asset_guards(root: Path, wrapper: Path, action: Path, check):
+    option_directory = root / "option-input"
+    option_directory.mkdir()
+    option_input = option_directory / "--inplace"
+    original = "probe: true\n"
+    option_input.write_text(original)
+    previous = Path.cwd()
+    try:
+        os.chdir(option_directory)
+        value = yaml_json(Path("--inplace"), ".probe")
+    finally:
+        os.chdir(previous)
+    check("option-like-yaml-path-remains-data", value is True and option_input.read_text() == original)
+    for asset, digest in ((wrapper, WRAPPER_SHA256), (action, ACTION_SHA256)):
+        altered = option_directory / ("altered-" + asset.name)
+        altered.write_bytes(asset.read_bytes() + b"\n# altered fixture asset\n")
+        rejected = False
+        try:
+            require_file(altered, digest)
+        except AssertionError:
+            rejected = True
+        check(f"tampered-{asset.name}-rejected-before-execution", rejected)
 
 
 def main() -> int:
@@ -67,13 +100,13 @@ def main() -> int:
     action = args.action.resolve()
     finder_path = Path(inspect.getfile(FileFinder))
     require(importlib.metadata.version("codecov-cli") == "11.3.2", "Unexpected collector version")
-    require(git_blob(finder_path) == "6c6dda89d17d408dd0d28cc5ffd9c2853d7098d6", "Unexpected collector bytes")
-    require(git_blob(wrapper) == "832d2018bfb88f94390da7127fc79880673418df", "Unexpected wrapper bytes")
-    require(git_blob(action) == "1dd2688c40ed86489da523e5b834dda2ecbdbceb", "Unexpected action bytes")
+    require_file(finder_path, COLLECTOR_SHA256)
+    require_file(wrapper, WRAPPER_SHA256)
+    require_file(action, ACTION_SHA256)
     package = finder_path.parents[2]
-    require(git_blob(package / "helpers/folder_searcher.py") == "8b7f35dfa32f8c9346cd8b2dec0a5936a1a1df7e", "Unexpected search helper bytes")
-    require(git_blob(package / "helpers/upload_type.py") == "fd53942fc25d20dde56ef6bf042da0d3c9012d3f", "Unexpected report-type bytes")
-    require(git_blob(package / "types.py") == "2ca6f391beddb6b8f5b168641896e20f10289a6c", "Unexpected collector type bytes")
+    require_file(package / "helpers/folder_searcher.py", "711a1f706407c6b674e41bfbb472a398e6b2388db393f7eda30ccd162c1d9e6d")
+    require_file(package / "helpers/upload_type.py", "9eb8c5711c5be61fbfbc6c28fbd057156b2fc263a23e1e6e272121314ed67230")
+    require_file(package / "types.py", "f9bcf6c3441393b6684e7229e332a514a48ec2bc9b37fa7e4417c638f1618585")
     definition = yaml_json(action, '{"default":.inputs.disable_search.default,"mapping":(.runs.steps[]|select(.name=="Upload coverage to Codecov")|.env.CC_DISABLE_SEARCH)}')
     require(definition == {"default": "false", "mapping": "${{ inputs.disable_search }}"}, "Unexpected input-to-environment mapping")
 
@@ -81,6 +114,7 @@ def main() -> int:
     compact = yaml_json(args.workflow, query)
     legacy = yaml_json(args.workflow, '[.jobs."unit-tests".steps[],.jobs."functional-tests".steps[],.jobs."functional-tests-sqlite".steps[]] | map(select(.name=="Upload coverage to Codecov")) | map({"name":.name,"with":.with})')
     require(len(compact) == 2 and len(legacy) == 3, "Unexpected upload inventory")
+    require([compact[0]["name"], compact[1]["name"]] == ["Upload unit coverage to Codecov", "Upload functional coverage to Codecov"], "Unexpected compact upload order or duplicate roles")
     results = []
 
     def check(name: str, passed: bool, **details):
@@ -88,6 +122,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="codecov-interop-") as temporary:
         root = Path(temporary)
+        check_path_and_asset_guards(root, wrapper, action, check)
         reports = ["coverage-unit.xml", "coverage-functional.xml", "decoy-coverage.xml"]
         for filename in reports:
             (root / filename).write_text('<coverage generated="0"><project timestamp="0"><metrics files="0"/></project></coverage>\n')
@@ -134,7 +169,7 @@ def main() -> int:
 
         for index, step in enumerate(compact):
             options = step["with"]
-            tier = "unit" if step["name"] == "Upload unit coverage to Codecov" else "functional"
+            tier = {"Upload unit coverage to Codecov": "unit", "Upload functional coverage to Codecov": "functional"}[step["name"]]
             report = f"coverage-{tier}.xml"
             require(step["uses"] == "codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5", "Unexpected action pin")
             require(options["files"] == report and options["flags"] == tier, "Unexpected report or flag")
@@ -162,12 +197,21 @@ def main() -> int:
         check("missing-explicit-file-does-not-fall-back-to-decoys", missing == [])
         check("no-network-or-upload", not network_attempts and not network_marker.exists())
 
+    require(len(results) == 18, "A regression fixture case is missing")
     result = {
         "workflow": str(args.workflow.resolve()),
         "vendor_action_commit": "303a32d7a59b442fa8d48b6a1cc6825c09c847a5",
-        "vendor_wrapper_blob": git_blob(wrapper),
+        "vendor_wrapper_sha256": file_digest(wrapper),
         "real_collector_version": importlib.metadata.version("codecov-cli"),
-        "real_collector_blob": git_blob(finder_path),
+        "real_collector_sha256": file_digest(finder_path),
+        "git_blob_provenance": {
+            "action_definition": "1dd2688c40ed86489da523e5b834dda2ecbdbceb",
+            "action_wrapper": "832d2018bfb88f94390da7127fc79880673418df",
+            "collector": "6c6dda89d17d408dd0d28cc5ffd9c2853d7098d6",
+            "folder_searcher": "8b7f35dfa32f8c9346cd8b2dec0a5936a1a1df7e",
+            "report_type": "fd53942fc25d20dde56ef6bf042da0d3c9012d3f",
+            "collection_types": "2ca6f391beddb6b8f5b168641896e20f10289a6c",
+        },
         "network_calls": len(network_attempts),
         "external_uploads": 0,
         "auth_environment_sanitized": True,

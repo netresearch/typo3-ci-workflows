@@ -9,7 +9,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Prepared resources support an entirely offline local run. The Python fixture
-# always verifies their Git blob hashes and the collector package version.
+# always verifies their SHA256 bytes and the collector package version.
 FIXTURE_PYTHON="${CODECOV_FIXTURE_PYTHON:-}"
 ACTION_DIR="${CODECOV_FIXTURE_ACTION_DIR:-}"
 if [[ -z "$FIXTURE_PYTHON" ]]; then
