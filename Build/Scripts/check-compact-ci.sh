@@ -52,17 +52,17 @@ mkdir -p "$TMP/prepared-env/bin" "$TMP/relative-caller/action"
 touch "$TMP/prepared-env/bin/python"
 ln -s "$TMP/prepared-env" "$TMP/relative-caller/.venv"
 if (
-    cd "$TMP/relative-caller"
+    cd "$TMP/relative-caller" || exit 1
     export CODECOV_FIXTURE_PYTHON=.venv/bin/python CODECOV_FIXTURE_ACTION_DIR=action
-    resolve_codecov_fixture_resources
-    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]]
-    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]]
-    resolve_codecov_fixture_resources
-    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]]
-    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]]
+    resolve_codecov_fixture_resources || exit 1
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]] || exit 1
+    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]] || exit 1
+    resolve_codecov_fixture_resources || exit 1
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]] || exit 1
+    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]] || exit 1
     unset CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR
-    resolve_codecov_fixture_resources
-    [[ ! -v CODECOV_FIXTURE_PYTHON && ! -v CODECOV_FIXTURE_ACTION_DIR ]]
+    resolve_codecov_fixture_resources || exit 1
+    [[ ! -v CODECOV_FIXTURE_PYTHON && ! -v CODECOV_FIXTURE_ACTION_DIR ]] || exit 1
 ); then
     pass 'prepared paths preserve relative, absolute, venv-symlink and unset behavior'
 else
