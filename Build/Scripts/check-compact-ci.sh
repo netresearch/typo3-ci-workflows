@@ -2,9 +2,12 @@
 # Execute the compact CI planner, commands and verdicts in deterministic fixtures.
 # This verifies our orchestration, not GitHub's scheduler. The native pilot is
 # still required before a consumer adopts the opt-in execution graph.
+# Codecov vendor preparation may download pinned inputs; the collection probe
+# itself rejects network access and uploads. Prepared inputs support offline use.
 set -euo pipefail
 
-WORKFLOW="${1:-.github/workflows/ci.yml}"
+WORKFLOW="$(realpath "${1:-.github/workflows/ci.yml}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 WORKFLOW_JSON="$(yq -o=json '.' "$WORKFLOW")"
@@ -226,5 +229,8 @@ assert_status 1 'dedup cannot hide an unexpected execution' env RESULTS="$(jq '.
 STANDARD_RESULTS="$(jq 'with_entries(.value.result="success") | ."compact-quality".result="skipped" | ."compact-tests".result="skipped"' <<< "$BASE_RESULTS")"
 assert_status 0 'the default legacy graph retains its successful verdict' env INPUTS='{"compact-jobs":false}' RESULTS="$STANDARD_RESULTS" bash -eo pipefail "$TMP/gate.sh"
 assert_status 1 'default mode still blocks a cancelled old family' env INPUTS='{"compact-jobs":false}' RESULTS="$(jq '."unit-tests".result="cancelled"' <<< "$STANDARD_RESULTS")" bash -eo pipefail "$TMP/gate.sh"
+
+bash "$SCRIPT_DIR/check-codecov-collection.sh" "$WORKFLOW"
+pass 'pinned Codecov arguments and real collection preserve report membership'
 
 printf 'Compact CI: %s checks passed.\n' "$CASES"
