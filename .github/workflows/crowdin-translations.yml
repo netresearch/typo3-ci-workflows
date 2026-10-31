@@ -221,6 +221,7 @@ jobs:
           output(**{
               'has-source': 'true',
               'changed': str(bool(files)).lower(),
+              'held': len(held),
               'up-to-date': str(up_to_date).lower(),
               'target-exists': str(exists(target)).lower(),
               'base-oid': text('rev-parse', base),
@@ -252,6 +253,7 @@ jobs:
           MESSAGE_FILE: ${{ runner.temp }}/crowdin-message.txt
           BODY_FILE: ${{ runner.temp }}/crowdin-pr.md
           CHANGED: ${{ steps.merge.outputs.changed }}
+          HELD: ${{ steps.merge.outputs.held }}
           UP_TO_DATE: ${{ steps.merge.outputs.up-to-date }}
           TARGET_EXISTS: ${{ steps.merge.outputs.target-exists }}
           BASE_OID: ${{ steps.merge.outputs.base-oid }}
@@ -335,7 +337,8 @@ jobs:
               echo "Committed $oid to $TARGET_BRANCH"
             fi
 
-            pr=$(gh pr list -R "$REPO" --head "$TARGET_BRANCH" --state open --json number --jq '.[0].number // empty')
+            pr=$(gh pr list -R "$REPO" --head "$TARGET_BRANCH" --base "$BASE_BRANCH" --state open --json number,isCrossRepository \
+              --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')
             if [[ -z "$pr" ]]; then
               gh pr create -R "$REPO" --base "$BASE_BRANCH" --head "$TARGET_BRANCH" --title "$title" --body-file "$BODY_FILE"
             elif [[ "$UP_TO_DATE" != true ]]; then
@@ -345,9 +348,13 @@ jobs:
 
           # Only now: the content is in a mergeable pull request or already on
           # the default branch, so nothing is lost by closing the unsigned one.
-          note='Closed by the crowdin-translations workflow. These commits are unsigned and cannot merge here; the content comes in through a signed pull request from `'"$TARGET_BRANCH"'`.'
-          gh pr list -R "$REPO" --head "$SOURCE_BRANCH" --base "$BASE_BRANCH" --state open --json number,isCrossRepository \
-            --jq '.[] | select(.isCrossRepository | not) | .number' \
-            | while read -r number; do
-                gh pr close "$number" -R "$REPO" --comment "$note"
-              done
+          # With held-back files and no signed pull request, the unsigned one
+          # stays open as the only visible trace of them.
+          if [[ "$CHANGED" == true || "$HELD" == 0 ]]; then
+            note='Closed by the crowdin-translations workflow. These commits are unsigned and cannot merge here; the content comes in through a signed pull request from `'"$TARGET_BRANCH"'`.'
+            gh pr list -R "$REPO" --head "$SOURCE_BRANCH" --base "$BASE_BRANCH" --state open --json number,isCrossRepository \
+              --jq '.[] | select(.isCrossRepository | not) | .number' \
+              | while read -r number; do
+                  gh pr close "$number" -R "$REPO" --comment "$note"
+                done
+          fi
