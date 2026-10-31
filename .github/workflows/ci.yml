@@ -2492,8 +2492,7 @@ jobs:
               exit 1
             fi
           fi
-          if [[ "$compact" == true ]]; then
-            if ! jq -e --argjson inputs "$INPUTS" --argjson db_count "$db_count" '
+          if [[ "$compact" == true ]] && ! jq -e --argjson inputs "$INPUTS" --argjson db_count "$db_count" '
               def result($name; $expected):
                 if .[$name].result == $expected then .
                 else error("CI gate: " + $name + " expected " + $expected + ", got " + (.[$name].result // "missing")) end;
@@ -2524,7 +2523,6 @@ jobs:
             ' <<< "$RESULTS" > /dev/null; then
               echo '::error::Compact CI did not satisfy its complete expected job set.'
               exit 1
-            fi
           fi
           bad=$(jq -r '
             to_entries[]

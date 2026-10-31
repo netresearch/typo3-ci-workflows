@@ -153,7 +153,7 @@ def planner(config: dict, value: str, **overrides) -> tuple[int, dict]:
     with tempfile.TemporaryDirectory(prefix="db-matrix-plan-") as directory:
         output = Path(directory) / "outputs"
         result = execute(step(config, PREFLIGHT, PLAN_STEP)["run"], {**environment, "GITHUB_OUTPUT": str(output)})
-        values = dict(line.split("=", 1) for line in output.read_text().splitlines()) if output.exists() else {}
+        values = {key: value for key, value in (line.split("=", 1) for line in output.read_text().splitlines())} if output.exists() else {}
     return result.returncode, values
 
 
@@ -178,9 +178,8 @@ def check_invalid_rows(config: dict, probe: Probe):
     for key in ROWS[0]:
         changed = dict(ROWS[0])
         del changed[key]
-        invalid.append(json.dumps([changed]))
-        invalid.append(json.dumps([{**ROWS[0], key: ""}]))
-        invalid.append(json.dumps([{**ROWS[0], key: 1}]))
+        invalid.extend((json.dumps([changed]), json.dumps([{**ROWS[0], key: ""}]),
+                        json.dumps([{**ROWS[0], key: 1}])))
     invalid.extend(json.dumps([{**ROWS[0], "image": "invalid" + character + "image"}]) for character in (" ", "\t", "\n", "\x00", "\x1b", "\u00a0"))
     invalid.extend((json.dumps([{**ROWS[0], "db": "sqlite"}]), json.dumps([{**ROWS[0], "command": "extra"}]), json.dumps([{**ROWS[0], "image": str(index)} for index in range(257)])))
     for value in invalid:
