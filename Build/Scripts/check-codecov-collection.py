@@ -68,6 +68,7 @@ def require_file(path: Path, expected_digest: str):
 
 
 def upload_enabled(step: dict, coverage: bool, functional_coverage: bool, outcome: str = "success", cancelled: bool = False) -> bool:
+    """Evaluate the supported native predicates, rejecting unknown expressions."""
     # Interpret only the native predicates exercised here; unknown expressions
     # fail rather than becoming a permissive imitation of GitHub's evaluator.
     condition = step["if"]
@@ -109,6 +110,7 @@ def check_path_and_asset_guards(root: Path, wrapper: Path, action: Path, check):
 
 
 def check_compact_uploads(compact, reports, invoke, collect, check):
+    """Verify pinned per-suite collection and expose discovery/flag regressions."""
     for index, step in enumerate(compact):
         options = step["with"]
         tier = {"Upload unit coverage to Codecov": "unit", "Upload functional coverage to Codecov": "functional"}[step["name"]]
@@ -137,6 +139,7 @@ def check_compact_uploads(compact, reports, invoke, collect, check):
 
 
 def check_planned_uploads(root: Path, planner: str, compact, invoke, collect, check):
+    """Check report inventories and upload eligibility using the real cell planner."""
     # Every cell comes from the real extracted planner. With all reports
     # (including functional decoys) present, the real upload conditions,
     # wrapper and collector must still obey explicit on/off declarations.
@@ -178,6 +181,7 @@ def check_planned_uploads(root: Path, planner: str, compact, invoke, collect, ch
 
 
 def main() -> int:
+    """Validate pinned assets and run offline upload-orchestration probes."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--workflow", type=Path, required=True)
     parser.add_argument("--wrapper", type=Path, required=True)
