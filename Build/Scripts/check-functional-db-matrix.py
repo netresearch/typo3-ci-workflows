@@ -316,7 +316,7 @@ def mutation_cases(config: dict):
     command_index = server["steps"].index(step(config, SERVER, FUNCTIONAL_STEP))
     gate_script = step(config, "gate", GATE_STEP)["run"]
     planned = step(config, PREFLIGHT, PLAN_STEP)["run"]
-    no_strictness = gate_script.replace('if [[ "$db_count" -gt 0 ]]; then', 'if false; then')
+    no_strictness = gate_script.replace('if [[ "$db_count" -gt 0 ]] && ! jq', 'if false && ! jq')
     no_postgres = planned.replace('else {include:$rows} end)', 'else {include:($rows | map(select(.db != "postgres")))} end)')
     if no_strictness == gate_script or no_postgres == planned:
         raise AssertionError("A mutation marker no longer reaches the production code")
