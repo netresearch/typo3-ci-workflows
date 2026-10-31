@@ -10,8 +10,12 @@ resolve_codecov_fixture_resources() {
     local resource resolved
     for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
         if [[ -n "${!resource:-}" ]]; then
+            if [[ ! -e "${!resource}" ]]; then
+                printf '%s must name an existing prepared resource: %s\n' "$resource" "${!resource}" >&2
+                return 1
+            fi
             # Keep venv interpreter symlinks within their environment path.
-            resolved="$(realpath --no-symlinks -- "${!resource}")" || return
+            resolved="$(realpath --canonicalize-existing --no-symlinks -- "${!resource}")" || return
             printf -v "$resource" '%s' "$resolved"
             export "${resource?}"
         fi
@@ -85,6 +89,19 @@ for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
         fail "$resource did not reject an invalid prepared resource"
     fi
 done
+
+if (
+    export CODECOV_FIXTURE_PYTHON="$TMP/prepared-env/bin/python" CODECOV_FIXTURE_ACTION_DIR="$TMP/relative-caller/action"
+    realpath() { return 57; }
+    status=0
+    resolve_codecov_fixture_resources || status=$?
+    [[ "$status" == 57 ]] || exit 1
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/prepared-env/bin/python" ]] || exit 1
+); then
+    pass 'canonicalizer failure propagates without erasing the configured value'
+else
+    fail 'canonicalizer failure was masked or erased the prepared resource'
+fi
 
 assert_yaml '.on.workflow_call.inputs["compact-jobs"].default == false' 'compact execution is opt-in'
 assert_yaml '.on.workflow_call.inputs["upload-docs-artifact"].default == false' 'docs artifact remains opt-in'
