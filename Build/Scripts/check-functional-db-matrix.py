@@ -153,7 +153,8 @@ def planner(config: dict, value: str, **overrides) -> tuple[int, dict]:
     with tempfile.TemporaryDirectory(prefix="db-matrix-plan-") as directory:
         output = Path(directory) / "outputs"
         result = execute(step(config, PREFLIGHT, PLAN_STEP)["run"], {**environment, "GITHUB_OUTPUT": str(output)})
-        values = {key: value for key, value in (line.split("=", 1) for line in output.read_text().splitlines())} if output.exists() else {}
+        pairs = [line.split("=", 1) for line in output.read_text().splitlines()] if output.exists() else []
+        values = dict(pairs)
     return result.returncode, values
 
 
