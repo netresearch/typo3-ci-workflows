@@ -102,11 +102,12 @@ on:
         default: false
       make-latest:
         description: >-
-          Mark this release as the repository's "Latest" release. GitHub's API
-          defaults this to true, so a maintenance release cut from an older
-          major line takes the badge — and the /releases/latest redirect —
-          away from the newest version. Set false in the release workflow of
-          every backport branch; leave it at true on the top major line.
+          Let this release become the repository's "Latest" release. With
+          true, it becomes Latest only when its version is the highest of all
+          published, non-prerelease releases, so a maintenance release of an
+          older major line leaves the badge — and the /releases/latest
+          redirect — on the newest version. false keeps it off Latest in every
+          case.
         required: false
         type: boolean
         default: true
@@ -435,6 +436,57 @@ jobs:
           echo "Release ${TAG}: ${STATE}"
           echo "state=$STATE" >> "$GITHUB_OUTPUT"
 
+      # GitHub makes a new release Latest unless told otherwise, so a
+      # maintenance release of an older major line (v3.0.6 after v4.1.0) took
+      # the badge and the /releases/latest redirect from the newest version.
+      # Only the highest version becomes Latest. Versions are compared without
+      # a leading "v", because repositories changed their tag style over time
+      # and 4.0.0 must still outrank v3.0.6. The same step runs in release.yml;
+      # Build/Scripts/check-release-latest.sh runs both and fails if they
+      # drift apart.
+      - name: Decide whether this release becomes Latest
+        id: latest
+        if: steps.state.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          MAKE_LATEST: ${{ inputs.make-latest }}
+        run: |
+          set -euo pipefail
+          decide() { # true|false, message
+            echo "latest=$1" >> "$GITHUB_OUTPUT"
+            echo "$2"
+            exit 0
+          }
+          if [[ "$MAKE_LATEST" != "true" ]]; then
+            decide false "make-latest is false: ${TAG} does not become Latest."
+          fi
+          VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+$'
+          VERSION="${TAG#v}"
+          if ! [[ "$VERSION" =~ $VERSION_RE ]]; then
+            echo "::warning::${TAG} is not a vX.Y.Z or X.Y.Z tag and cannot be compared with the other releases, so it does not become Latest."
+            decide false "Latest stays where it is."
+          fi
+          LIST_DIR="$(mktemp -d)"
+          # A failed listing must not read as "no other releases": that would
+          # make every release Latest, the defect this step exists to prevent.
+          # It does not fail the release either; the badge stays where it is.
+          if ! gh api --paginate "repos/${REPO}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+              > "${LIST_DIR}/tags" 2> "${LIST_DIR}/err"; then
+            echo "::warning::Could not list the releases of ${REPO}, so ${TAG} does not become Latest: $(tr '\n' ' ' < "${LIST_DIR}/err")"
+            decide false "Latest stays where it is."
+          fi
+          # This tag is added explicitly: on the first run its release does
+          # not exist yet, and on a re-run it may still be a draft.
+          HIGHEST="$({ sed 's/^v//' "${LIST_DIR}/tags"; echo "$VERSION"; } | grep -E "$VERSION_RE" | sort -u -V | tail -n 1)"
+          if [[ "$HIGHEST" == "$VERSION" ]]; then
+            decide true "${TAG} is the highest released version: it becomes Latest."
+          fi
+          echo "::notice::${TAG} is lower than the released ${HIGHEST}, so it does not become Latest."
+          decide false "Latest stays on ${HIGHEST}."
+
       - name: Download dist artifact
         if: steps.state.outputs.state != 'published'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -453,7 +505,7 @@ jobs:
         if: steps.state.outputs.state == 'absent'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          make_latest: ${{ inputs.make-latest }}
+          make_latest: ${{ steps.latest.outputs.latest }}
           files: |
             dist/*
           fail_on_unmatched_files: true
@@ -530,7 +582,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           ATTEMPTS: '4'
           STATE: ${{ steps.state.outputs.state }}
-          MAKE_LATEST: ${{ inputs.make-latest }}
+          MAKE_LATEST: ${{ steps.latest.outputs.latest }}
         run: |
           set -euo pipefail
 
@@ -615,9 +667,10 @@ jobs:
 
           if [[ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft')" == "true" ]]; then
             echo "Publishing the completed release."
-            # --latest carries make-latest: without it this path would not
-            # pass the input on, and a backport release could take the Latest
-            # badge from the top major line.
+            # --latest carries the decision of "Decide whether this release
+            # becomes Latest": without it this path would not pass it on, and a
+            # backport release could take the Latest badge from the top major
+            # line.
             gh release edit "$TAG" --repo "$REPO" --draft=false --latest="$MAKE_LATEST"
           fi
 
