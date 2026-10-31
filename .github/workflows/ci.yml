@@ -159,6 +159,13 @@ on:
         description: Database for functional tests (sqlite, mysql, mariadb, postgres)
         type: string
         default: sqlite
+      functional-db-matrix:
+        description: >-
+          JSON array of additional server functional-test cells with exact
+          php, typo3, db and image strings. Empty preserves the original graph.
+          Nonempty requires enabled functional tests with a SQLite primary.
+        type: string
+        default: '[]'
       db-image:
         # Our copy of the Docker official image on GHCR (ci-mirror.yml): same
         # image and tag as Docker Hub's mysql, without the anonymous limits of
@@ -491,6 +498,8 @@ jobs:
       compact-matrix: ${{ steps.compact.outputs.matrix }}
       tooling-php: ${{ steps.compact.outputs.tooling-php }}
       test-timeout: ${{ steps.compact.outputs.test-timeout }}
+      server-matrix: ${{ steps.server.outputs.matrix }}
+      db-count: ${{ steps.server.outputs.count }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -567,6 +576,36 @@ jobs:
             exit 1
           fi
           jq -r '"matrix=\(.matrix|tojson)","tooling-php=\(.tool)","test-timeout=\(.timeout)"' <<< "$plan" >> "$GITHUB_OUTPUT"
+      - name: Build server matrix
+        id: server
+        shell: bash
+        env:
+          FUNCTIONAL_DB_MATRIX: ${{ inputs.functional-db-matrix }}
+          PHP_VERSIONS: ${{ inputs.php-versions }}
+          TYPO3_VERSIONS: ${{ inputs.typo3-versions }}
+          MATRIX_EXCLUDE: ${{ inputs.matrix-exclude }}
+          FUNCTIONAL_DB: ${{ inputs.functional-test-db }}
+          RUN_FUNCTIONAL: ${{ inputs.run-functional-tests }}
+        run: |
+          set -euo pipefail
+          if ! plan=$(jq -cen --argjson rows "$FUNCTIONAL_DB_MATRIX" \
+            --argjson php "$PHP_VERSIONS" --argjson typo3 "$TYPO3_VERSIONS" --argjson exclude "$MATRIX_EXCLUDE" \
+            --arg db "$FUNCTIONAL_DB" --arg run "$RUN_FUNCTIONAL" '
+              if ($rows | type == "array" and length <= 256
+                  and all(.[]; type == "object" and keys == ["db","image","php","typo3"]
+                    and all(.[]; type == "string" and length > 0)
+                    and (.db == "mariadb" or .db == "mysql" or .db == "postgres")
+                    and (.image | test("[\\s\\p{Cc}]") | not))
+                  and length == (unique | length))
+                then . else error("functional-db-matrix needs at most 256 unique php/typo3/db/image rows with safe image strings") end
+              | if ($rows | length) == 0 or ($db == "sqlite" and $run == "true") then .
+                else error("functional-db-matrix requires enabled functional tests with a SQLite primary") end
+              | {count:($rows | length),matrix:(if ($rows | length) == 0
+                  then {php:$php,typo3:$typo3,exclude:$exclude} else {include:$rows} end)}'); then
+            echo '::error::Invalid functional database matrix configuration.'
+            exit 1
+          fi
+          jq -r '"matrix=\(.matrix|tojson)","count=\(.count)"' <<< "$plan" >> "$GITHUB_OUTPUT"
       - id: gate
         shell: bash
         env:
@@ -1600,20 +1639,17 @@ jobs:
   functional-tests:
     needs: preflight
     name: Functional Tests
-    if: ${{ inputs.run-functional-tests && inputs.functional-test-db != 'sqlite' && needs.preflight.outputs.run == 'true' }}
+    if: ${{ inputs.run-functional-tests && (inputs.functional-test-db != 'sqlite' || fromJSON(needs.preflight.outputs.db-count) > 0) && needs.preflight.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.functional-timeout-minutes }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        php: ${{ fromJSON(inputs.php-versions) }}
-        typo3: ${{ fromJSON(inputs.typo3-versions) }}
-        exclude: ${{ fromJSON(inputs.matrix-exclude) }}
+      matrix: ${{ fromJSON(needs.preflight.outputs.server-matrix) }}
     services:
       db:
-        image: ${{ inputs.db-image }}
+        image: ${{ matrix.image || inputs.db-image }}
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: typo3_test
@@ -1628,7 +1664,7 @@ jobs:
         # mysqladmin. With mysqladmin alone, `db-image: mariadb:11.x` never
         # turns healthy and the job dies with "Failed to initialize container".
         options: >-
-          --health-cmd="${{ inputs.functional-test-db == 'postgres' && 'pg_isready -U postgres' || 'mariadb-admin ping --silent || mysqladmin ping --silent' }}"
+          --health-cmd="${{ (matrix.db || inputs.functional-test-db) == 'postgres' && 'pg_isready -U postgres' || 'mariadb-admin ping --silent || mysqladmin ping --silent' }}"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -1713,11 +1749,11 @@ jobs:
           FUNCTIONAL_TEST_COMMAND: ${{ inputs.functional-test-command }}
           UPLOAD_COVERAGE: ${{ inputs.upload-coverage }}
           UPLOAD_TEST_RESULTS: ${{ inputs.upload-test-results }}
-          typo3DatabaseDriver: ${{ inputs.functional-test-db == 'postgres' && 'pdo_pgsql' || 'mysqli' }}
+          typo3DatabaseDriver: ${{ (matrix.db || inputs.functional-test-db) == 'postgres' && 'pdo_pgsql' || 'mysqli' }}
           typo3DatabaseHost: 127.0.0.1
-          typo3DatabasePort: ${{ inputs.functional-test-db == 'postgres' && '5432' || '3306' }}
+          typo3DatabasePort: ${{ (matrix.db || inputs.functional-test-db) == 'postgres' && '5432' || '3306' }}
           typo3DatabaseName: typo3_test
-          typo3DatabaseUsername: ${{ inputs.functional-test-db == 'postgres' && 'postgres' || 'root' }}
+          typo3DatabaseUsername: ${{ (matrix.db || inputs.functional-test-db) == 'postgres' && 'postgres' || 'root' }}
           typo3DatabasePassword: root
           PATH_COVERAGE: ${{ inputs.upload-coverage && inputs.coverage-tool == 'xdebug' && inputs.path-coverage }}
         run: |
@@ -2421,8 +2457,43 @@ jobs:
             echo '::error::CI gate could not determine the requested execution mode.'
             exit 1
           fi
-          if [[ "$compact" == true ]]; then
+          if ! db_count=$(jq -er '."functional-db-matrix" | fromjson
+            | if type == "array" then length else error("invalid database declaration") end' <<< "$INPUTS"); then
+            echo '::error::CI gate could not parse the functional database declaration.'
+            exit 1
+          fi
+          if [[ "$db_count" -gt 0 ]]; then
             if ! jq -e --argjson inputs "$INPUTS" '
+              ($inputs."functional-db-matrix" | fromjson) as $rows
+              | if ($rows | length <= 256
+                  and all(.[]; type == "object" and keys == ["db","image","php","typo3"]
+                    and all(.[]; type == "string" and length > 0)
+                    and (.db == "mariadb" or .db == "mysql" or .db == "postgres")
+                    and (.image | test("[\\s\\p{Cc}]") | not))
+                  and length == (unique | length))
+                  and $inputs."run-functional-tests" and $inputs."functional-test-db" == "sqlite"
+                then . else error("CI gate: invalid functional database declaration") end
+              | reduce ["preflight","lint","cgl","phpstan","phpstan-unpinned","rector","fractor","repo-checks","unit-tests","acceptance-tests","functional-tests","functional-tests-sqlite","lowest-deps","detect-docs","docs","compact-quality","compact-tests"][] as $name
+                  (.; if has($name) then . else error("CI gate: missing expected family " + $name) end)
+              | if .preflight.result == "success"
+                  and .preflight.outputs."db-count" == ($rows | length | tostring)
+                  and (.preflight.outputs."server-matrix" | fromjson) == {include:$rows}
+                then . else error("CI gate: missing or inconsistent functional database plan") end
+              | if .preflight.outputs.run == "true" then
+                  if ."functional-tests".result == "success" then .
+                  else error("CI gate: every enabled server functional row must succeed") end
+                elif .preflight.outputs.run == "false" then
+                  if all(to_entries[] | select(.key != "preflight"); .value.result == "skipped") then .
+                  else error("CI gate: reused database execution must be explicitly skipped with every other family") end
+                else error("CI gate: missing or invalid database execution decision") end
+              | true
+            ' <<< "$RESULTS" > /dev/null; then
+              echo '::error::Functional database matrix did not satisfy its complete expected contract.'
+              exit 1
+            fi
+          fi
+          if [[ "$compact" == true ]]; then
+            if ! jq -e --argjson inputs "$INPUTS" --argjson db_count "$db_count" '
               def result($name; $expected):
                 if .[$name].result == $expected then .
                 else error("CI gate: " + $name + " expected " + $expected + ", got " + (.[$name].result // "missing")) end;
@@ -2436,7 +2507,8 @@ jobs:
                   else error("CI gate: deduplicated or path-gated work unexpectedly ran") end
                 elif .preflight.outputs.run == "true" then
                   result("compact-quality"; "success") | result("compact-tests"; "success")
-                  | reduce ["lint","cgl","rector","repo-checks","unit-tests","functional-tests","functional-tests-sqlite","detect-docs"][] as $name (.; result($name; "skipped"))
+                  | reduce ["lint","cgl","rector","repo-checks","unit-tests","functional-tests-sqlite","detect-docs"][] as $name (.; result($name; "skipped"))
+                  | enabled("functional-tests"; $db_count > 0)
                   | enabled("phpstan"; $inputs."run-phpstan")
                   | enabled("phpstan-unpinned"; ($inputs."run-phpstan" and $inputs."run-phpstan-unpinned"))
                   | enabled("fractor"; $inputs."run-fractor")

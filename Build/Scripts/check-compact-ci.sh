@@ -351,6 +351,7 @@ assert_status 0 'only disabled quality commands may skip' env RUN_CGL=false RUN_
 export INPUTS='{"compact-jobs":true,"run-lint":true,"run-cgl":true,"run-phpstan":true,"run-phpstan-unpinned":true,"run-rector":true,"run-fractor":false,"run-repo-checks":true,"run-unit-tests":true,"run-functional-tests":true,"run-acceptance-tests":false,"run-docs":true,"lowest-deps":false,"pin-packages":""}'
 export RESULTS='{"preflight":{"result":"success","outputs":{"run":"true"}},"lint":{"result":"skipped"},"cgl":{"result":"skipped"},"phpstan":{"result":"success"},"phpstan-unpinned":{"result":"success"},"rector":{"result":"skipped"},"fractor":{"result":"skipped"},"repo-checks":{"result":"skipped"},"unit-tests":{"result":"skipped"},"acceptance-tests":{"result":"skipped"},"functional-tests":{"result":"skipped"},"functional-tests-sqlite":{"result":"skipped"},"lowest-deps":{"result":"skipped"},"detect-docs":{"result":"skipped"},"compact-quality":{"result":"success","outputs":{"docs-present":"true"}},"compact-tests":{"result":"success"},"docs":{"result":"success"}}'
 BASE_RESULTS="$RESULTS"
+INPUTS="$(jq '. + {"functional-db-matrix":"[]"}' <<< "$INPUTS")"
 assert_status 0 'the complete compact workflow passes the stable gate' bash -eo pipefail "$TMP/gate.sh"
 for job in preflight compact-quality compact-tests phpstan phpstan-unpinned docs; do
     for result in failure cancelled skipped ''; do
@@ -371,10 +372,11 @@ assert_status 0 'the existing explicit dedup skip starts no compact work' env RE
 assert_status 1 'dedup does not allow a missing family' env RESULTS="$(jq 'del(."compact-tests")' <<< "$DEDUP_RESULTS")" bash -eo pipefail "$TMP/gate.sh"
 assert_status 1 'dedup cannot hide an unexpected execution' env RESULTS="$(jq '."compact-tests".result="success"' <<< "$DEDUP_RESULTS")" bash -eo pipefail "$TMP/gate.sh"
 STANDARD_RESULTS="$(jq 'with_entries(.value.result="success") | ."compact-quality".result="skipped" | ."compact-tests".result="skipped"' <<< "$BASE_RESULTS")"
-assert_status 0 'the default legacy graph retains its successful verdict' env INPUTS='{"compact-jobs":false}' RESULTS="$STANDARD_RESULTS" bash -eo pipefail "$TMP/gate.sh"
-assert_status 1 'default mode still blocks a cancelled old family' env INPUTS='{"compact-jobs":false}' RESULTS="$(jq '."unit-tests".result="cancelled"' <<< "$STANDARD_RESULTS")" bash -eo pipefail "$TMP/gate.sh"
+assert_status 0 'the default legacy graph retains its successful verdict' env INPUTS='{"compact-jobs":false,"functional-db-matrix":"[]"}' RESULTS="$STANDARD_RESULTS" bash -eo pipefail "$TMP/gate.sh"
+assert_status 1 'default mode still blocks a cancelled old family' env INPUTS='{"compact-jobs":false,"functional-db-matrix":"[]"}' RESULTS="$(jq '."unit-tests".result="cancelled"' <<< "$STANDARD_RESULTS")" bash -eo pipefail "$TMP/gate.sh"
 
 bash "$SCRIPT_DIR/check-codecov-collection.sh" "$WORKFLOW"
 pass 'pinned Codecov arguments and real collection preserve report membership'
 
 printf 'Compact CI: %s checks passed.\n' "$CASES"
+python3 "$SCRIPT_DIR/check-functional-db-matrix.py" "$WORKFLOW"

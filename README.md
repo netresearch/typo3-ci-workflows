@@ -222,6 +222,7 @@ jobs:
 | `run-functional-tests` | boolean | `false` | Run PHPUnit functional tests |
 | `run-acceptance-tests` | boolean | `false` | Run PHPUnit acceptance tests |
 | `functional-test-db` | string | `sqlite` | Database: `sqlite`, `mysql`, `mariadb`, `postgres` |
+| `functional-db-matrix` | string | `'[]'` | Additional explicit server functional cells `{php,typo3,db,image}`, up to 256 unique rows. Nonempty requires enabled functional tests with a SQLite primary. Empty preserves the original matrix. |
 | `db-image` | string | `ghcr.io/netresearch/ci-mirror/mysql:9.6` | Docker image for database service. The default comes from our [mirror](#ci-image-mirror) of the Docker official images on GHCR. A bare name such as `mariadb:11.4` pulls anonymously from Docker Hub, whose pull limit can fail the job before a test runs |
 | `upload-coverage` | boolean | `false` | Upload coverage to Codecov, under the flags `unit`, `functional` and `acceptance`. Custom `*-test-command` overrides run unchanged and must write `coverage-unit.xml` / `coverage-functional.xml` / `coverage-acceptance.xml` themselves — the upload uses `fail_ci_if_error: false`, so a missing report passes silently. |
 | `functional-coverage-php-versions` | string | `''` | Compact mode only: JSON array of retained PHP versions that collect functional coverage across their TYPO3 cells. Empty inherits `upload-coverage`; `[]` disables functional coverage while the full suite still runs. A nonempty array requires `upload-coverage: true`. Unit coverage is unchanged. |
@@ -285,6 +286,35 @@ while global coverage is disabled fail preflight before test-matrix allocation.
 Custom commands run unchanged and must implement the declared selection and
 their own content checks; a nonempty report alone does not establish positive
 covered statements.
+
+### Additional server functional tests
+
+An enabled SQLite primary can add server functional cells to the same CI call:
+
+```yaml
+      run-functional-tests: true
+      functional-test-db: sqlite
+      functional-db-matrix: >-
+        [{"php":"8.5","typo3":"^14.3","db":"mariadb","image":"ghcr.io/netresearch/ci-mirror/mariadb:10.11"},
+         {"php":"8.5","typo3":"^14.3","db":"mysql","image":"ghcr.io/netresearch/ci-mirror/mysql:8.0"},
+         {"php":"8.5","typo3":"^14.3","db":"postgres","image":"ghcr.io/netresearch/ci-mirror/postgres:16-alpine"}]
+```
+
+Rows specify complete cells and create no PHP/TYPO3 cross product. They run in
+parallel with the primary checks, using the existing server job, isolated
+services, functional command, timeout and global coverage/JUnit settings.
+Every row must succeed before `All CI checks` succeeds. Explicit whole-workflow
+reuse may skip the rows only when every execution family is skipped; missing
+or inconsistent planning/results fail. Malformed, duplicate, incomplete or
+unknown-field rows and image values containing whitespace/control characters
+fail preflight. Rows cannot provide commands, credentials or service options.
+
+The default `[]`, including whitespace-formatted empty arrays, keeps existing
+server-primary callers' PHP/TYPO3/exclusion matrix and check names. Default
+callers need no change. This option also works without compact mode. Local
+planner, command, verdict and mutation probes run inside the existing compact
+fixture command; real database/test inventories still require native consumer
+qualification.
 
 For a four-PHP by two-TYPO3 consumer with CGL, Rector, repo checks, unit, functional and docs enabled, the graph uses 21 runners rather than 36: preflight, eight PHPStan cells, the unpinned analysis, eight combined test cells, quality, docs and the stable `ci / All CI checks` gate. This is a job-count reduction, not a measured speed claim. Serial suites can lengthen a cell when capacity is free. Compare test/report inventories, runner occupation and elapsed time under comparable load before adopting it.
 
