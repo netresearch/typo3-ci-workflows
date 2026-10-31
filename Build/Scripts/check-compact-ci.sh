@@ -6,6 +6,18 @@
 # itself rejects network access and uploads. Prepared inputs support offline use.
 set -euo pipefail
 
+resolve_codecov_fixture_resources() {
+    local resource
+    for resource in CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR; do
+        if [[ -n "${!resource:-}" ]]; then
+            # Keep venv interpreter symlinks within their environment path.
+            printf -v "$resource" '%s' "$(realpath --no-symlinks -- "${!resource}")"
+            export "${resource?}"
+        fi
+    done
+}
+resolve_codecov_fixture_resources
+
 WORKFLOW="$(realpath "${1:-.github/workflows/ci.yml}")"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
@@ -35,6 +47,27 @@ assert_status() {
     fi
     pass "$name"
 }
+
+mkdir -p "$TMP/prepared-env/bin" "$TMP/relative-caller/action"
+touch "$TMP/prepared-env/bin/python"
+ln -s "$TMP/prepared-env" "$TMP/relative-caller/.venv"
+if (
+    cd "$TMP/relative-caller"
+    export CODECOV_FIXTURE_PYTHON=.venv/bin/python CODECOV_FIXTURE_ACTION_DIR=action
+    resolve_codecov_fixture_resources
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]]
+    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]]
+    resolve_codecov_fixture_resources
+    [[ "$CODECOV_FIXTURE_PYTHON" == "$TMP/relative-caller/.venv/bin/python" ]]
+    [[ "$CODECOV_FIXTURE_ACTION_DIR" == "$TMP/relative-caller/action" ]]
+    unset CODECOV_FIXTURE_PYTHON CODECOV_FIXTURE_ACTION_DIR
+    resolve_codecov_fixture_resources
+    [[ ! -v CODECOV_FIXTURE_PYTHON && ! -v CODECOV_FIXTURE_ACTION_DIR ]]
+); then
+    pass 'prepared paths preserve relative, absolute, venv-symlink and unset behavior'
+else
+    fail 'prepared resource paths changed meaning before the cwd change'
+fi
 
 assert_yaml '.on.workflow_call.inputs["compact-jobs"].default == false' 'compact execution is opt-in'
 assert_yaml '.on.workflow_call.inputs["upload-docs-artifact"].default == false' 'docs artifact remains opt-in'
