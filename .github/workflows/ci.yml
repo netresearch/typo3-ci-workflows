@@ -2462,8 +2462,7 @@ jobs:
             echo '::error::CI gate could not parse the functional database declaration.'
             exit 1
           fi
-          if [[ "$db_count" -gt 0 ]]; then
-            if ! jq -e --argjson inputs "$INPUTS" '
+          if [[ "$db_count" -gt 0 ]] && ! jq -e --argjson inputs "$INPUTS" '
               ($inputs."functional-db-matrix" | fromjson) as $rows
               | if ($rows | length <= 256
                   and all(.[]; type == "object" and keys == ["db","image","php","typo3"]
@@ -2487,10 +2486,9 @@ jobs:
                   else error("CI gate: reused database execution must be explicitly skipped with every other family") end
                 else error("CI gate: missing or invalid database execution decision") end
               | true
-            ' <<< "$RESULTS" > /dev/null; then
-              echo '::error::Functional database matrix did not satisfy its complete expected contract.'
-              exit 1
-            fi
+          ' <<< "$RESULTS" > /dev/null; then
+            echo '::error::Functional database matrix did not satisfy its complete expected contract.'
+            exit 1
           fi
           if [[ "$compact" == true ]] && ! jq -e --argjson inputs "$INPUTS" --argjson db_count "$db_count" '
               def result($name; $expected):
