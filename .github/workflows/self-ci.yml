@@ -456,6 +456,7 @@ jobs:
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
           shellcheck -x Build/Scripts/check-release-publication-status.sh
+          shellcheck -x Build/Scripts/check-release-latest.sh
           shellcheck -x Build/Scripts/check-forbidden-licenses.sh
           shellcheck -x Build/Scripts/check-opengrep-severity.sh
           shellcheck -x Build/Scripts/check-opengrep-exec-use.sh
@@ -551,6 +552,17 @@ jobs:
         # upload assets to a published (immutable) release, and it must
         # rewrite the publication status section instead of adding a second.
         run: bash Build/Scripts/check-release-publication-status.sh .github/workflows/release-typo3-extension.yml
+
+      - name: Check only the highest version becomes the Latest release
+        # GitHub made every new release Latest, so a maintenance release of an
+        # older major line took the badge from the newest version. This runs
+        # the decision step of both release workflows against fixture release
+        # lists, fails if the two copies differ, and checks that both release
+        # paths read the decision.
+        run: >-
+          bash Build/Scripts/check-release-latest.sh
+          .github/workflows/release-typo3-extension.yml
+          .github/workflows/release.yml
 
       - name: Check the licence audit refuses SSPL and BUSL
         # The default pattern `"(SSPL|BSL)"` matched only the bare strings, so

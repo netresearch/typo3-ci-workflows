@@ -745,28 +745,17 @@ jobs:
 | `package-name` | string | **yes** | - | Composer package name (e.g., `netresearch/contexts`) |
 | `include-sbom` | boolean | no | `true` | Include SPDX and CycloneDX SBOMs |
 | `sign-artifacts` | boolean | no | `true` | Sign artifacts with Cosign keyless signing |
-| `make-latest` | boolean | no | `true` | Mark the release as the repository's "Latest". Set `false` on backport branches — see [Backport releases and the Latest badge](#backport-releases-and-the-latest-badge) |
+| `make-latest` | boolean | no | `true` | Let the release become the repository's "Latest" when its version is the highest released one; `false` keeps it off Latest in every case — see [Backport releases and the Latest badge](#backport-releases-and-the-latest-badge) |
 
 ### Backport releases and the Latest badge
 
-GitHub's release API defaults `make_latest` to `true`, so a release cut from a maintenance branch takes the "Latest" badge and the `/releases/latest` redirect away from the newest version — `v2.0.12` off the `TYPO3-12` line displacing `v4.0.0`. Composer resolution is unaffected (it is constraint- and tag-based), the repository landing page is not.
+GitHub's release API makes every new release "Latest" unless told otherwise, so a release cut from a maintenance branch took the badge and the `/releases/latest` redirect away from the newest version — `v3.0.6` off the `TYPO3_13` line displacing `v4.1.0`. Composer resolution is unaffected (it is constraint- and tag-based), the repository landing page is not.
 
-Set `make-latest: false` in the release caller on every branch that is not the top major line. `release-typo3-extension.yml` takes the same input.
+`release.yml` and `release-typo3-extension.yml` therefore compare the pushed tag with every published, non-prerelease release of the repository and make it Latest only when its version is the highest. A leading `v` is ignored on both sides, so a repository that changed its tag style compares `4.0.0` and `v3.0.6` correctly. Drafts, prereleases and release tags that are not `X.Y.Z` do not count, and a pushed tag that is not `X.Y.Z` (`release.yml` accepts one) does not become Latest. A repository with a single release line is unaffected: each new release is its highest. A backport branch needs no setting.
 
-```yaml
-# .github/workflows/release.yml on branch TYPO3-12
-jobs:
-  release:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/release.yml@main
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    with:
-      archive-prefix: my-extension
-      package-name: vendor/my-extension
-      make-latest: false
-```
+If the releases cannot be listed, the release is still created, without Latest, and the run shows a warning. `make-latest: false` keeps a release off Latest in every case; it is not needed for backports any more, and a caller that already sets it can keep it.
+
+A release that is already published keeps its badge. To move Latest back to the newest version after a wrong badge, use "Set as the latest release" on that release's edit page.
 
 ### TYPO3 extension releases: the release first, then the targets
 
