@@ -45,7 +45,8 @@ name: Crowdin Translations
 # The commit goes to `target-branch` with the default branch as its parent. A
 # later run replaces it only when the content changed, so an approval survives a
 # run with nothing new. The integration keeps opening its own pull request; once
-# the replacement exists, or nothing is left to bring over, that one is closed.
+# the replacement exists, or nothing is left to bring over and no file was held
+# back, that one is closed.
 
 on:
   workflow_call:
