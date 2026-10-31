@@ -1,0 +1,353 @@
+name: Crowdin Translations
+
+# Turns what the Crowdin GitHub integration pushed to its service branch into
+# one signed pull request against the default branch.
+#
+# WHY THIS EXISTS
+# ===============
+# The crowdin.com integration commits through the GitHub connection of the
+# person who set it up, so its commits are unsigned and carry no sign-off, and
+# every one ends in `[ci skip]`. On a repository with a required_signatures
+# ruleset such a pull request can never merge, and the skip marker means its
+# required checks never report either. Measured 2026-10-31: the last three
+# Crowdin pull requests of t3x-nr-textdb and of t3x-rte_ckeditor_image were all
+# closed unmerged or stuck.
+#
+# `crowdin download` is not available: the TYPO3 Crowdin project holds no
+# credential of ours. The service branch is therefore treated as data. It is
+# read, never executed and never written, because the integration owns it.
+#
+# TRIGGER
+# =======
+# Call this from `schedule` and `workflow_dispatch`. `on: push` to the service
+# branch does not work: GitHub drops the push and pull_request events of a head
+# commit carrying `[ci skip]`.
+#
+# HOW THE CONTENT IS BUILT
+# ========================
+# A three-way merge of the service branch into the default branch, not a copy
+# of its files. The service branch forks from an old state of the default
+# branch; copying would undo what happened there since, such as licence headers
+# or a reviewed wording. Where both sides changed the same lines the default
+# branch wins, and the pull request names the file. Only paths matching
+# `translation-paths` are taken, so nothing outside the language files can reach
+# the commit, whatever the service branch contains.
+#
+# HOW THE COMMIT IS MADE
+# ======================
+# Through the Git data API with a GitHub App token and no author: GitHub signs
+# such a commit, and a commit or pull request made with GITHUB_TOKEN starts no
+# workflows, so the required checks would never report on it. The App needs
+# Contents and Pull requests write access. createCommitOnBranch would sign too,
+# but it can only append, so replacing the commit would first have to reset an
+# open pull request's branch to the default branch.
+#
+# The commit goes to `target-branch` with the default branch as its parent. A
+# later run replaces it only when the content changed, so an approval survives a
+# run with nothing new. The integration keeps opening its own pull request; once
+# the replacement exists, or nothing is left to bring over, that one is closed.
+
+on:
+  workflow_call:
+    inputs:
+      source-branch:
+        description: 'Service branch the Crowdin integration pushes to. A repository without it is left alone.'
+        required: false
+        type: string
+        default: 'l10n_main'
+      target-branch:
+        description: 'Branch the signed commit goes to, replaced on every content change'
+        required: false
+        type: string
+        default: 'crowdin/translations'
+      translation-paths:
+        description: >-
+          Python regular expression a path must match in full to be taken from
+          the service branch. The default excludes `t3`, Crowdin's in-context
+          pseudo language.
+        required: false
+        type: string
+        default: '(Resources/Private/Language|Configuration/Sets/[^/]+)/(?!t3\.)[a-z]{2,3}(_[A-Za-z]+)?\.[^/]+\.xlf'
+    secrets:
+      app-id:
+        description: 'ID of the GitHub App that creates the commit and the pull request'
+        required: true
+      app-private-key:
+        description: 'Private key of that GitHub App'
+        required: true
+
+# CALLER REQUIREMENTS
+# ===================
+# When calling this reusable workflow, the caller's job-level `permissions:`
+# block MUST grant at least this set, otherwise the run fails with
+# `startup_failure` before any job executes. Every write goes through the App
+# token, so GITHUB_TOKEN stays read-only.
+#
+#   jobs:
+#     translations:
+#       uses: netresearch/typo3-ci-workflows/.github/workflows/crowdin-translations.yml@main
+#       permissions:
+#         contents: read
+#       secrets:
+#         app-id: ${{ secrets.PROJECT_APP_ID }}
+#         app-private-key: ${{ secrets.PROJECT_APP_PRIVATE_KEY }}
+permissions: {}
+
+jobs:
+  translations:
+    name: Signed translations pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history of every branch: the merge needs the merge base,
+          # and the Merge step reads the source and target branches.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge
+        id: merge
+        shell: bash
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_BRANCH: ${{ inputs.source-branch }}
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+          TRANSLATION_PATHS: ${{ inputs.translation-paths }}
+          CHANGES_FILE: ${{ runner.temp }}/crowdin-changes.json
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess, sys
+          import xml.etree.ElementTree as ET
+
+          base   = 'origin/' + os.environ['BASE_BRANCH']
+          source = 'origin/' + os.environ['SOURCE_BRANCH']
+          target = 'origin/' + os.environ['TARGET_BRANCH']
+          paths  = re.compile(os.environ['TRANSLATION_PATHS'])
+
+          def git(*args, allowed=(0,)):
+              run = subprocess.run(['git', *args], capture_output=True)
+              if run.returncode not in allowed:
+                  print(f'::error::git {" ".join(args)}: {run.stderr.decode()}')
+                  sys.exit(1)
+              return run
+
+          def text(*args):
+              return git(*args).stdout.decode().strip()
+
+          def exists(ref):
+              return subprocess.run(
+                  ['git', 'rev-parse', '--verify', '--quiet', ref + '^{commit}'],
+                  capture_output=True,
+              ).returncode == 0
+
+          def output(**values):
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+                  for key, value in values.items():
+                      fh.write(f'{key}={value}\n')
+
+          def merge(*strategy):
+              # Exit 1 is the documented "merged with conflicts": the first
+              # line is the tree, then the conflicted paths up to a blank line.
+              run = git('merge-tree', '--write-tree', '--name-only', *strategy, base, source, allowed=(0, 1))
+              lines = run.stdout.decode().split('\n')
+              conflicted = []
+              for line in lines[1:]:
+                  if not line:
+                      break
+                  conflicted.append(line)
+              return lines[0], conflicted
+
+          def defect(tree, path):
+              # A line merge knows nothing of XLIFF: both sides adding one unit
+              # at different places yields a file that parses and holds it twice.
+              try:
+                  root = ET.fromstring(git('cat-file', 'blob', f'{tree}:{path}').stdout)
+              except ET.ParseError as error:
+                  return f'not well-formed XML: {error}'
+              ids = [e.get('id') for e in root.iter() if e.tag.rsplit('}', 1)[-1] == 'trans-unit']
+              twice = sorted({i for i in ids if ids.count(i) > 1})
+              return f'duplicate trans-unit id: {", ".join(twice)}' if twice else None
+
+          if not exists(source):
+              print(f'::notice::{source} does not exist, nothing to do')
+              output(**{'has-source': 'false'})
+              sys.exit(0)
+
+          overlapped = merge()[1]
+          tree, unresolved = merge('-X', 'ours')
+
+          files, held = [], {path: 'cannot be merged' for path in unresolved}
+          for row in text('diff', '--no-renames', '--name-status', base, tree).splitlines():
+              status, path = row.split('\t', 1)
+              if status not in ('A', 'M') or not paths.fullmatch(path):
+                  print(f'Not taken: {status} {path}')
+              elif path not in held:
+                  reason = defect(tree, path)
+                  if reason:
+                      held[path] = reason
+                  else:
+                      files.append(path)
+
+          up_to_date = False
+          if exists(target):
+              fork = text('merge-base', base, target)
+              on_branch = text('diff', '--name-only', fork, target).splitlines()
+              up_to_date = sorted(on_branch) == sorted(files) and all(
+                  text('rev-parse', f'{target}:{path}') == text('rev-parse', f'{tree}:{path}')
+                  for path in files
+              )
+
+          for path, reason in held.items():
+              print(f'::warning::{path} keeps the {base} version: {reason}')
+
+          pathlib.Path(os.environ['CHANGES_FILE']).write_text(json.dumps({
+              'tree': tree,
+              'source': text('rev-parse', source),
+              'files': files,
+              'overlapped': sorted(set(overlapped) & set(files)),
+              'held': held,
+          }), encoding='utf-8')
+
+          print(f'{len(files)} file(s) to bring over, {len(held)} held back')
+          output(**{
+              'has-source': 'true',
+              'changed': str(bool(files)).lower(),
+              'up-to-date': str(up_to_date).lower(),
+              'target-exists': str(exists(target)).lower(),
+              'base-oid': text('rev-parse', base),
+          })
+          PY
+
+      - name: Mint App token
+        id: app-token
+        if: steps.merge.outputs.has-source == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.app-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Publish
+        if: steps.merge.outputs.has-source == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          REPO: ${{ github.repository }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_BRANCH: ${{ inputs.source-branch }}
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+          CHANGES_FILE: ${{ runner.temp }}/crowdin-changes.json
+          TREE_FILE: ${{ runner.temp }}/crowdin-tree.json
+          MESSAGE_FILE: ${{ runner.temp }}/crowdin-message.txt
+          BODY_FILE: ${{ runner.temp }}/crowdin-pr.md
+          CHANGED: ${{ steps.merge.outputs.changed }}
+          UP_TO_DATE: ${{ steps.merge.outputs.up-to-date }}
+          TARGET_EXISTS: ${{ steps.merge.outputs.target-exists }}
+          BASE_OID: ${{ steps.merge.outputs.base-oid }}
+        run: |
+          set -euo pipefail
+
+          title='chore(l10n): update translations from Crowdin'
+
+          if [[ "$CHANGED" == true ]]; then
+            python3 - <<'PY'
+          import json, os, pathlib
+
+          changes = json.loads(pathlib.Path(os.environ['CHANGES_FILE']).read_text(encoding='utf-8'))
+          lines = [
+              f"Merging this brings {len(changes['files'])} translation file(s) from Crowdin to "
+              f"`{os.environ['BASE_BRANCH']}`. The content is a three-way merge of "
+              f"`{os.environ['SOURCE_BRANCH']}` at {changes['source']}, in one commit signed by GitHub.",
+              '',
+              'Translations are edited in Crowdin. Where a later export changes lines that were '
+              'edited on the default branch, the default branch\'s lines are kept.',
+          ]
+          if changes['overlapped']:
+              lines += ['', 'Both sides changed lines in these files, and the default branch\'s lines were kept:', '']
+              lines += [f'- `{path}`' for path in changes['overlapped']]
+          if changes['held']:
+              lines += ['', 'Not brought over, the default branch\'s version stays:', '']
+              lines += [f'- `{path}`: {reason}' for path, reason in changes['held'].items()]
+          pathlib.Path(os.environ['BODY_FILE']).write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
+            if [[ "$UP_TO_DATE" != true ]]; then
+              # The trailer has to name the author GitHub records for this
+              # token, or a sign-off check reads it as somebody else's.
+              bot="${APP_SLUG}[bot]"
+              bot_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq '.id')
+              export SIGN_OFF="$bot <$bot_id+$bot@users.noreply.github.com>"
+
+              python3 - <<'PY'
+          import json, os, pathlib, subprocess
+
+          changes = json.loads(pathlib.Path(os.environ['CHANGES_FILE']).read_text(encoding='utf-8'))
+
+          def git(*args):
+              return subprocess.run(['git', *args], capture_output=True, check=True).stdout.decode('utf-8')
+
+          def contents(path):
+              return git('cat-file', 'blob', f"{changes['tree']}:{path}")
+
+          pathlib.Path(os.environ['TREE_FILE']).write_text(json.dumps({
+              'base_tree': git('rev-parse', os.environ['BASE_OID'] + '^{tree}').strip(),
+              'tree': [
+                  {'path': path, 'mode': '100644', 'type': 'blob', 'content': contents(path)}
+                  for path in changes['files']
+              ],
+          }), encoding='utf-8')
+          pathlib.Path(os.environ['MESSAGE_FILE']).write_text(
+              'chore(l10n): update translations from Crowdin\n\n'
+              f"Merged from {os.environ['SOURCE_BRANCH']} at {changes['source']}.\n\n"
+              f"Signed-off-by: {os.environ['SIGN_OFF']}\n",
+              encoding='utf-8',
+          )
+          PY
+
+              tree=$(gh api "repos/$REPO/git/trees" --input "$TREE_FILE" --jq '.sha')
+              commit=$(jq -n --rawfile message "$MESSAGE_FILE" --arg tree "$tree" --arg parent "$BASE_OID" \
+                '{message: $message, tree: $tree, parents: [$parent]}' \
+                | gh api "repos/$REPO/git/commits" --input - --jq '[.sha, .verification.verified, .verification.reason] | @tsv')
+              read -r oid verified reason <<<"$commit"
+              # The branch is touched only after this: an unsigned commit is
+              # exactly what the ruleset refuses, so it must not reach a branch.
+              if [[ "$verified" != true ]]; then
+                echo "::error::GitHub did not sign commit $oid: $reason"
+                exit 1
+              fi
+
+              if [[ "$TARGET_EXISTS" == true ]]; then
+                gh api -X PATCH "repos/$REPO/git/refs/heads/$TARGET_BRANCH" -f sha="$oid" -F force=true >/dev/null
+              else
+                gh api "repos/$REPO/git/refs" -f ref="refs/heads/$TARGET_BRANCH" -f sha="$oid" >/dev/null
+              fi
+              echo "Committed $oid to $TARGET_BRANCH"
+            fi
+
+            pr=$(gh pr list -R "$REPO" --head "$TARGET_BRANCH" --state open --json number --jq '.[0].number // empty')
+            if [[ -z "$pr" ]]; then
+              gh pr create -R "$REPO" --base "$BASE_BRANCH" --head "$TARGET_BRANCH" --title "$title" --body-file "$BODY_FILE"
+            elif [[ "$UP_TO_DATE" != true ]]; then
+              gh pr edit "$pr" -R "$REPO" --body-file "$BODY_FILE"
+            fi
+          fi
+
+          # Only now: the content is in a mergeable pull request or already on
+          # the default branch, so nothing is lost by closing the unsigned one.
+          note='Closed by the crowdin-translations workflow. These commits are unsigned and cannot merge here; the content comes in through a signed pull request from `'"$TARGET_BRANCH"'`.'
+          gh pr list -R "$REPO" --head "$SOURCE_BRANCH" --base "$BASE_BRANCH" --state open --json number,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | .number' \
+            | while read -r number; do
+                gh pr close "$number" -R "$REPO" --comment "$note"
+              done
