@@ -1001,7 +1001,7 @@ Trigger it on a schedule. `on: push` to the service branch never fires, because 
 
 The content is a three-way merge of the service branch into the default branch, so licence headers and reviewed wording on the default branch survive. Where both sides changed the same lines, the default branch wins and the pull request names the file. A file that cannot be merged, is not well-formed XML or holds a `trans-unit` id twice keeps its default-branch version and is named too.
 
-The commit is created through the Git data API with the App token. GitHub signs it, its trailer carries the App's sign-off, and unlike a commit made with `GITHUB_TOKEN` it starts the required checks. The run fails before touching a branch if GitHub reports the commit as unverified. Once that pull request exists, or nothing is left to bring over, the workflow closes the integration's unsigned pull request. The integration opens a new one on its next sync, and the next run closes that as well. A person still reviews and merges the signed pull request.
+The commit is created through the Git data API with the App token. GitHub signs it, its trailer carries the App's sign-off, and unlike a commit made with `GITHUB_TOKEN` it starts the required checks. The run fails before touching a branch if GitHub reports the commit as unverified. Once that pull request exists, or nothing is left to bring over and no file was held back, the workflow closes the integration's unsigned pull request. The integration opens a new one on its next sync, and the next run closes that as well. A person still reviews and merges the signed pull request.
 
 ## Publish to TER
 
