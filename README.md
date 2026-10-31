@@ -303,6 +303,9 @@ An enabled SQLite primary can add server functional cells to the same CI call:
 Rows specify complete cells and create no PHP/TYPO3 cross product. They run in
 parallel with the primary checks, using the existing server job, isolated
 services, functional command, timeout and global coverage/JUnit settings.
+For these server rows, `upload-coverage` applies to every row. The
+`functional-coverage-php-versions` selector controls only compact primary cells;
+even an explicit `[]` does not disable server-row coverage when `upload-coverage` is on.
 Every row must succeed before `All CI checks` succeeds. Explicit whole-workflow
 reuse may skip the rows only when every execution family is skipped; missing
 or inconsistent planning/results fail. Malformed, duplicate, incomplete or
