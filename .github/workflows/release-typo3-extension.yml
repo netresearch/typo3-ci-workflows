@@ -487,6 +487,31 @@ jobs:
           echo "::notice::${TAG} is lower than the released ${HIGHEST}, so it does not become Latest."
           decide false "Latest stays on ${HIGHEST}."
 
+      # build-and-sign checked out github.sha, the commit the tag pointed at
+      # when this run started, and a caller's release gate verified that same
+      # commit. A tag moved since then would attach this release, and every
+      # target that follows it, to a commit nobody built or checked.
+      - name: Check the tag still points at the built commit
+        if: steps.state.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          BUILT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          OBJECT="$(gh api "repos/${REPO}/git/ref/tags/${TAG}" --jq '.object.type + " " + .object.sha')"
+          TYPE="${OBJECT%% *}"
+          SHA="${OBJECT#* }"
+          if [[ "$TYPE" == "tag" ]]; then
+            SHA="$(gh api "repos/${REPO}/git/tags/${SHA}" --jq '.object.sha')"
+          fi
+          if [[ "$SHA" != "$BUILT" ]]; then
+            echo "::error::Tag ${TAG} now points at ${SHA}, but this run built ${BUILT}. Move the tag back or push a new one; nothing was published."
+            exit 1
+          fi
+          echo "Tag ${TAG} points at the built commit ${BUILT}."
+
       - name: Download dist artifact
         if: steps.state.outputs.state != 'published'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -689,7 +714,9 @@ jobs:
       contents: read
     uses: netresearch/typo3-ci-workflows/.github/workflows/publish-to-ter.yml@main
     with:
-      ref: ${{ github.ref }}
+      # The built commit, not the tag name: a tag moved after the build would
+      # otherwise put a different revision on TER than on GitHub.
+      ref: ${{ github.sha }}
       # The release exists by now, but its body opens with the installation
       # and verification boilerplate. Hand TER the change list itself.
       release-notes: ${{ needs.build-and-sign.outputs.release-notes }}
