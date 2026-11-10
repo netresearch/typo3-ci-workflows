@@ -449,6 +449,7 @@ jobs:
           shellcheck -x Build/Scripts/check-ci-mirror-list.sh
           shellcheck -x Build/Scripts/check-runner-detection.sh
           shellcheck -x Build/Scripts/check-runner-network-cleanup.sh
+          shellcheck -x Build/Scripts/check-runner-git-mount.sh
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
           shellcheck -x Build/Scripts/check-e2e-provision-probe.sh
@@ -504,6 +505,13 @@ jobs:
         # behind per run until the address pool ran out. This runs the runner
         # end to end against a stand-in docker that records the network calls.
         run: bash Build/Scripts/check-runner-network-cleanup.sh assets/Build/Scripts/runTests.sh
+
+      - name: Check the runner mounts a worktree's git directory
+        # In a worktree `.git` points outside the extension, and the containers
+        # mounted only the extension, so git failed in every one of them. Runs
+        # the runner against a bare-repository worktree and a plain clone with
+        # a stand-in docker that records the mounts.
+        run: bash Build/Scripts/check-runner-git-mount.sh assets/Build/Scripts/runTests.sh
 
       - name: Check that provisioning's TYPO3 config takes effect
         # additional.php shipped as a file that RETURNS an array, and TYPO3
