@@ -233,7 +233,7 @@ jobs:
 | `unit-timeout-minutes` | number | `15` | Job timeout of the unit test job |
 | `functional-timeout-minutes` | number | `30` | Job timeout of the functional test jobs |
 | `acceptance-timeout-minutes` | number | `15` | Job timeout of the acceptance test job |
-| `remove-dev-deps` | string | `'[]'` | JSON array of dev deps to remove for TYPO3 version compat |
+| `remove-dev-deps` | string | `'[]'` | JSON array of dev deps that `composer remove --dev --no-update` drops per cell before the install. `only-for` keeps a dep only on the TYPO3 lines it lists (`"^12\|^13"`, prefix match on the matrix value); `remove-for-php` drops it on the PHP versions it lists (`"8.6"`, exact or minor match on the matrix value), for a dev dep that does not install on a new PHP yet. An entry may carry both; an entry with neither is skipped with a warning. Example: `[{"dep":"saschaegerer/phpstan-typo3","only-for":"^13"},{"dep":"georgringer/news","remove-for-php":"8.6"}]` |
 | `lowest-deps` | boolean | `false` | Run one extra cell with the lowest installable dependencies (`composer update --prefer-lowest --prefer-stable`; with `roave/security-advisories`, the lowest release without a known advisory) on the lowest php/typo3 cell of the matrix. See [Lowest and pinned dependencies](#lowest-and-pinned-dependencies). |
 | `pin-packages` | string | `''` | Space-separated `vendor/package:constraint` pairs applied in that extra cell only (e.g. `guzzlehttp/guzzle:^7.10`). Set alone, it runs the cell with the newest versions of everything else. |
 | `skip-paths` | string | `''` | Newline-separated globs. On `pull_request` only, skip the whole workflow when **every** changed file matches. See [Path gating](#path-gating). |

@@ -271,7 +271,7 @@ on:
 
       # Incompatible dev deps
       remove-dev-deps:
-        description: 'JSON array of dev deps to remove for TYPO3 version compat (e.g. [{"dep":"saschaegerer/phpstan-typo3","only-for":"^13"}])'
+        description: 'JSON array of dev deps to remove per cell. "only-for" keeps the dep only on matching TYPO3 lines; "remove-for-php" removes it on matching PHP versions (e.g. [{"dep":"saschaegerer/phpstan-typo3","only-for":"^13"},{"dep":"georgringer/news","remove-for-php":"8.6"}])'
         type: string
         default: '[]'
 
@@ -892,6 +892,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
+          PHP_VERSION: ${{ matrix.php }}
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -902,19 +903,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -1095,6 +1105,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ steps.cell.outputs.typo3 }}
+          PHP_VERSION: ${{ steps.cell.outputs.php }}
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -1105,19 +1116,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       # No `phpunit/phpunit:<13` here — that omission is the entire point of
@@ -1406,6 +1426,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
+          PHP_VERSION: ${{ matrix.php }}
         run: &ci-remove-dev-deps |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -1416,19 +1437,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -1560,6 +1590,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
+          PHP_VERSION: ${{ matrix.php }}
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -1570,19 +1601,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -1702,6 +1742,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
+          PHP_VERSION: ${{ matrix.php }}
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -1712,19 +1753,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -1854,6 +1904,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
+          PHP_VERSION: ${{ matrix.php }}
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -1864,19 +1915,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       - name: Install TYPO3
@@ -2098,6 +2158,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ steps.cell.outputs.typo3 }}
+          PHP_VERSION: ${{ steps.cell.outputs.php }}
         run: |
           if [[ "$REMOVE_DEV_DEPS" == "[]" ]]; then exit 0; fi
           echo "$REMOVE_DEV_DEPS" | python3 -c "
@@ -2108,19 +2169,28 @@ jobs:
               print(f'::error::Invalid JSON in remove-dev-deps input: {e}')
               sys.exit(1)
           typo3 = os.environ['TYPO3_VERSION']
+          php = os.environ['PHP_VERSION']
           for entry in entries:
               dep = entry.get('dep')
               if not dep:
                   print(f'::error::remove-dev-deps entry missing dep key: {entry}')
                   sys.exit(1)
               only_for = entry.get('only-for', '')
+              remove_for_php = entry.get('remove-for-php', '')
+              if not only_for and not remove_for_php:
+                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for or remove-for-php filter, skipping')
+                  continue
               if only_for:
                   patterns = [p.strip() for p in only_for.split('|')]
                   if not any(typo3.startswith(p) for p in patterns):
                       print(f'Removing {dep} (only compatible with {only_for})')
                       subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
-              else:
-                  print(f'::warning::remove-dev-deps entry for {dep} has no only-for filter, skipping')
+                      continue
+              if remove_for_php:
+                  patterns = [p.strip() for p in remove_for_php.split('|')]
+                  if any(php == p or php.startswith(p + '.') for p in patterns):
+                      print(f'Removing {dep} (not installable on PHP {php})')
+                      subprocess.run(['composer', 'remove', '--dev', '--no-update', dep], check=True)
           "
 
       # The TYPO3 line is required first, as in every cell: without it
@@ -2698,6 +2768,7 @@ jobs:
         env:
           REMOVE_DEV_DEPS: ${{ inputs.remove-dev-deps }}
           TYPO3_VERSION: ${{ matrix.typo3 }}
+          PHP_VERSION: ${{ matrix.php }}
         run: *ci-remove-dev-deps
       - name: Install TYPO3
         id: install
