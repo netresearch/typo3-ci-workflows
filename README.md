@@ -1424,6 +1424,12 @@ It needs the installed package, so it cannot run in the repo-checks job of `ci.y
 
 The exit code is 0 when every file carries the profile, 1 when a flag is missing or not `"true"` (each one is named), and 2 for a file that cannot be read or is not a PHPUnit configuration.
 
+## Infection
+
+`config/infection/infection.json.dist` is the template for mutation testing. Copy it to `infection.json.dist` in the extension root, then adjust the vendor directory in `$schema` if `composer.json` sets another `vendor-dir` than `.Build/vendor`, and the source directories. It runs the `unit` testsuite of `Build/phpunit.xml`, the copy of the PHPUnit template above. It validates against the schema of Infection 0.29.0, the lowest version `composer.json` allows, and of the current release.
+
+Keep one Infection configuration. Infection reads `infection.json5`, `infection.json`, `infection.json5.dist` and `infection.json.dist`, in this order, and uses the first it finds; `runTests.sh -s mutation` follows the same order and names the files it ignores. The template sets no `threads`: `extended-testing.yml` and `runTests.sh` pass `--threads=max`, so Infection uses every CPU of the machine it runs on.
+
 ## Editor and lint templates
 
 Two more templates for files every extension keeps:

@@ -196,6 +196,11 @@ jobs:
         # strict profile must name each flag the templates leave out.
         run: bash Build/Scripts/check-phpunit-config.sh bin/check-phpunit-config
 
+      - name: Check the Infection template against its schema
+        # config/infection/infection.json.dist is copied into extensions, and
+        # Infection rejects a configuration its schema does not allow.
+        run: vendor/bin/validate-json config/infection/infection.json.dist vendor/infection/infection/resources/schema.json
+
       - name: Check the phplint template and its settings check
         # bin/check-phplint-config is what consumers run against their copy of
         # config/phplint/.phplint.yml. The template must pass it.
