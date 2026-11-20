@@ -417,7 +417,7 @@ jobs:
           INFECTION_CONFIG: ${{ inputs.infection-config }}
           UNIT_TESTSUITE: ${{ inputs.unit-testsuite }}
         run: |
-          .Build/bin/infection --threads=4 --no-progress --logger-github \
+          .Build/bin/infection --threads=max --no-progress --logger-github \
             ${INFECTION_CONFIG:+--configuration="${INFECTION_CONFIG}"} \
             --skip-initial-tests --coverage=.Build/logs \
             --test-framework-options="--testsuite='${UNIT_TESTSUITE}'"

@@ -562,4 +562,27 @@ else
     fail "short-option split got '${got}' — a typo would silently become a tool argument"
 fi
 
+# 16. The runner picked infection.json.dist before infection.json5, whereas
+#     Infection reads infection.json5 first. An extension that kept both ran one
+#     file under `-s mutation` and the other under `composer test:mutation`.
+printf 'infection config order\n'
+inf_root="${FIXTURES}/infection-order"
+mkdir -p "${inf_root}"
+printf '{"name":"netresearch/fixture-infection","require":{"php":"^8.2"},"extra":{"typo3/cms":{"extension-key":"fixture"}}}\n' \
+    > "${inf_root}/composer.json"
+printf '{}\n' > "${inf_root}/infection.json.dist"
+got="$(derive "${inf_root}" INFECTION_CONFIG)"
+if [[ "${got}" == "infection.json.dist" ]]; then
+    pass "infection.json.dist alone is found (${got})"
+else
+    fail "infection.json.dist alone got '${got:-<empty>}'"
+fi
+printf '{}\n' > "${inf_root}/infection.json5"
+got="$(derive "${inf_root}" INFECTION_CONFIG)"
+if [[ "${got}" == "infection.json5" ]]; then
+    pass "with both present, infection.json5 wins, as in Infection itself (${got})"
+else
+    fail "with both present got '${got:-<empty>}', Infection itself reads infection.json5"
+fi
+
 exit "${FAILED}"

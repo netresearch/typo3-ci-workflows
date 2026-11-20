@@ -1,0 +1,22 @@
+{
+    "$schema": ".Build/vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": [
+            "Classes"
+        ]
+    },
+    "phpUnit": {
+        "configDir": "Build"
+    },
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--testsuite=unit",
+    "timeout": 30,
+    "tmpDir": ".Build/infection/tmp",
+    "logs": {
+        "text": ".Build/infection/infection.log",
+        "summary": ".Build/infection/summary.log"
+    },
+    "mutators": {
+        "@default": true
+    }
+}

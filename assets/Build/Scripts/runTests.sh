@@ -451,7 +451,10 @@ RECTOR_CONFIG="${RECTOR_CONFIG:-$(detect_config 'rector config' Build/rector/rec
 # rector above; the two are configured side by side and should not need two
 # different layouts to be remembered.
 FRACTOR_CONFIG="${FRACTOR_CONFIG:-$(detect_config 'fractor config' Build/fractor/fractor.php Build/fractor/fractor.php Build/fractor.php fractor.php)}"
-INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infection.json.dist infection.json.dist infection.json infection.json5)}"
+# Infection's own order (json5, json, json5.dist, json.dist): a caller that
+# runs `infection` without --configuration, such as a composer script, then
+# reads the same file as this runner when an extension keeps more than one.
+INFECTION_CONFIG="${INFECTION_CONFIG:-$(detect_config 'infection config' infection.json.dist infection.json5 infection.json infection.json5.dist infection.json.dist)}"
 # php-cs-fixer discovers only .php-cs-fixer.php / .php-cs-fixer.dist.php next to
 # the working directory. Thirteen extensions keep theirs under Build/ and two
 # keep two, so leaving the flag off does not mean "use the extension's rules" — it
@@ -1235,7 +1238,7 @@ case ${TEST_SUITE} in
         SUITE_EXIT_CODE=$?
         ;;
     mutation)
-        COMMAND=(php -d opcache.enable_cli=1 ${BIN_DIR}/infection --configuration=${INFECTION_CONFIG} --threads=4 "$@")
+        COMMAND=(php -d opcache.enable_cli=1 ${BIN_DIR}/infection --configuration=${INFECTION_CONFIG} --threads=max "$@")
         ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name mutation-${SUFFIX} -e XDEBUG_MODE=coverage ${IMAGE_PHP} "${COMMAND[@]}"
         SUITE_EXIT_CODE=$?
         ;;
