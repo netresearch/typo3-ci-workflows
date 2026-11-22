@@ -234,7 +234,7 @@ jobs:
         if: steps.merge.outputs.has-source == 'true'
         uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
-          app-id: ${{ secrets.app-id }}
+          client-id: ${{ secrets.app-id }}
           private-key: ${{ secrets.app-private-key }}
           permission-contents: write
           permission-pull-requests: write
