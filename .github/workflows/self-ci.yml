@@ -463,6 +463,7 @@ jobs:
           shellcheck -x Build/Scripts/check-empty-suite-fails.sh
           shellcheck -x Build/Scripts/check-e2e-provision-config.sh
           shellcheck -x Build/Scripts/check-e2e-provision-probe.sh
+          shellcheck -x Build/Scripts/check-wait-for-abort.sh
           shellcheck -x Build/Scripts/check-php-server-backtrace.sh
           shellcheck -x Build/Scripts/check-lowest-deps-cell.sh
           shellcheck -x Build/Scripts/check-matrix-cell-lock.sh
@@ -537,6 +538,12 @@ jobs:
         # serving yet, failed the setup on a status a later request no longer
         # gave. Stand-in container, no network.
         run: bash Build/Scripts/check-e2e-provision-probe.sh assets/Build/Scripts/e2e-provision.sh
+
+      - name: Check that an unreachable service stops the runner
+        # wait_for signalled the process group of the script. In CI the script
+        # does not lead one, so the signal failed and the suite ran without the
+        # service. Stand-in container, no network.
+        run: bash Build/Scripts/check-wait-for-abort.sh assets/Build/Scripts/runTests.sh
 
       - name: Check that a suite with nothing to run fails
         # The fallback chain used to end in a notice and a green job, which is

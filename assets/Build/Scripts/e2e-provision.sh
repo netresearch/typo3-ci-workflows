@@ -313,8 +313,8 @@ TYPOSCRIPT_EOF
             return 1
         }
 
-    # wait_for aborts the whole run via SIGINT when the port never opens, and
-    # its trap runs clean_up — there is no path past it to handle here. 30s
+    # wait_for exits the whole run when the port never opens, and the EXIT trap
+    # runs clean_up — there is no path past it to handle here. 30s
     # rather than the default 10: MariaDB initialises its data directory first.
     wait_for mariadb-e2e 3306 30
 

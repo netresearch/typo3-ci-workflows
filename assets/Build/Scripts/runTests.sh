@@ -46,7 +46,10 @@ wait_for() {
     "
     ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name wait-for-${SUFFIX} ${XDEBUG_MODE} -e XDEBUG_CONFIG="${XDEBUG_CONFIG}" ${IMAGE_ALPINE} /bin/sh -c "${test_command}"
     if [[ $? -gt 0 ]]; then
-        kill -SIGINT -$$
+        # Not `kill -SIGINT -$$`: it reaches the script only as the leader of a
+        # process group, which a script started by CI or by another script is
+        # not. The EXIT trap cleans up.
+        exit 1
     fi
     return 0
 }
@@ -68,7 +71,7 @@ wait_for_http() {
     "
     ${CONTAINER_BIN} run ${CONTAINER_COMMON_PARAMS} --name wait-for-http-${SUFFIX} ${IMAGE_ALPINE} /bin/sh -c "${test_command}"
     if [[ $? -gt 0 ]]; then
-        kill -SIGINT -$$
+        exit 1
     fi
     return 0
 }
