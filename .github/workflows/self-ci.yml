@@ -273,6 +273,11 @@ jobs:
         # the PHP version, and that an unknown option or value throws.
         run: php -dzend.assertions=1 Build/Scripts/check-rector-options.php
 
+      - name: Check the TYPO3 sets load and their rules run
+        # Rector 2.9.0 removed classes ssch/typo3-rector still uses, and every
+        # consumer's Rector job failed. The smoke test below loads no TYPO3 set.
+        run: php Build/Scripts/check-rector-typo3-sets.php
+
       - name: Smoke test rector boots with the shared config
         run: |
           FIXTURE=$(mktemp -d)

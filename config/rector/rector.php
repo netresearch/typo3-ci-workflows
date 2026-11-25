@@ -80,6 +80,9 @@ use Rector\TypeDeclaration\Rector\Class_\TypedPropertyFromCreateMockAssignRector
 use Ssch\TYPO3Rector\Set\Typo3LevelSetList;
 use Ssch\TYPO3Rector\TYPO313\v4\MigratePluginContentElementAndPluginSubtypesRector;
 
+// On require, not in the closure: an extension may add TYPO3 sets itself.
+require_once __DIR__ . '/removed-classes.php';
+
 /**
  * @param array{tests?: bool, php?: string, typo3?: int} $options
  */
