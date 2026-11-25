@@ -1690,13 +1690,14 @@ Cost: the fixer is linear in file size and mildly superlinear in the number of c
 
 This package requires `captainhook/hook-installer` and allows its Composer plugin. On every `composer install` and `composer update` the plugin installs the Git hooks that a CaptainHook configuration defines. It reads the configuration from `extra.captainhook.config` in your `composer.json`, a path relative to the directory Composer runs in, and falls back to `captainhook.json`.
 
-`config/captainhook/captainhook.json` is a template: a Conventional Commits check on the commit message, lint, CGL and PHPStan before a commit, and unit tests before a push. It calls the Composer scripts `ci:test:php:lint`, `ci:test:php:cgl`, `ci:test:php:phpstan` and `ci:test:php:unit`, so your extension has to define them. Copy the template to `Build/captainhook.json` and point the plugin at it:
+`config/captainhook/captainhook.json` is a template: a Conventional Commits check on the commit message, lint, CGL and PHPStan before a commit, and unit tests before a push. It calls the Composer scripts `ci:test:php:lint`, `ci:test:php:cgl`, `ci:test:php:phpstan` and `ci:test:php:unit`, so your extension has to define them. Copy the template to `Build/captainhook.json` and point the plugin at it. The template's `bootstrap` is relative to the configuration file; change it when `vendor-dir` is not `.Build/vendor`. `only-enabled` keeps the hooks that the template disables from being installed:
 
 ```json
 {
     "extra": {
         "captainhook": {
-            "config": "Build/captainhook.json"
+            "config": "Build/captainhook.json",
+            "only-enabled": true
         }
     }
 }
