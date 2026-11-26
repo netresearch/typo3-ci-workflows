@@ -1703,6 +1703,8 @@ This package requires `captainhook/hook-installer` and allows its Composer plugi
 }
 ```
 
+Hooks that are already installed keep the `--bootstrap` path they were written with, because the plugin skips existing hooks. After changing `bootstrap`, reinstall them: `.Build/bin/captainhook install --force --only-enabled --configuration=Build/captainhook.json`.
+
 The plugin installs nothing, and prints a notice instead, in these cases:
 
 | Situation | Notice |
