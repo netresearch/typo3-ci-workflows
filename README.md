@@ -139,8 +139,6 @@ gh api repos/netresearch/REPO/hooks --method POST \
 | [`release.yml`](#release) | Enterprise release pipeline (archive, SBOM, cosign, attestation) | tag push |
 | [`release-gate.yml`](#release-gate) | Block a release until named workflows succeeded for the released commit | `workflow_call` (first job of a release workflow) |
 | [`publish-to-ter.yml`](#publish-to-ter) | Publish extension to TYPO3 TER | tag push |
-| [`changelog-assemble.yml`](#changelog-fragments) | Assemble changelog fragments into a released section | release prep |
-| [`changelog-check.yml`](#changelog-fragments) | Require a changelog fragment on a pull request | PR |
 
 ### Repository Hygiene
 
@@ -824,13 +822,12 @@ Every named workflow must run for the released commit: for a tag on `main`, a wo
 
 ## Changelog Fragments
 
-**Opt-in.** A repository that does not call these workflows is unaffected.
-
 A shared `CHANGELOG.md` is the one file every pull request edits in the same
 place, right under `## [Unreleased]`. Every pull request after the first one to
 merge therefore conflicts, and always in the same shape: both sides added a
-bullet. Measured on `netresearch/t3x-nr-llm` on 2026-08-09, all 28 pairings of
-eight open pull requests conflicted — in `CHANGELOG.md` and in nothing else.
+bullet. Measured with `git merge-tree` on 2026-10-19: of 64 conflicting open pull
+requests in `netresearch/t3x-nr-llm` and `netresearch/t3x-nr-vault`, 56 conflicted in
+`CHANGELOG.md` and nowhere else.
 
 Two things that do **not** solve it, so nobody spends an afternoon on them:
 
@@ -841,115 +838,98 @@ Two things that do **not** solve it, so nobody spends an afternoon on them:
   one resolves.
 
 Fragments remove the conflict by construction: one file per change, so no two
-pull requests touch the same path.
+pull requests touch the same path. The Composer bin `changelog-fragments` checks
+them and collects them into `[Unreleased]` in the release commit.
 
 ### How a contributor uses it
 
-Add one file per user-visible change:
+Add one file per change to `changelog.d/`:
 
 ```
-Changelog.d/701.fixed.md
+changelog.d/fix-skill-sync-lock.fixed.md
 ```
 
-`<name>.<type>.md`, where `<type>` is `added`, `changed`, `deprecated`,
-`removed`, `fixed` or `security` — the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-headings. The name is free (a PR number, an issue number, a slug) and only
-orders entries within their group. The file contains the entry itself, without
-the leading `- `:
+- File name: `<branch-slug>.<section>.md`, lowercase. The branch slug keeps names
+  unique and orders the entries within their heading.
+- `<section>` selects the heading in `## [Unreleased]`:
 
-```markdown
-Model discovery seeds the capabilities the provider actually reports (#671).
-Continuation lines are indented into the bullet automatically.
+  | Section      | Heading in `CHANGELOG.md`                         |
+  |--------------|---------------------------------------------------|
+  | `upgrading`  | `### Upgrading from X.Y` (the last minor release) |
+  | `added`      | `### Added`                                       |
+  | `changed`    | `### Changed`                                     |
+  | `deprecated` | `### Deprecated`                                  |
+  | `removed`    | `### Removed`                                     |
+  | `fixed`      | `### Fixed`                                       |
+  | `security`   | `### Security`                                    |
+
+- Content: one or more top-level bullets (`-` and a space), written as they will
+  appear in `CHANGELOG.md`. No heading; the file name selects it. Links are
+  written inline, not as a `[name]: URL` definition. A change that belongs under
+  two headings gets two files.
+
+A repository keeps a short `changelog.d/README.md` with these rules for its
+contributors; the check skips that file.
+
+### Commands
+
+```
+changelog-fragments check   [<repository root>]
+changelog-fragments collect [<repository root>]
 ```
 
-Mark a breaking change inline (`**Breaking:** …`) as before. There is no
-`### Breaking` heading, because the released section must stay in the shape
-`publish-to-ter.yml` already parses for its TER upload comment.
+The root defaults to the working directory, which is the project root when
+Composer runs a script.
 
-### Assembling at release time
+- `check` refuses a fragment with an unknown section, without a leading bullet,
+  with a heading or with a link definition. It also refuses fragments while the
+  topmost released section has no tag yet: either the release commit skipped
+  `collect` and the release would ship without those notes, or the release is
+  merged and its tag is not pushed yet. The tag is looked up locally and then on
+  `origin` with `git ls-remote`, which fetches nothing, so a shallow CI checkout
+  works; when origin cannot be asked, the check stops with its own message.
+- `collect` appends every fragment, in file-name order, at the end of its heading
+  in `## [Unreleased]`, creates a missing heading in Keep a Changelog order, and
+  deletes the fragment. `upgrading` joins an existing `### Upgrading…` heading, or
+  gets one named after the last released minor version. The new changelog is
+  written beside the old one and renamed over it once complete, so a failed
+  write leaves `CHANGELOG.md` and the fragments as they were. With no fragments it
+  changes nothing.
 
-```yaml
-jobs:
-  changelog:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/changelog-assemble.yml@main
-    permissions:
-      contents: write
-    with:
-      version: ${{ inputs.version }}
+Exit codes: 0 on success, 1 when a fragment or the changelog is not ready (each
+problem is named), 2 on a usage error, an unknown option, or a file that cannot
+be read, written or deleted.
+
+### Adopting it
+
+```json
+{
+    "scripts": {
+        "changelog:collect": "changelog-fragments collect",
+        "ci:test:changelog": "changelog-fragments check",
+        "ci:test:php:cgl": [
+            "@ci:test:changelog",
+            "php-cs-fixer check --config Build/.php-cs-fixer.dist.php"
+        ]
+    }
+}
 ```
 
-It writes `## [<version>] - <date>` with the grouped entries, deletes the
-consumed fragments, and commits both in one signed commit. The commit is made
-through the GitHub API on purpose: a plain `git commit` on a runner is
-unsigned, and a repository with a `required_signatures` ruleset refuses it.
-`expectedHeadOid` makes the commit fail on a concurrent push rather than
-overwrite it.
+The check needs the installed package, so, like `check-phpunit-config`, it cannot
+run in the repo-checks job of `ci.yml`, which skips `composer install`. The CGL
+job calls `composer ci:test:php:cgl` after `composer install` and without
+arguments, so chain it there. With `skip-paths` matching `*.md`, a pull request
+that adds only a fragment skips the CGL job. `merge_group` and `push` runs are never
+gated, so the check runs in the merge queue, or on the push to the default branch.
 
-`## [Unreleased]` is left alone. A repository migrating to fragments still has
-hand-written entries there, and folding them into a release would attribute
-them to a version nobody checked them against — the workflow warns instead.
+1. Create `changelog.d/README.md` with the format above.
+2. Add the scripts and require a version of this package that ships the bin.
+3. Run `composer changelog:collect` in the release commit before renaming `[Unreleased]`.
+4. Add `/changelog.d/ export-ignore` to `.gitattributes`.
+5. Point contributor docs (`CONTRIBUTING.md`, `AGENTS.md`, the pull request template)
+   at `changelog.d/` instead of `[Unreleased]`.
 
-#### Inputs
-
-| Input | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `version` | string | **yes** | - | Version being released, no leading `v` |
-| `fragments-dir` | string | no | `Changelog.d` | Directory holding the fragments |
-| `changelog-file` | string | no | `CHANGELOG.md` | Changelog to write into |
-| `release-date` | string | no | today (UTC) | Release date as `YYYY-MM-DD` |
-| `commit` | boolean | no | `true` | Commit the result via the GitHub API |
-| `branch` | string | no | current ref | Branch to commit to |
-| `allow-empty` | boolean | no | `false` | Succeed with no fragments at all |
-
-#### Outputs
-
-| Output | Description |
-|--------|-------------|
-| `section` | The assembled markdown, without its version heading |
-| `fragment-count` | Number of fragments consumed |
-
-The run fails — loudly, before writing anything — on an unknown fragment type, a
-file without a `.<type>` segment, an empty fragment, a version the changelog
-already has, a non-semantic version, and on no fragments at all unless
-`allow-empty` says otherwise.
-
-### Requiring a fragment on a pull request
-
-```yaml
-jobs:
-  changelog:
-    uses: netresearch/typo3-ci-workflows/.github/workflows/changelog-check.yml@main
-    permissions:
-      contents: read
-      pull-requests: read
-```
-
-Separately opt-in, because assembly works without it — but without it a fragment
-is simply forgotten and the entry quietly disappears from the release. The check
-only reports; whether it blocks is the repository's ruleset decision.
-
-#### Inputs
-
-| Input | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `fragments-dir` | string | no | `Changelog.d` | Directory a fragment must be added to |
-| `paths-ignore` | string | no | see below | Newline-separated patterns needing no fragment |
-| `skip-label` | string | no | `skip-changelog` | Label that waives the requirement |
-
-`paths-ignore` defaults to `.github/**`, `Build/**`, `Tests/**`, `docs/**`,
-`Documentation/**`, `*.md`, `.gitignore`, `.gitattributes`, `.editorconfig`. A
-pull request touching only those passes.
-
-### Migrating a repository
-
-1. Create `Changelog.d/` with a `.gitkeep`.
-2. Call `changelog-check.yml` from the pull-request workflow.
-3. Call `changelog-assemble.yml` from release preparation, before the tag.
-4. Leave the existing `CHANGELOG.md` untouched — assembled sections are added
-   above the newest released one, and old sections keep working.
-
-Existing hand-written `## [Unreleased]` entries stay where they are until
-someone moves them into fragments or into a release by hand.
+Entries already in `[Unreleased]` stay; `collect` appends after them.
 
 ---
 
