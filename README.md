@@ -908,7 +908,7 @@ be read, written or deleted.
 {
     "scripts": {
         "changelog:collect": "changelog-fragments collect",
-        "ci:test:changelog": "changelog-fragments check",
+        "ci:test:changelog": "changelog-fragments check @no_additional_args",
         "ci:test:php:cgl": [
             "@ci:test:changelog",
             "php-cs-fixer check --config Build/.php-cs-fixer.dist.php"
@@ -920,7 +920,9 @@ be read, written or deleted.
 The check needs the installed package, so, like `check-phpunit-config`, it cannot
 run in the repo-checks job of `ci.yml`, which skips `composer install`. The CGL
 job calls `composer ci:test:php:cgl` after `composer install` and without
-arguments, so chain it there. With `skip-paths` matching `*.md`, a pull request
+arguments, so chain it there. `@no_additional_args` (Composer 2.8) keeps options
+forwarded to the chain (`composer ci:test:php:cgl -- --using-cache=no`) away from
+the check, which refuses them; the fixer still receives them. With `skip-paths` matching `*.md`, a pull request
 that adds only a fragment skips the CGL job. `merge_group` and `push` runs are never
 gated, so the check runs in the merge queue, or on the push to the default branch.
 
