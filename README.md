@@ -891,7 +891,8 @@ Composer runs a script.
   works; when origin cannot be asked, the check stops with its own message.
 - `collect` appends every fragment, in file-name order, at the end of its heading
   in `## [Unreleased]`, creates a missing heading in Keep a Changelog order, and
-  deletes the fragment. `upgrading` joins an existing `### Upgrading…` heading, or
+  deletes the fragment. A missing `## [Unreleased]` (a release renamed it and
+  added no new one) is created above the newest release. `upgrading` joins an existing `### Upgrading…` heading, or
   gets one named after the last released minor version. The new changelog is
   written beside the old one and renamed over it once complete, so a failed
   write leaves `CHANGELOG.md` and the fragments as they were. With no fragments it

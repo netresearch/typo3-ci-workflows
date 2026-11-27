@@ -371,6 +371,14 @@ function sectionEnd(string $rest): int
  */
 function collect(string $changelog, array $fragments): ?string
 {
+    // A release that renamed the section without adding a new one leaves
+    // none; it goes above the newest release, or at the end.
+    if (!str_contains($changelog, '## [Unreleased]')) {
+        $changelog = preg_match('/^(?:## \[|##? \d)/m', $changelog, $m, PREG_OFFSET_CAPTURE) === 1
+            ? substr_replace($changelog, "## [Unreleased]\n\n", $m[0][1], 0)
+            : rtrim($changelog, "\n") . "\n\n## [Unreleased]\n";
+    }
+
     $start = strpos($changelog, '## [Unreleased]');
 
     if ($start === false) {

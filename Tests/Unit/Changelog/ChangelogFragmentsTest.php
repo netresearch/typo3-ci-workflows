@@ -618,6 +618,22 @@ final class ChangelogFragmentsTest extends TestCase
     }
 
     #[Test]
+    #[TestWith(["# Changelog\n\n## [1.2.0] - 2026-01-01\n\n### Fixed\n\n- Released.\n", "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- A new fix.\n\n## [1.2.0] - 2026-01-01\n\n### Fixed\n\n- Released.\n"])]
+    #[TestWith(["# Changelog\n\n# 5.1.1\n\n## Bug Fixes\n\n- Old.\n", "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- A new fix.\n\n# 5.1.1\n\n## Bug Fixes\n\n- Old.\n"])]
+    #[TestWith(["# Changelog\n", "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- A new fix.\n\n"])]
+    public function collectRestoresAMissingUnreleasedSection(string $before, string $after): void
+    {
+        // The last release renamed [Unreleased] and did not add a new one.
+        file_put_contents($this->repo . '/CHANGELOG.md', $before);
+        $this->fragment('a.fixed.md', "- A new fix.\n");
+
+        [$exit, , $stderr] = $this->runScript('collect');
+
+        self::assertSame(0, $exit, $stderr);
+        self::assertSame($after, $this->changelog());
+    }
+
+    #[Test]
     public function aReleaseTaggedWithoutThePrefixCountsAsTagged(): void
     {
         // t3x-nr-saml-auth tags "13.1.0", not "v13.1.0".
