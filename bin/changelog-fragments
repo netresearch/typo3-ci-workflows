@@ -327,6 +327,35 @@ function insertionIndex(array $heads, string $heading): int
 }
 
 /**
+ * Where the [Unreleased] section at the start of $rest ends: at the next
+ * level-1 or level-2 heading or link definition at the start of a line,
+ * outside fenced code. A release history kept in another format ("# 5.1.1",
+ * "## 3.28.11 (2026-11-25)") below [Unreleased] therefore stays where it is,
+ * and a "# comment" in a fenced shell example does not end the section.
+ */
+function sectionEnd(string $rest): int
+{
+    $offset = 0;
+    $fence  = null;
+
+    foreach (preg_split('/(?<=\n)/', $rest) ?: [] as $i => $line) {
+        if ($fence !== null) {
+            if (preg_match('/^ {0,3}' . preg_quote($fence[0], '/') . '{' . strlen($fence) . ',}[ \t]*\r?$/', rtrim($line, "\n")) === 1) {
+                $fence = null;
+            }
+        } elseif (preg_match('/^ {0,3}(`{3,}|~{3,})/', $line, $m) === 1) {
+            $fence = $m[1];
+        } elseif ($i > 0 && preg_match('/^(##? (?!\[Unreleased\])|\[[^\]]+\]: \S)/', $line) === 1) {
+            return $offset;
+        }
+
+        $offset += strlen($line);
+    }
+
+    return strlen($rest);
+}
+
+/**
  * Append the fragments to the `[Unreleased]` section of $changelog.
  *
  * The section is split into blocks at its `### ` headings; a fragment is
@@ -344,10 +373,7 @@ function collect(string $changelog, array $fragments): ?string
     }
 
     $rest    = substr($changelog, $start);
-    // The section ends at the next level-1 or level-2 heading, so a release
-    // history kept in another format ("# 5.1.1", "## 3.28.11 (2026-11-25)")
-    // below [Unreleased] stays where it is.
-    $end     = preg_match('/^(##? (?!\[Unreleased\])|\[[^\]]+\]: \S)/m', $rest, $m, PREG_OFFSET_CAPTURE) === 1 ? $m[0][1] : strlen($rest);
+    $end     = sectionEnd($rest);
     $section = substr($rest, 0, $end);
 
     // Block 0 is the heading line plus anything above the first `### `.

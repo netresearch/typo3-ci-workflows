@@ -588,6 +588,23 @@ final class ChangelogFragmentsTest extends TestCase
     }
 
     #[Test]
+    public function aCommentInAFencedExampleDoesNotEndTheSection(): void
+    {
+        $fence = str_repeat('`', 3);
+        $changelog = "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- Run the migration:\n\n{$fence}bash\n# Run the migration\n./migrate\n{$fence}\n\n## [1.2.0] - 2026-01-01\n\n### Fixed\n\n- Released.\n";
+        file_put_contents($this->repo . '/CHANGELOG.md', $changelog);
+        $this->fragment('a.fixed.md', "- A new fix.\n");
+
+        [$exit, , $stderr] = $this->runScript('collect');
+
+        self::assertSame(0, $exit, $stderr);
+        self::assertSame(
+            str_replace("{$fence}\n\n## [1.2.0]", "{$fence}\n\n- A new fix.\n\n## [1.2.0]", $changelog),
+            $this->changelog(),
+        );
+    }
+
+    #[Test]
     public function aHeadingWithoutAVersionNumberIsNoRelease(): void
     {
         // t3x-contexts_wurfl keeps its legacy line as "## [0.x] - Legacy".
