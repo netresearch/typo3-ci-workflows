@@ -619,6 +619,51 @@ final class ChangelogFragmentsTest extends TestCase
         self::assertSame(0, $exit, $stderr);
     }
 
+    #[Test]
+    public function aReleaseTaggedWithoutThePrefixCountsAsTagged(): void
+    {
+        $this->git('tag', '1.3.0');
+        file_put_contents(
+            $this->repo . '/CHANGELOG.md',
+            str_replace('## [Unreleased]', "## [Unreleased]\n\n## [1.3.0] - 2026-02-01", self::CHANGELOG),
+        );
+        $this->fragment('fix-thing.fixed.md', "- A fix.\n");
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(0, $exit, $stderr);
+    }
+
+    #[Test]
+    public function aReleaseTaggedWithoutThePrefixOnlyOnOriginCountsAsTagged(): void
+    {
+        $origin = $this->repo . '/.git/test-origin.git';
+        $this->git('init', '--quiet', '--bare', $origin);
+        $this->git('remote', 'add', 'origin', $origin);
+        $this->git('tag', '1.3.0');
+        $this->git('push', '--quiet', 'origin', 'refs/tags/1.3.0');
+        $this->git('tag', '-d', '1.3.0');
+        file_put_contents(
+            $this->repo . '/CHANGELOG.md',
+            str_replace('## [Unreleased]', "## [Unreleased]\n\n## [1.3.0] - 2026-02-01", self::CHANGELOG),
+        );
+        $this->fragment('fix-thing.fixed.md', "- A fix.\n");
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(0, $exit, $stderr);
+    }
+
+    #[Test]
+    public function theMarkerOfAnOlderComposerIsIgnored(): void
+    {
+        // Composer before 2.8 passes "@no_additional_args" on as an argument.
+        [$exit, $stdout, $stderr] = $this->runIn($this->repo, 'check', '@no_additional_args');
+
+        self::assertSame(0, $exit, $stderr);
+        self::assertStringContainsString('0 fragment(s) ok', $stdout);
+    }
+
     private function fragment(string $name, string $text): void
     {
         file_put_contents($this->repo . '/changelog.d/' . $name, $text);

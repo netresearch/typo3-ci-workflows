@@ -68,7 +68,9 @@ const LOCAL_GIT_VARIABLES = [
 
 const NAME_PATTERN = '/^[a-z0-9][a-z0-9._-]*\.(upgrading|added|changed|deprecated|removed|fixed|security)\.md$/';
 
-$args = array_slice($argv, 1);
+// Composer before 2.8 passes the @no_additional_args marker of a script on
+// instead of removing it.
+$args = array_values(array_filter(array_slice($argv, 1), static fn (string $arg): bool => $arg !== '@no_additional_args'));
 $mode = $args[0] ?? '';
 $root = $args[1] ?? (string) getcwd();
 
@@ -200,7 +202,8 @@ function topmostReleased(string $changelog): ?string
 }
 
 /**
- * Whether tag v$version exists, locally or on origin.
+ * Whether the release is tagged, as v$version or as $version, locally or on
+ * origin. Repositories differ in the prefix: t3x-nr-saml-auth tags "13.1.0".
  *
  * A shallow CI checkout carries no tags, so origin is asked with ls-remote. It
  * fetches nothing, so it cannot turn a full clone into a shallow one. Without
@@ -210,10 +213,12 @@ function topmostReleased(string $changelog): ?string
  */
 function tagExists(string $root, string $version): bool
 {
-    $ref = 'refs/tags/v' . $version;
+    $refs = ['refs/tags/v' . $version, 'refs/tags/' . $version];
 
-    if (run(['git', '-C', $root, 'rev-parse', '--quiet', '--verify', $ref])) {
-        return true;
+    foreach ($refs as $ref) {
+        if (run(['git', '-C', $root, 'rev-parse', '--quiet', '--verify', $ref])) {
+            return true;
+        }
     }
 
     if (!run(['git', '-C', $root, 'remote', 'get-url', 'origin'])) {
@@ -222,7 +227,7 @@ function tagExists(string $root, string $version): bool
 
     $listed = '';
 
-    if (!run(['git', '-C', $root, 'ls-remote', '--tags', 'origin', $ref], $listed)) {
+    if (!run(['git', '-C', $root, 'ls-remote', '--tags', 'origin', ...$refs], $listed)) {
         fwrite(
             STDERR,
             sprintf(
