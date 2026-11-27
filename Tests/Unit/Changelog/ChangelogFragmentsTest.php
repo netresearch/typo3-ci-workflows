@@ -567,6 +567,41 @@ final class ChangelogFragmentsTest extends TestCase
         self::assertSame(self::CHANGELOG, $this->changelog());
     }
 
+    /**
+     * The release histories of t3x-contexts ("# 5.1.1", "## Bug Fixes") and
+     * t3x-cowriter ("## 3.28.11 (2026-11-25)", "### BUGFIX") below a new
+     * [Unreleased] section.
+     */
+    #[Test]
+    #[TestWith(["# 5.1.1\n\n## Bug Fixes\n\n- Old fix.\n\n### Fixed\n\n- Older.\n"])]
+    #[TestWith(["## 3.28.11 (2026-11-25)\n\n### BUGFIX\n\n- Old fix.\n\n### Fixed\n\n- Older.\n"])]
+    public function collectStopsAtAReleaseHeadingOfAnotherFormat(string $history): void
+    {
+        $head = "# Changelog\n\nThe format is based on Keep a Changelog.\n\n## [Unreleased]\n\n";
+        file_put_contents($this->repo . '/CHANGELOG.md', $head . $history);
+        $this->fragment('a.fixed.md', "- A new fix.\n");
+
+        [$exit, , $stderr] = $this->runScript('collect');
+
+        self::assertSame(0, $exit, $stderr);
+        self::assertSame($head . "### Fixed\n\n- A new fix.\n\n" . $history, $this->changelog());
+    }
+
+    #[Test]
+    public function aHeadingWithoutAVersionNumberIsNoRelease(): void
+    {
+        // t3x-contexts_wurfl keeps its legacy line as "## [0.x] - Legacy".
+        file_put_contents(
+            $this->repo . '/CHANGELOG.md',
+            "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- New.\n\n## [0.x] - Legacy (WURFL)\n\n- Old.\n",
+        );
+        $this->fragment('a.fixed.md', "- A new fix.\n");
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(0, $exit, $stderr);
+    }
+
     private function fragment(string $name, string $text): void
     {
         file_put_contents($this->repo . '/changelog.d/' . $name, $text);

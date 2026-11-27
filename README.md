@@ -895,7 +895,8 @@ Composer runs a script.
   gets one named after the last released minor version. The new changelog is
   written beside the old one and renamed over it once complete, so a failed
   write leaves `CHANGELOG.md` and the fragments as they were. With no fragments it
-  changes nothing.
+  changes nothing. `[Unreleased]` ends at the next level-1 or level-2 heading,
+  so a release history kept in another format below it is left as it is.
 
 Exit codes: 0 on success, 1 when a fragment or the changelog is not ready (each
 problem is named), 2 on a usage error, an unknown option, or a file that cannot
