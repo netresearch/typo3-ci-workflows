@@ -28,6 +28,9 @@ final class ChangelogFragmentsTest extends TestCase
 
     private string $repo = '';
 
+    /** @var array<string, string> Added to the environment of the script, not of git. */
+    private array $scriptEnvironment = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -444,6 +447,126 @@ final class ChangelogFragmentsTest extends TestCase
         self::assertStringContainsString('unknown option --dry-run', $stderr);
     }
 
+    #[Test]
+    public function aSymlinkedFragmentDirectoryIsRefusedAndNothingOutsideIsDeleted(): void
+    {
+        $outside = $this->repo . '/.git/outside';
+        mkdir($outside);
+        file_put_contents($outside . '/keep.fixed.md', "- Not a fragment of this repository.\n");
+        rmdir($this->repo . '/changelog.d');
+        symlink($outside, $this->repo . '/changelog.d');
+
+        [$exit, , $stderr] = $this->runScript('collect');
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString('changelog.d  is a symbolic link', $stderr);
+        self::assertFileExists($outside . '/keep.fixed.md');
+        self::assertSame(self::CHANGELOG, $this->changelog());
+    }
+
+    #[Test]
+    public function aSymlinkedFragmentIsRefused(): void
+    {
+        file_put_contents($this->repo . '/.git/target.md', "- Read through the link.\n");
+        symlink($this->repo . '/.git/target.md', $this->repo . '/changelog.d/a.fixed.md');
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString('a.fixed.md  is a symbolic link', $stderr);
+    }
+
+    #[Test]
+    #[TestWith(["- A fix.\n\nNotes\n=====\n"])]
+    #[TestWith(["- A fix.\n\nNotes\n-----\n"])]
+    #[TestWith(["- A fix.\n\n---\n\n- Another.\n"])]
+    public function checkRefusesAHeadingUnderlineOrARule(string $text): void
+    {
+        $this->fragment('a.fixed.md', $text);
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString('must not contain a heading underline or a horizontal rule', $stderr);
+    }
+
+    #[Test]
+    public function checkRefusesALinkDefinitionWithItsDestinationOnTheNextLine(): void
+    {
+        $this->fragment('a.fixed.md', "- See [guide].\n\n[guide]:\n  https://example.org\n");
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString('must not contain a link definition', $stderr);
+    }
+
+    #[Test]
+    public function checkDoesNotUseTheRepositoryOfAHooksGitDir(): void
+    {
+        // A hook of another repository exports GIT_DIR. That repository has
+        // the tag; the checked one does not, so the check must refuse.
+        $other = $this->repo . '/.git/other';
+        mkdir($other);
+        $this->git('init', '--quiet', $other);
+        $this->git('-C', $other, '-c', 'user.name=Test', '-c', 'user.email=test@example.org', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'other');
+        $this->git('-C', $other, 'tag', 'v1.3.0');
+        file_put_contents(
+            $this->repo . '/CHANGELOG.md',
+            str_replace('## [Unreleased]', "## [Unreleased]\n\n## [1.3.0] - 2026-02-01", self::CHANGELOG),
+        );
+        $this->fragment('fix-thing.fixed.md', "- A fix.\n");
+        $this->scriptEnvironment = ['GIT_DIR' => $other . '/.git'];
+
+        [$exit, , $stderr] = $this->runScript('check');
+
+        self::assertSame(1, $exit, $stderr);
+        self::assertStringContainsString('[1.3.0] has no tag v1.3.0 yet', $stderr);
+    }
+
+    #[Test]
+    public function anUnreadableFragmentIsAnInputOutputError(): void
+    {
+        $this->fragment('a.fixed.md', "- A fix.\n");
+        chmod($this->repo . '/changelog.d/a.fixed.md', 0o000);
+        clearstatcache();
+
+        try {
+            if (is_readable($this->repo . '/changelog.d/a.fixed.md')) {
+                self::markTestSkipped('The test user can read an unreadable file (root).');
+            }
+
+            [$exit, , $stderr] = $this->runScript('check');
+        } finally {
+            chmod($this->repo . '/changelog.d/a.fixed.md', 0o644);
+        }
+
+        self::assertSame(2, $exit);
+        self::assertStringContainsString('cannot read', $stderr);
+    }
+
+    #[Test]
+    public function anUnlistableFragmentDirectoryIsAnInputOutputError(): void
+    {
+        $this->fragment('a.fixed.md', "- A fix.\n");
+        chmod($this->repo . '/changelog.d', 0o300);
+        clearstatcache();
+
+        try {
+            if (is_readable($this->repo . '/changelog.d')) {
+                self::markTestSkipped('The test user can list an unreadable directory (root).');
+            }
+
+            [$exit, , $stderr] = $this->runScript('collect');
+        } finally {
+            chmod($this->repo . '/changelog.d', 0o755);
+        }
+
+        self::assertSame(2, $exit);
+        self::assertStringContainsString('cannot list', $stderr);
+        self::assertSame(self::CHANGELOG, $this->changelog());
+    }
+
     private function fragment(string $name, string $text): void
     {
         file_put_contents($this->repo . '/changelog.d/' . $name, $text);
@@ -479,7 +602,7 @@ final class ChangelogFragmentsTest extends TestCase
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $cwd,
-            $this->environment(),
+            array_replace($this->environment(), $this->scriptEnvironment),
         );
 
         self::assertIsResource($proc, 'cannot start the script');

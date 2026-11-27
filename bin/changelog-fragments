@@ -47,6 +47,25 @@ const SECTIONS = [
 /** The upgrading heading before a version is appended to it. */
 const UPGRADING = '### Upgrading';
 
+/** What "git rev-parse --local-env-vars" lists (git 2.56.1). */
+const LOCAL_GIT_VARIABLES = [
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_CONFIG',
+    'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_DIR',
+    'GIT_WORK_TREE',
+    'GIT_IMPLICIT_WORK_TREE',
+    'GIT_GRAFT_FILE',
+    'GIT_INDEX_FILE',
+    'GIT_NO_REPLACE_OBJECTS',
+    'GIT_REPLACE_REF_BASE',
+    'GIT_PREFIX',
+    'GIT_SHALLOW_FILE',
+    'GIT_COMMON_DIR',
+];
+
 const NAME_PATTERN = '/^[a-z0-9][a-z0-9._-]*\.(upgrading|added|changed|deprecated|removed|fixed|security)\.md$/';
 
 $args = array_slice($argv, 1);
@@ -85,11 +104,26 @@ if (!is_readable($changelogPath)) {
  */
 function readFragments(string $dir, array &$problems): array
 {
+    // A checked-in symbolic link would let collect read and delete files
+    // outside the repository.
+    if (is_link($dir)) {
+        $problems[] = '  changelog.d  is a symbolic link; it must be a directory of the repository';
+
+        return [];
+    }
+
     if (!is_dir($dir)) {
         return [];
     }
 
-    $names = scandir($dir) ?: [];
+    $names = scandir($dir);
+
+    if ($names === false) {
+        fwrite(STDERR, sprintf("changelog-fragments: cannot list %s\n", $dir));
+
+        exit(2);
+    }
+
     sort($names, SORT_STRING);
     $fragments = [];
 
@@ -100,13 +134,27 @@ function readFragments(string $dir, array &$problems): array
 
         $path = $dir . '/' . $name;
 
+        if (is_link($path)) {
+            $problems[] = sprintf('  %s  is a symbolic link; write the fragment as a file', $name);
+
+            continue;
+        }
+
         if (preg_match(NAME_PATTERN, $name, $m) !== 1 || !is_file($path)) {
             $problems[] = sprintf('  %s  is not named <branch-slug>.<%s>.md', $name, implode('|', array_keys(SECTIONS)));
 
             continue;
         }
 
-        $text = trim(str_replace("\r\n", "\n", (string) file_get_contents($path)));
+        $raw = file_get_contents($path);
+
+        if ($raw === false) {
+            fwrite(STDERR, sprintf("changelog-fragments: cannot read %s\n", $path));
+
+            exit(2);
+        }
+
+        $text = trim(str_replace("\r\n", "\n", $raw));
 
         if (!str_starts_with($text, '- ')) {
             $problems[] = sprintf('  %s  must start with a top-level bullet ("- ")', $name);
@@ -120,8 +168,17 @@ function readFragments(string $dir, array &$problems): array
             continue;
         }
 
-        // Such a line ends the [Unreleased] section for collect().
-        if (preg_match('/^\[[^\]]+\]: \S/m', $text) === 1) {
+        // An underline of "=" or "-" turns the line above into a heading, and
+        // on its own line it is a horizontal rule; either splits the section.
+        if (preg_match('/^ {0,3}(=+|-+)[ \t]*$/m', $text) === 1) {
+            $problems[] = sprintf('  %s  must not contain a heading underline or a horizontal rule', $name);
+
+            continue;
+        }
+
+        // Such a line ends the [Unreleased] section for collect(), and its
+        // destination may follow on the next line.
+        if (preg_match('/^ {0,3}\[[^\]]+\]:(\s|$)/m', $text) === 1) {
             $problems[] = sprintf('  %s  must not contain a link definition; write the link inline', $name);
 
             continue;
@@ -185,18 +242,31 @@ function tagExists(string $root, string $version): bool
 function run(array $command, string &$stdout = ''): bool
 {
     // nosemgrep: netresearch.php.lang.security.exec-use.exec-use - argv array, no shell; every caller passes literal git arguments plus this repository's own root and a version read from its CHANGELOG
-    $proc = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    $proc = proc_open($command, [1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, null, gitEnvironment());
 
     if (!is_resource($proc)) {
         return false;
     }
 
+    // stderr goes to /dev/null rather than into a pipe: a transport that
+    // filled a pipe nobody reads yet would block before it closes stdout.
     $stdout = (string) stream_get_contents($pipes[1]);
-    stream_get_contents($pipes[2]);
     fclose($pipes[1]);
-    fclose($pipes[2]);
 
     return proc_close($proc) === 0;
+}
+
+/**
+ * The environment without git's repository-local variables.
+ *
+ * A hook of a linked worktree runs with GIT_DIR and GIT_INDEX_FILE set, and
+ * both override "git -C": the tag would be looked up in that repository.
+ *
+ * @return array<string, string>
+ */
+function gitEnvironment(): array
+{
+    return array_diff_key(getenv(), array_flip(LOCAL_GIT_VARIABLES));
 }
 
 /**
@@ -304,7 +374,13 @@ function collect(string $changelog, array $fragments): ?string
 
 $problems  = [];
 $fragments = readFragments($dir, $problems);
-$changelog = (string) file_get_contents($changelogPath);
+$changelog = file_get_contents($changelogPath);
+
+if ($changelog === false) {
+    fwrite(STDERR, sprintf("changelog-fragments: cannot read %s\n", $changelogPath));
+
+    exit(2);
+}
 
 if ($mode === 'check') {
     $released = topmostReleased($changelog);

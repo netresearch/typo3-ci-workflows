@@ -882,7 +882,8 @@ The root defaults to the working directory, which is the project root when
 Composer runs a script.
 
 - `check` refuses a fragment with an unknown section, without a leading bullet,
-  with a heading or with a link definition. It also refuses fragments while the
+  with a heading, a heading underline or a horizontal rule, or with a link
+  definition, and a fragment or `changelog.d/` that is a symbolic link. It also refuses fragments while the
   topmost released section has no tag yet: either the release commit skipped
   `collect` and the release would ship without those notes, or the release is
   merged and its tag is not pushed yet. The tag is looked up locally and then on
